@@ -71,14 +71,14 @@ Features:
 
 ```bash
 # TUI - live terminal dashboard
-fabric tui                              # Read from .needle/ in current directory
-fabric tui --source /path/to/.needle/   # Read from specific .needle folder
+fabric tui                              # Read from ~/.needle/logs/
+fabric tui --source /path/to/logs/      # Read from specific path
 fabric tui --worker w-abc123            # Filter to one worker
 
 # HTML - generate static report
 fabric html                             # Output to stdout
 fabric html --output report.html        # Output to file
-fabric html --source .needle/           # From specific .needle folder
+fabric html --source ~/.needle/logs/    # Explicit source path
 
 # Simple log viewing (parsed + formatted)
 fabric logs                             # Pretty-print parsed logs
@@ -88,17 +88,18 @@ fabric logs --worker w-abc123           # Filter by worker
 
 ## Default Source
 
-FABRIC looks for `.needle/` in the current working directory by default. This folder contains NEEDLE's logging artifacts:
+FABRIC reads from `~/.needle/logs/` by default. NEEDLE's folder structure:
 
 ```
-.needle/
-├── workers/
-│   ├── w-abc123.jsonl
-│   ├── w-def456.jsonl
-│   └── ...
-└── sessions/
-    └── session-001.jsonl
+~/.needle/
+├── config.yaml    # NEEDLE configuration
+├── logs/          # Worker log output (FABRIC reads this)
+├── state/         # Runtime state
+├── cache/         # Cached data
+└── README.md
 ```
+
+The exact log file format within `logs/` will be determined by NEEDLE's output behavior.
 
 ## Architecture
 
