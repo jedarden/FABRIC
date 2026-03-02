@@ -2,32 +2,40 @@
 
 **Flow Analysis & Bead Reporting Interface Console**
 
-A visualization and dashboard system for monitoring [NEEDLE](../claude-config)'s bead orchestration output.
+A visualization system for surfacing NEEDLE worker activity through TUI and HTML dashboards.
 
 ## Purpose
 
-FABRIC provides real-time and historical insights into bead processing workflows orchestrated by NEEDLE. It transforms raw orchestration data into actionable visualizations, enabling:
+FABRIC consumes logging and telemetry output from NEEDLE workers, transforming raw execution data into reviewable visualizations:
 
-- **Flow Analysis**: Track bead lifecycle from creation through completion
-- **Bead Reporting**: Aggregate metrics on processing times, success rates, and bottlenecks
-- **Interface Console**: Interactive dashboard for monitoring active and historical workflows
+- **Flow Analysis**: Visualize worker execution timelines and patterns
+- **Bead Reporting**: Surface what workers are doing and how they're performing
+- **Interface Console**: Both TUI (terminal) and HTML dashboards for review
 
-## Architecture
+## Output Formats
 
-FABRIC integrates with NEEDLE's output streams to create a comprehensive view of:
-- Bead state transitions
-- Worker assignment and execution patterns
-- Dependency graphs and blocking relationships
-- Processing throughput and latency metrics
+### TUI Dashboard
+Real-time terminal interface showing:
+- Active worker status grid
+- Live log streaming with filtering
+- Worker detail views and session history
+- Keyboard-driven navigation
+
+### HTML Reports
+Static and interactive browser-based views:
+- Session timeline visualizations (Gantt-style)
+- Metrics charts (API calls, tokens, duration)
+- Searchable log explorer
+- Shareable, self-contained reports
 
 ## Relationship to NEEDLE
 
-While NEEDLE orchestrates bead processing, FABRIC answers questions like:
-- Which beads are currently blocked and why?
-- What's the average time-to-completion for different bead types?
-- How many beads are in each state (pending, active, completed)?
-- Which workers are processing which beads?
-- Where are the bottlenecks in the workflow?
+NEEDLE orchestrates workers; FABRIC surfaces their activity:
+- What is each worker currently doing?
+- How long are tasks taking?
+- What errors are occurring?
+- What's the API/token usage?
+- What does the execution timeline look like?
 
 ## Status
 
