@@ -2,51 +2,58 @@
 
 **Flow Analysis & Bead Reporting Interface Console**
 
-A visualization system for surfacing NEEDLE worker activity through TUI and HTML dashboards.
+A live display for NEEDLE worker activity, available as TUI or web dashboard.
 
 ## Purpose
 
-FABRIC consumes logging and telemetry output from NEEDLE workers, transforming raw execution data into reviewable visualizations:
+FABRIC tails NEEDLE's logging output and renders it in real-time. It answers:
 
-- **Flow Analysis**: Visualize worker execution timelines and patterns
-- **Bead Reporting**: Surface what workers are doing and how they're performing
-- **Interface Console**: Both TUI (terminal) and HTML dashboards for review
+- What is each worker doing right now?
+- What events are happening across all workers?
+- Which workers are active, idle, or erroring?
 
-## Output Formats
+## Display Modes
 
-### TUI Dashboard
-Real-time terminal interface showing:
-- Active worker status grid
-- Live log streaming with filtering
-- Worker detail views and session history
-- Keyboard-driven navigation
+### TUI (`fabric tui`)
 
-### HTML Reports
-Static and interactive browser-based views:
-- Session timeline visualizations (Gantt-style)
-- Metrics charts (API calls, tokens, duration)
-- Searchable log explorer
-- Shareable, self-contained reports
+Live terminal dashboard:
+- Worker status grid
+- Scrolling log stream
+- Worker detail panel
+- Keyboard navigation and filtering
+
+### Web (`fabric web`)
+
+Live browser dashboard at `localhost:3000`:
+- Worker overview cards
+- Real-time activity feed
+- Timeline visualization
+- WebSocket-powered updates
+
+## Quick Start
+
+```bash
+# Terminal dashboard
+fabric tui
+
+# Web dashboard
+fabric web
+```
+
+FABRIC reads from `~/.needle/logs/` by default.
 
 ## Relationship to NEEDLE
 
-NEEDLE orchestrates workers; FABRIC surfaces their activity:
-- What is each worker currently doing?
-- How long are tasks taking?
-- What errors are occurring?
-- What's the API/token usage?
-- What does the execution timeline look like?
+```
+NEEDLE (orchestrates workers) → logs → FABRIC (displays activity)
+```
+
+NEEDLE does the work. FABRIC shows you what's happening.
 
 ## Status
 
 🚧 **In Development** - See [docs/plan.md](docs/plan.md) for implementation roadmap.
 
-## Getting Started
-
-_(Coming soon)_
-
 ## Documentation
 
 - [Implementation Plan](docs/plan.md)
-- [Architecture](docs/architecture.md) _(coming soon)_
-- [API Reference](docs/api.md) _(coming soon)_

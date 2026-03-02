@@ -4,25 +4,25 @@
 
 ## Overview
 
-FABRIC parses NEEDLE worker output and renders it as TUI or HTML visualizations. No storage layer - it reads logs directly and renders on demand.
+FABRIC is a live display for NEEDLE worker activity. It parses NEEDLE's logging output and renders it in real-time as either a TUI (terminal) or web dashboard.
 
 ## Goals
 
-1. **Parse**: Read and understand NEEDLE's logging/telemetry output format
-2. **Render TUI**: Terminal dashboard for real-time monitoring
-3. **Render HTML**: Browser-viewable reports for review and sharing
+1. **Live Display**: Real-time visualization of NEEDLE worker activity
+2. **Dual Interface**: TUI for terminal users, web app for browser users
+3. **Stateless**: Reads and displays - no storage or persistence
 
 ## Data Flow
 
 ```
-NEEDLE Workers → stdout/log files → FABRIC Parser → TUI or HTML Renderer
+NEEDLE Workers → ~/.needle/logs/ → FABRIC → Live TUI or Web Dashboard
 ```
 
-FABRIC is stateless - it reads, parses, and renders. That's it.
+FABRIC continuously tails NEEDLE's output and updates the display in real-time.
 
-## Input: NEEDLE Output Format
+## Input: NEEDLE Log Format
 
-FABRIC expects structured log lines from NEEDLE workers:
+FABRIC expects structured JSON log lines from NEEDLE:
 
 ```json
 {"ts":1709337600,"worker":"w-abc123","level":"info","msg":"Starting task","task":"bd-xyz"}
@@ -41,51 +41,6 @@ interface LogEvent {
 }
 ```
 
-## Output: Visualizations
-
-### TUI Mode (`fabric tui`)
-
-Terminal dashboard showing:
-- **Worker List**: Active workers with current status
-- **Log Stream**: Live scrolling log output
-- **Detail View**: Focus on single worker's activity
-
-Features:
-- Filter by worker, log level, or search term
-- Keyboard navigation (j/k scroll, / search, q quit)
-- Color-coded log levels
-
-### HTML Mode (`fabric html`)
-
-Static HTML file containing:
-- **Timeline**: Visual representation of worker activity over time
-- **Log Viewer**: Formatted, syntax-highlighted logs
-- **Summary**: Worker count, error count, duration
-
-Features:
-- Self-contained (embedded CSS/JS, no external dependencies)
-- Works offline
-- Shareable as single file
-
-## CLI Interface
-
-```bash
-# TUI - live terminal dashboard
-fabric tui                              # Read from ~/.needle/logs/
-fabric tui --source /path/to/logs/      # Read from specific path
-fabric tui --worker w-abc123            # Filter to one worker
-
-# HTML - generate static report
-fabric html                             # Output to stdout
-fabric html --output report.html        # Output to file
-fabric html --source ~/.needle/logs/    # Explicit source path
-
-# Simple log viewing (parsed + formatted)
-fabric logs                             # Pretty-print parsed logs
-fabric logs --level error               # Filter by level
-fabric logs --worker w-abc123           # Filter by worker
-```
-
 ## Default Source
 
 FABRIC reads from `~/.needle/logs/` by default. NEEDLE's folder structure:
@@ -99,94 +54,136 @@ FABRIC reads from `~/.needle/logs/` by default. NEEDLE's folder structure:
 └── README.md
 ```
 
-The exact log file format within `logs/` will be determined by NEEDLE's output behavior.
+## Output: Live Displays
+
+### TUI Mode (`fabric tui`)
+
+Live terminal dashboard that continuously updates:
+
+- **Worker Grid**: Real-time status of all active workers
+- **Log Stream**: Scrolling log output as events arrive
+- **Detail Panel**: Focus on a specific worker's activity
+
+Features:
+- Auto-updates as new log events arrive
+- Filter by worker, log level, or search term
+- Keyboard navigation (j/k scroll, / search, Tab switch panels, q quit)
+- Color-coded log levels
+
+### Web Mode (`fabric web`)
+
+Live browser dashboard served on localhost:
+
+- **Worker Overview**: Cards showing each worker's current state
+- **Activity Feed**: Real-time log stream
+- **Timeline**: Visual representation of worker activity
+
+Features:
+- WebSocket-powered real-time updates
+- Filter and search controls
+- Responsive layout
+- Auto-reconnect on connection loss
+
+## CLI Interface
+
+```bash
+# TUI - live terminal dashboard
+fabric tui                              # Read from ~/.needle/logs/
+fabric tui --source /path/to/logs/      # Read from specific path
+fabric tui --worker w-abc123            # Filter to one worker
+
+# Web - live browser dashboard
+fabric web                              # Serve on http://localhost:3000
+fabric web --port 8080                  # Custom port
+fabric web --source /path/to/logs/      # Read from specific path
+
+# Simple log streaming (parsed + formatted, also live)
+fabric logs                             # Stream parsed logs to stdout
+fabric logs --level error               # Filter by level
+fabric logs --worker w-abc123           # Filter by worker
+```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                      FABRIC                         │
-├─────────────────────────────────────────────────────┤
-│  ┌─────────┐    ┌─────────┐    ┌─────────────────┐ │
-│  │  Input  │───▶│ Parser  │───▶│    Renderer     │ │
-│  │ Reader  │    │         │    │  (TUI or HTML)  │ │
-│  └─────────┘    └─────────┘    └─────────────────┘ │
-│       │                               │            │
-│   stdin or                        stdout or        │
-│   log files                       HTML file        │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                         FABRIC                              │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────┐    ┌─────────┐    ┌───────────────────────┐  │
+│  │   Log    │───▶│ Parser  │───▶│   Display Renderer    │  │
+│  │  Tailer  │    │         │    │   (TUI or Web)        │  │
+│  └──────────┘    └─────────┘    └───────────────────────┘  │
+│       │                                    │                │
+│   ~/.needle/logs/                    Terminal or           │
+│   (tail -f style)                    localhost:3000        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Components
 
-1. **Input Reader**: Read from stdin, file, or directory of log files
+1. **Log Tailer**: Continuously read new lines from log files (like `tail -f`)
 2. **Parser**: Parse JSON log lines into structured events
-3. **Renderer**: Output as TUI dashboard or HTML document
+3. **Display Renderer**: Update TUI or push to WebSocket clients
 
 ## Implementation Phases
 
-### Phase 1: Core Parser
-- [ ] Parse NEEDLE JSON log format
-- [ ] Handle malformed lines gracefully
-- [ ] Group events by worker
+### Phase 1: Core Infrastructure
+- [ ] Log tailer that watches `~/.needle/logs/`
+- [ ] JSON line parser
+- [ ] Event emitter for parsed events
 
-### Phase 2: TUI Renderer
-- [ ] Basic worker list display
-- [ ] Log streaming view
-- [ ] Filtering and search
-- [ ] Keyboard controls
+### Phase 2: TUI Display
+- [ ] Worker list panel
+- [ ] Live log stream panel
+- [ ] Worker detail panel
+- [ ] Keyboard controls and filtering
 
-### Phase 3: HTML Renderer
-- [ ] Generate self-contained HTML
-- [ ] Timeline visualization
-- [ ] Formatted log display
-- [ ] Summary statistics (computed on render, not stored)
+### Phase 3: Web Display
+- [ ] HTTP server with WebSocket support
+- [ ] Real-time event streaming to browser
+- [ ] React/Svelte dashboard UI
+- [ ] Worker cards and activity feed
 
 ## Technology Options
 
-### Parser
-- Node.js with streaming JSON line parser
-- Go with bufio scanner
+### Log Tailer
+- Node.js `fs.watch` + readline
+- Go `fsnotify` + bufio
+- `tail` module (Node.js)
 
 ### TUI
 - **blessed** (Node.js) - Full-featured terminal UI
 - **ink** (Node.js) - React for CLIs
 - **bubbletea** (Go) - Elegant TUI framework
 
-### HTML
-- Template literals or simple templating
-- Inline CSS/JS for self-contained output
-- SVG for timeline visualization
+### Web
+- **Express + ws** (Node.js) - Simple HTTP + WebSocket
+- **Fastify** (Node.js) - Fast HTTP server
+- **Fiber** (Go) - Express-style for Go
+- **React/Svelte** - Frontend framework
 
 ## Example Usage
 
 ```bash
-# Run from workspace with .needle/ folder
-cd /path/to/workspace
+# Start TUI dashboard
 fabric tui
 
-# Pipe NEEDLE output directly
-needle run task.md | fabric tui
+# Start web dashboard
+fabric web
+# Then open http://localhost:3000 in browser
 
-# Generate HTML report from .needle/ artifacts
-fabric html --output report.html
-
-# Quick log review
-fabric logs --level error
-
-# Review specific worker
-fabric logs --worker w-abc123
+# Stream logs to terminal (simple mode)
+fabric logs --follow
 ```
 
 ## Non-Goals
 
+- ❌ Static report generation
 - ❌ Storing metrics or historical data
 - ❌ Database or persistence layer
-- ❌ Real-time alerting
-- ❌ Multi-instance aggregation
-- ❌ Web server (HTML is static file output)
+- ❌ Alerting system
 
-FABRIC is a parser and renderer. NEEDLE handles orchestration and logging; FABRIC makes that output human-readable.
+FABRIC is a live display. It shows what NEEDLE is doing right now.
 
 ---
 
