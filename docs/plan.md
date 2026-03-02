@@ -1010,7 +1010,11 @@ Live view of version control state as workers make changes:
 
 ### 16. Worker Comparison Analytics
 
-Compare worker performance over time to optimize allocation:
+Compare worker performance over time to optimize allocation.
+
+**Storage:** File-based database for historical metrics:
+- **SQLite** (`~/.needle/fabric.db`) - Simple, zero-config, portable
+- Alternative: **Parquet** files for columnar analytics if data volume grows
 
 ```
 ┌─ Worker Analytics ──────────────────────────────────────────────────┐
@@ -1074,6 +1078,55 @@ Compare worker performance over time to optimize allocation:
 - Success/failure rate
 - Retry frequency
 - Tool usage patterns
+
+**Storage schema (SQLite):**
+```sql
+-- Session summaries
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  started_at INTEGER,
+  ended_at INTEGER,
+  worker_count INTEGER,
+  task_count INTEGER,
+  total_cost REAL,
+  total_tokens INTEGER
+);
+
+-- Per-task metrics
+CREATE TABLE task_metrics (
+  id TEXT PRIMARY KEY,
+  session_id TEXT,
+  worker_id TEXT,
+  task_type TEXT,
+  started_at INTEGER,
+  ended_at INTEGER,
+  duration_ms INTEGER,
+  cost REAL,
+  tokens_in INTEGER,
+  tokens_out INTEGER,
+  success BOOLEAN,
+  retry_count INTEGER
+);
+
+-- Error history for Recovery Playbook
+CREATE TABLE error_history (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT,
+  worker_id TEXT,
+  error_type TEXT,
+  error_message TEXT,
+  file_path TEXT,
+  timestamp INTEGER,
+  resolution TEXT,
+  resolution_successful BOOLEAN
+);
+```
+
+**Data flow:**
+1. FABRIC parses session logs on close
+2. Extracts metrics and writes to SQLite
+3. Analytics queries aggregate across sessions
+4. Recovery Playbook searches error_history
 
 **Comparisons:**
 - Worker vs worker
@@ -1364,10 +1417,14 @@ fabric logs --follow
 ## Non-Goals
 
 - ❌ Static report generation (FABRIC is live, not batch)
-- ❌ Persistent storage (all state is in-memory, derived from logs)
-- ❌ External database (logs are the source of truth)
+- ❌ External database server (uses local SQLite file only)
 - ❌ Push notifications (alerts are in-UI only)
 - ❌ Worker control (FABRIC is read-only, cannot stop/start workers)
+- ❌ Real-time data sync (analytics updated on session close, not live)
+
+**Storage model:**
+- Real-time display: stateless, derived from log stream
+- Analytics/Recovery: SQLite file (`~/.needle/fabric.db`) updated on session close
 
 FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detects problems, and helps you understand your workers.
 
