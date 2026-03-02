@@ -71,19 +71,33 @@ Features:
 
 ```bash
 # TUI - live terminal dashboard
-fabric tui                              # Read from stdin or default log path
-fabric tui --source ~/.needle/logs/     # Read from specific path
+fabric tui                              # Read from .needle/ in current directory
+fabric tui --source /path/to/.needle/   # Read from specific .needle folder
 fabric tui --worker w-abc123            # Filter to one worker
 
 # HTML - generate static report
 fabric html                             # Output to stdout
 fabric html --output report.html        # Output to file
-fabric html --source session.log        # From specific log file
+fabric html --source .needle/           # From specific .needle folder
 
 # Simple log viewing (parsed + formatted)
 fabric logs                             # Pretty-print parsed logs
 fabric logs --level error               # Filter by level
 fabric logs --worker w-abc123           # Filter by worker
+```
+
+## Default Source
+
+FABRIC looks for `.needle/` in the current working directory by default. This folder contains NEEDLE's logging artifacts:
+
+```
+.needle/
+├── workers/
+│   ├── w-abc123.jsonl
+│   ├── w-def456.jsonl
+│   └── ...
+└── sessions/
+    └── session-001.jsonl
 ```
 
 ## Architecture
@@ -146,17 +160,21 @@ fabric logs --worker w-abc123           # Filter by worker
 ## Example Usage
 
 ```bash
+# Run from workspace with .needle/ folder
+cd /path/to/workspace
+fabric tui
+
 # Pipe NEEDLE output directly
 needle run task.md | fabric tui
 
-# Read from log file
-fabric tui --source /var/log/needle/session-001.jsonl
-
-# Generate HTML report after session
-fabric html --source /var/log/needle/session-001.jsonl --output report.html
+# Generate HTML report from .needle/ artifacts
+fabric html --output report.html
 
 # Quick log review
-cat session.log | fabric logs --level error
+fabric logs --level error
+
+# Review specific worker
+fabric logs --worker w-abc123
 ```
 
 ## Non-Goals
