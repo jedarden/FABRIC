@@ -734,6 +734,506 @@ Visual representation of where work is happening:
 
 ---
 
+### 11. Conversation Transcript View
+
+Show the actual Claude conversation—prompts and responses—not just tool calls. Tool calls are symptoms; the conversation is the substance.
+
+```
+┌─ Conversation: w-alpha ─────────────────────────────────────────────┐
+│                                                                     │
+│  ┌─ System ─────────────────────────────────────────────────────┐  │
+│  │ You are working on bd-1847: Implement authentication flow    │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌─ Assistant ──────────────────────────────────────────────────┐  │
+│  │ I'll start by understanding the existing auth structure.     │  │
+│  │ Let me examine the current implementation.                   │  │
+│  │                                                              │  │
+│  │ [Tool: Glob **/*.ts in src/auth/]                           │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌─ Tool Result ────────────────────────────────────────────────┐  │
+│  │ Found 4 files: login.ts, types.ts, middleware.ts, utils.ts  │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌─ Assistant ──────────────────────────────────────────────────┐  │
+│  │ Good, there's an existing auth module. I see login.ts       │  │
+│  │ handles the login flow. Let me read it to understand the    │  │
+│  │ current approach before making changes.                      │  │
+│  │                                                              │  │
+│  │ [Tool: Read src/auth/login.ts]                              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  View: [Conversation] [Tools Only] [Thinking Only]                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Features:**
+- Full conversation history with role labels (System, User, Assistant, Tool)
+- Collapsible tool calls and results
+- "Thinking" blocks shown separately (if available in logs)
+- Search within conversation
+- Jump between turns
+- Sync with activity stream (click event → jump to conversation point)
+
+**Why valuable:** Users see *why* decisions were made, not just what happened. Debug reasoning failures, understand worker logic, learn from good decisions.
+
+---
+
+### 12. Semantic Activity Narrative
+
+Real-time natural language description of what's happening, updated as workers progress:
+
+```
+┌─ Live Narrative ────────────────────────────────────────────────────┐
+│                                                                     │
+│  w-alpha (bd-1847 "Implement auth flow")                           │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│  Phase: Implementation (was: Research)                              │
+│                                                                     │
+│  "Alpha finished analyzing the existing auth code and is now       │
+│   writing a new JWT-based login function. It has created the       │
+│   token generation logic and is currently implementing the         │
+│   validation middleware."                                           │
+│                                                                     │
+│  Key decisions made:                                                │
+│    • Chose JWT over session cookies (for stateless scaling)        │
+│    • Using existing User type from types.ts                        │
+│    • Adding refresh token support                                  │
+│                                                                     │
+│  ──────────────────────────────────────────────────────────────────│
+│                                                                     │
+│  w-bravo (bd-1852 "Fix login validation")                          │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│  Phase: Debugging                                                   │
+│                                                                     │
+│  "Bravo identified the validation bug: the email regex was too     │
+│   strict and rejected valid .co.uk addresses. Currently writing    │
+│   a fix and adding test cases for edge cases."                     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Phases detected:**
+- Research (reading files, searching codebase)
+- Planning (analyzing, deciding approach)
+- Implementation (writing/editing code)
+- Testing (running tests, fixing failures)
+- Debugging (investigating errors, fixing issues)
+- Finalizing (committing, cleanup)
+
+**Features:**
+- Auto-generated from activity patterns
+- Phase transitions highlighted
+- Key decisions extracted from conversation
+- Updates in real-time as events arrive
+- Expandable for more detail
+
+**Why valuable:** Instant understanding without parsing logs. Executives, PMs, or anyone can understand status at a glance.
+
+---
+
+### 13. AI Session Digest
+
+On-demand or automatic session summaries:
+
+```
+┌─ Session Digest ────────────────────────────────────────────────────┐
+│                                                                     │
+│  Session: 2026-03-02 14:00-15:45 (1h 45m)                          │
+│                                                                     │
+│  📊 Overview                                                        │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  Workers: 4         Tasks completed: 5/7                     │  │
+│  │  Cost: $8.42        Files changed: 23                        │  │
+│  │  Commits: 3         Lines added: 847  deleted: 234          │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ✅ Completed                                                       │
+│    • bd-1847: Implemented JWT authentication with refresh tokens   │
+│    • bd-1852: Fixed email validation to support all TLDs          │
+│    • bd-1845: Added user profile CRUD endpoints                    │
+│    • bd-1849: Created unit tests for auth module (94% coverage)   │
+│    • bd-1850: Refactored error handling to use custom exceptions  │
+│                                                                     │
+│  🔄 In Progress                                                     │
+│    • bd-1853: Integration tests (60% complete, est. 15 min)       │
+│    • bd-1854: API documentation (blocked by bd-1853)              │
+│                                                                     │
+│  ⚠️ Issues Encountered                                              │
+│    • Rate limit hit at 14:32 (resolved: added retry logic)        │
+│    • w-alpha/w-bravo collision on types.ts (resolved: merged)     │
+│                                                                     │
+│  💡 Observations                                                    │
+│    • w-alpha most efficient ($1.40/task avg)                      │
+│    • Auth implementation took 2x expected time (complex codebase) │
+│    • Consider: break large tasks into smaller chunks              │
+│                                                                     │
+│  [Copy Summary] [Export Markdown] [Share Link]                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Generation triggers:**
+- On-demand via command palette (`>digest`)
+- Automatic at session end
+- Periodic (every 30 min) if enabled
+
+**Export formats:**
+- Markdown (for docs/Slack)
+- JSON (for integrations)
+- Plain text (for email)
+
+**Why valuable:** Stakeholder communication in one click. Daily standup prep. Historical record of what was accomplished. No manual note-taking.
+
+---
+
+### 14. File Context Panel
+
+When a worker interacts with a file, show its content in a persistent side panel:
+
+```
+┌─ Activity ──────────────────────┬─ File Context ─────────────────────┐
+│                                 │                                     │
+│  14:32:07  w-alpha              │  src/auth/login.ts                 │
+│  Edit src/auth/login.ts        │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+│                                 │                                     │
+│  14:32:01  w-alpha              │   1│ import { User } from './types' │
+│  Read src/auth/types.ts        │   2│ import { hash } from 'bcrypt'; │
+│   ↳ 42 lines                    │   3│                               │
+│                                 │   4│ export async function login(  │
+│  14:31:55  w-alpha              │   5│   email: string,              │
+│  Analyzing dependencies...      │   6│   password: string            │
+│                                 │   7│ ): Promise<User> {            │
+│  14:31:47  w-alpha              │   8│   const user = await findUser │
+│  Glob **/*.ts                   │   9│   if (!user) {                │
+│   ↳ Found 23 files              │  10│     throw new AuthError();    │
+│                                 │  11│   }                           │
+│                                 │  12│                               │
+│  [Click any file event to      │  13│   const valid = await compare │
+│   see file context]             │  14│   if (!valid) {               │
+│                                 │  15│     throw new AuthError();    │
+│                                 │  16│   }                           │
+│                                 │  17│                               │
+│                                 │  18│   return sanitize(user);      │
+│                                 │  19│ }                             │
+│                                 │                                     │
+│                                 │  ─────────────────────────────────  │
+│                                 │  Recent operations on this file:   │
+│                                 │   • Read by w-alpha (14:32:01)     │
+│                                 │   • Edit by w-alpha (14:32:07)     │
+│                                 │                                     │
+│                                 │  [Open in Editor] [Show Full File] │
+└─────────────────────────────────┴─────────────────────────────────────┘
+```
+
+**Features:**
+- Auto-updates when new file event selected
+- Syntax highlighting based on file extension
+- Line numbers with highlight on relevant lines
+- Sticky panel - stays visible while scrolling activity
+- File history: see all operations on this file
+- Quick toggle between recently touched files
+- "Open in Editor" button (launches configured editor)
+
+**TUI layout:**
+- Vertical split (activity left, file right)
+- Toggle with `Ctrl+F` or `[` / `]` to resize
+- `Tab` to switch focus between panels
+
+**Web layout:**
+- Collapsible side panel
+- Resizable divider
+- Can pop out to separate window
+
+**Why valuable:** Full context without context-switching. Understand *what* workers are working with, not just *that* they're working.
+
+---
+
+### 15. Git Integration Panel
+
+Live view of version control state as workers make changes:
+
+```
+┌─ Git Status ────────────────────────────────────────────────────────┐
+│                                                                     │
+│  Branch: feature/auth-jwt (3 commits ahead of main)                │
+│                                                                     │
+│  Uncommitted Changes (5 files)                                      │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  M  src/auth/login.ts          +47 -12    w-alpha           │  │
+│  │  M  src/auth/types.ts          +18 -3     w-alpha           │  │
+│  │  A  src/auth/jwt.ts            +89        w-alpha           │  │
+│  │  M  src/auth/middleware.ts     +23 -8     w-alpha           │  │
+│  │  D  src/auth/legacy-auth.ts    -127       w-alpha (pending) │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  Preview Commit                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  feat(auth): implement JWT-based authentication             │  │
+│  │                                                              │  │
+│  │  - Add JWT token generation and validation                  │  │
+│  │  - Add refresh token support                                │  │
+│  │  - Migrate from legacy session-based auth                   │  │
+│  │  - Add middleware for protected routes                      │  │
+│  │                                                              │  │
+│  │  Breaking change: removes legacy auth endpoints             │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  Potential Conflicts                                                │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  ⚠️  main has 2 new commits since branch creation            │  │
+│  │     • fix: update bcrypt dependency (touches auth/login.ts) │  │
+│  │     Recommendation: rebase before merging                   │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  [View Full Diff] [Preview PR] [Refresh]                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Features:**
+- Real-time git status from working directory
+- Shows which worker made each change
+- Auto-generates preview commit message from activity
+- Detects potential conflicts with upstream
+- PR preview (title, description, files changed)
+- Branch visualization
+
+**Data sources:**
+- `git status` for uncommitted changes
+- `git log` for commit history
+- `git fetch` + `git log origin/main..HEAD` for upstream comparison
+- Activity logs for worker attribution
+
+**Why valuable:** Git is the ultimate source of truth. Seeing changes in git context makes worker activity concrete. Catch conflicts early. Preview PRs before they exist.
+
+---
+
+### 16. Worker Comparison Analytics
+
+Compare worker performance over time to optimize allocation:
+
+```
+┌─ Worker Analytics ──────────────────────────────────────────────────┐
+│                                                                     │
+│  Comparison: Last 7 days (23 sessions, 89 tasks)                   │
+│                                                                     │
+│  ┌─ Efficiency Ranking ─────────────────────────────────────────┐  │
+│  │                                                               │  │
+│  │  Worker      Tasks   Avg Time   Cost/Task   Success   Score  │  │
+│  │  ──────────────────────────────────────────────────────────  │  │
+│  │  w-alpha       28     8.2m       $1.12       96%       A     │  │
+│  │  w-charlie     24     9.5m       $1.34       92%       A-    │  │
+│  │  w-delta       22    10.1m       $1.28       94%       B+    │  │
+│  │  w-bravo       15    12.4m       $1.67       87%       B     │  │
+│  │                                                               │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌─ Task Type Performance ──────────────────────────────────────┐  │
+│  │                                                               │  │
+│  │  Task Type        Best Worker    Avg Time   vs. Others       │  │
+│  │  ─────────────────────────────────────────────────────────── │  │
+│  │  Implementation   w-alpha        7.8m       -22% faster      │  │
+│  │  Bug fixes        w-charlie      5.2m       -15% faster      │  │
+│  │  Refactoring      w-delta        6.1m       -8% faster       │  │
+│  │  Tests            w-alpha        4.3m       -31% faster      │  │
+│  │  Documentation    w-bravo        3.8m       -5% faster       │  │
+│  │                                                               │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌─ Trends ─────────────────────────────────────────────────────┐  │
+│  │                                                               │  │
+│  │  Cost per task (7-day trend)                                 │  │
+│  │                                                               │  │
+│  │  $2.00 │                                                     │  │
+│  │        │  ╭─╮                                                │  │
+│  │  $1.50 │ ╭╯  ╰╮    ╭─╮                                      │  │
+│  │        │╭╯    ╰────╯  ╰──────────────                       │  │
+│  │  $1.00 │                                                     │  │
+│  │        └─────────────────────────────────────────────────    │  │
+│  │         Mon   Tue   Wed   Thu   Fri   Sat   Sun              │  │
+│  │                                                               │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌─ Insights ───────────────────────────────────────────────────┐  │
+│  │                                                               │  │
+│  │  💡 w-alpha excels at complex implementation tasks           │  │
+│  │  💡 w-charlie is most cost-efficient for quick fixes        │  │
+│  │  ⚠️  w-bravo has higher retry rate (12% vs 5% avg)           │  │
+│  │  💡 Parallel workers reduce total time by 40% on avg        │  │
+│  │                                                               │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  [Export Report] [Configure Metrics] [Compare Sessions]            │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Metrics tracked:**
+- Tasks completed
+- Average completion time
+- Cost per task
+- Success/failure rate
+- Retry frequency
+- Tool usage patterns
+
+**Comparisons:**
+- Worker vs worker
+- Session vs session
+- Current session vs historical average
+
+**Why valuable:** Data-driven worker optimization. Understand which configurations work best. Identify issues before they compound. Improve over time.
+
+---
+
+### 17. Recovery Playbook
+
+When failures occur, show what worked in similar past situations:
+
+```
+┌─ Recovery Suggestions ──────────────────────────────────────────────┐
+│                                                                     │
+│  Current Error                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  Worker: w-bravo                                              │  │
+│  │  Error: TypeScript compilation failed                        │  │
+│  │  File: src/api/handlers.ts:47                                │  │
+│  │  Message: Property 'userId' does not exist on type 'Request' │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  Similar Past Errors (3 found)                                      │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                                                               │  │
+│  │  #1  2026-02-28 Session (98% match)                          │  │
+│  │      Error: Property 'user' does not exist on type 'Request' │  │
+│  │      Resolution: Extended Request type in types/express.d.ts │  │
+│  │      Time to resolve: 2 minutes                              │  │
+│  │      ✅ Successful                                            │  │
+│  │      [View Solution] [Show Context]                          │  │
+│  │                                                               │  │
+│  │  ────────────────────────────────────────────────────────── │  │
+│  │                                                               │  │
+│  │  #2  2026-02-25 Session (85% match)                          │  │
+│  │      Error: Property 'session' missing on Request            │  │
+│  │      Resolution: Added middleware to populate property       │  │
+│  │      Time to resolve: 5 minutes                              │  │
+│  │      ✅ Successful                                            │  │
+│  │      [View Solution]                                          │  │
+│  │                                                               │  │
+│  │  ────────────────────────────────────────────────────────── │  │
+│  │                                                               │  │
+│  │  #3  2026-02-20 Session (72% match)                          │  │
+│  │      Error: Type mismatch in handler                         │  │
+│  │      Resolution: Updated type definition                     │  │
+│  │      ⚠️  Caused regression - NOT RECOMMENDED                  │  │
+│  │      [View Details]                                           │  │
+│  │                                                               │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  Suggested Recovery Steps                                           │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  Based on successful past resolutions:                       │  │
+│  │                                                               │  │
+│  │  1. Check if userId is set by auth middleware                │  │
+│  │  2. Extend Request type in types/express.d.ts                │  │
+│  │  3. Verify middleware order in app setup                     │  │
+│  │                                                               │  │
+│  │  Confidence: High (2/3 past solutions worked)                │  │
+│  │                                                               │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  [Dismiss] [Mark as Resolved] [Add to Playbook]                    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+1. Extract error signature (type, message pattern, file pattern)
+2. Search historical session logs for similar errors
+3. Find subsequent events that resolved the error
+4. Rank by similarity and success rate
+5. Present as actionable suggestions
+
+**Error matching:**
+- Exact match: same error type and message
+- Pattern match: similar error type, related files
+- Semantic match: similar context (same task type, same module)
+
+**Feedback loop:**
+- Mark resolution as successful/failed
+- Improves future recommendations
+- Build organizational knowledge base
+
+**Why valuable:** Institutional memory. Don't repeat mistakes. Accelerate debugging. Workers (and humans) learn from past sessions.
+
+---
+
+### 18. Focus Mode with Pinning
+
+Pin specific workers, tasks, or files. Everything else fades away:
+
+```
+┌─ FABRIC (Focus Mode) ───────────────────────────────────────────────┐
+│                                                                     │
+│  📌 Pinned: w-alpha, bd-1847                    [Exit Focus Mode]   │
+│                                                                     │
+│  ┌─ w-alpha on bd-1847 "Implement auth flow" ───────────────────┐  │
+│  │                                                               │  │
+│  │  Status: ● Running (8m 34s)     Cost: $1.82                  │  │
+│  │                                                               │  │
+│  │  Progress                                                     │  │
+│  │  ━━━━━━━━━━━━━━━━━━━━━━━━━●━━━━━━━━━━━━  ~70% complete       │  │
+│  │  Research → Implementation → [Testing]                        │  │
+│  │                                                               │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  Activity (filtered to pinned only)                                │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                                                               │  │
+│  │  14:32:07  Edit src/auth/login.ts                            │  │
+│  │            ┌─────────────────────────────────────────────┐   │  │
+│  │            │ - function login() {                        │   │  │
+│  │            │ + async function login(): Promise<User> {   │   │  │
+│  │            └─────────────────────────────────────────────┘   │  │
+│  │                                                               │  │
+│  │  14:32:01  Read src/auth/types.ts                            │  │
+│  │                                                               │  │
+│  │  14:31:55  Thinking: "Now I need to implement the token     │  │
+│  │            validation. I'll create a new middleware..."       │  │
+│  │                                                               │  │
+│  │  14:31:47  Glob **/*.ts → 23 files                           │  │
+│  │                                                               │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ─────────────────────────────────────────────────────────────────  │
+│  Other activity (3 workers, muted)              [Show All]         │
+│  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Pinning modes:**
+- Pin worker: Show only that worker's activity
+- Pin task (bead): Show all workers working on that task
+- Pin file: Show all operations on that file
+- Pin multiple: Combine any of the above
+
+**Keyboard shortcuts:**
+- `p` - Toggle pin mode
+- `P` - Clear all pins
+- Click/Enter on item while in pin mode adds to pins
+- `Esc` - Exit focus mode
+
+**Visual treatment:**
+- Pinned items: Full color, full detail
+- Unpinned items: Grayed out, collapsed, or hidden
+- Muted activity bar at bottom shows unpinned worker count
+
+**Presets:**
+- Save pin configurations as named presets
+- Quick switch: `>focus alpha` or `>focus auth-task`
+
+**Why valuable:** Reduce noise. Follow what matters. Deep focus on one task without distraction. Scales from "show me everything" to "show me just this."
+
+---
+
 ## CLI Interface
 
 ```bash
@@ -782,6 +1282,7 @@ fabric logs --worker w-abc123           # Filter by worker
 - [ ] JSON line parser
 - [ ] Event emitter for parsed events
 - [ ] In-memory event index (by worker, bead, file, timestamp)
+- [ ] Conversation transcript parser (extract full conversation from logs)
 
 ### Phase 2: TUI Display
 - [ ] Worker list panel
@@ -789,6 +1290,8 @@ fabric logs --worker w-abc123           # Filter by worker
 - [ ] Worker detail panel
 - [ ] Keyboard controls and filtering
 - [ ] Command palette (Ctrl+K)
+- [ ] File context panel (split view)
+- [ ] Focus mode with pinning
 
 ### Phase 3: Web Display
 - [ ] HTTP server with WebSocket support
@@ -796,24 +1299,35 @@ fabric logs --worker w-abc123           # Filter by worker
 - [ ] React/Svelte dashboard UI
 - [ ] Worker cards and activity feed
 - [ ] Command palette (Cmd+K)
+- [ ] File context panel (side panel)
+- [ ] Focus mode with pinning
 
 ### Phase 4: Intelligence Features (Core)
 - [ ] Cross-reference hyperlinking (bead, file, worker links)
 - [ ] Inline diff view for Edit tool calls
 - [ ] File activity heatmap
 - [ ] Cost & token tracking dashboard
+- [ ] Conversation transcript view
 
 ### Phase 5: Intelligence Features (Detection)
 - [ ] Stuck detection (no progress timeout)
 - [ ] Loop detection (repeated actions on same file)
 - [ ] Worker collision detection (overlapping file edits)
 - [ ] Smart error grouping with context
+- [ ] Semantic activity narrative (phase detection)
 
-### Phase 6: Advanced Features
+### Phase 6: Context & Integration
+- [ ] Git integration panel (status, diff preview, conflict detection)
+- [ ] AI session digest generation
+- [ ] Worker comparison analytics
+- [ ] Historical session index for comparisons
+
+### Phase 7: Advanced Features
 - [ ] Session replay with timeline scrubbing
 - [ ] Task dependency DAG visualization
 - [ ] Budget alerts and projections
 - [ ] Anomaly detection (unexpected file activity)
+- [ ] Recovery playbook (error pattern matching)
 
 ## Technology Options
 

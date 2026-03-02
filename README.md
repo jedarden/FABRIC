@@ -61,6 +61,14 @@ Beyond simple log display, FABRIC provides:
 | **Cost Tracking** | Real-time token usage and budget alerts |
 | **Task Dependency DAG** | Visual graph of task relationships |
 | **File Heatmap** | See where all the action is at a glance |
+| **Conversation Transcript** | See the full Claude conversation, not just tool calls |
+| **Semantic Narrative** | Natural language summary of what workers are doing |
+| **AI Session Digest** | Auto-generated session summaries for stakeholders |
+| **File Context Panel** | See file contents alongside activity stream |
+| **Git Integration** | Live git status, diff preview, conflict detection |
+| **Worker Analytics** | Compare worker performance over time |
+| **Recovery Playbook** | Suggestions based on similar past errors |
+| **Focus Mode** | Pin workers/tasks, hide everything else |
 
 ## Relationship to NEEDLE
 
