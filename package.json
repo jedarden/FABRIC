@@ -9,12 +9,17 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:web": "vite build",
     "dev": "tsc --watch",
+    "dev:web": "vite",
     "start": "node dist/cli.js",
     "tui": "node dist/cli.js tui",
     "web": "node dist/cli.js web",
     "clean": "rm -rf dist",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "needle",
@@ -30,11 +35,25 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^20.11.0",
-    "typescript": "^5.3.0"
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.1.4",
+    "@vitest/coverage-v8": "^4.0.18",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "^5.3.0",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@types/blessed": "^0.1.27",
+    "blessed": "^0.1.81",
     "chalk": "^4.1.2",
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "express": "^5.2.1",
+    "ws": "^8.19.0"
   }
 }

@@ -58,6 +58,12 @@ export interface WorkerInfo {
 
   /** Last activity timestamp */
   lastActivity: number;
+
+  /** Files currently being modified by this worker */
+  activeFiles: string[];
+
+  /** Whether this worker is involved in any collisions */
+  hasCollision: boolean;
 }
 
 export interface EventFilter {
@@ -80,6 +86,26 @@ export interface EventFilter {
   until?: number;
 }
 
+/**
+ * File collision event - when multiple workers modify the same file concurrently
+ */
+export interface FileCollision {
+  /** File path being contested */
+  path: string;
+
+  /** Workers involved in the collision */
+  workers: string[];
+
+  /** Timestamp when collision was detected */
+  detectedAt: number;
+
+  /** Events that triggered the collision */
+  events: LogEvent[];
+
+  /** Whether the collision is still active */
+  isActive: boolean;
+}
+
 export interface EventStore {
   /** Add an event to the store */
   add(event: LogEvent): void;
@@ -95,4 +121,10 @@ export interface EventStore {
 
   /** Clear all events */
   clear(): void;
+
+  /** Get all active collisions */
+  getCollisions(): FileCollision[];
+
+  /** Get collisions for a specific worker */
+  getWorkerCollisions(workerId: string): FileCollision[];
 }

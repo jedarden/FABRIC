@@ -2,13 +2,21 @@
  * FABRIC In-Memory Event Store
  *
  * Stores and indexes LogEvents for efficient querying.
+ * Includes collision detection for concurrent file modifications.
  */
 
-import { LogEvent, WorkerInfo, WorkerStatus, EventFilter, EventStore } from './types.js';
+import { LogEvent, WorkerInfo, WorkerStatus, EventFilter, EventStore, FileCollision } from './types.js';
+
+/** Time window (in ms) to consider events as concurrent */
+const COLLISION_WINDOW_MS = 5000;
+
+/** File operations that indicate modification */
+const FILE_MODIFICATION_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
 
 export class InMemoryEventStore implements EventStore {
   private events: LogEvent[] = [];
   private workers: Map<string, WorkerInfo> = new Map();
+  private collisions: Map<string, FileCollision> = new Map();
   private maxEvents: number;
 
   constructor(maxEvents: number = 10000) {
@@ -21,6 +29,7 @@ export class InMemoryEventStore implements EventStore {
   add(event: LogEvent): void {
     this.events.push(event);
     this.updateWorkerInfo(event);
+    this.detectCollision(event);
 
     // Trim if over limit
     if (this.events.length > this.maxEvents) {
@@ -62,11 +71,28 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
+   * Get all active collisions
+   */
+  getCollisions(): FileCollision[] {
+    // Clean up stale collisions first
+    this.cleanupStaleCollisions();
+    return Array.from(this.collisions.values()).filter(c => c.isActive);
+  }
+
+  /**
+   * Get collisions for a specific worker
+   */
+  getWorkerCollisions(workerId: string): FileCollision[] {
+    return this.getCollisions().filter(c => c.workers.includes(workerId));
+  }
+
+  /**
    * Clear all events
    */
   clear(): void {
     this.events = [];
     this.workers.clear();
+    this.collisions.clear();
   }
 
   /**
@@ -89,12 +115,21 @@ export class InMemoryEventStore implements EventStore {
         beadsCompleted: 0,
         firstSeen: event.ts,
         lastActivity: event.ts,
+        activeFiles: [],
+        hasCollision: false,
       };
       this.workers.set(event.worker, worker);
     }
 
     // Update last activity
     worker.lastActivity = event.ts;
+
+    // Track active files
+    if (event.path && this.isFileModification(event)) {
+      if (!worker.activeFiles.includes(event.path)) {
+        worker.activeFiles.push(event.path);
+      }
+    }
 
     // Update status based on event
     if (event.level === 'error') {
@@ -104,12 +139,118 @@ export class InMemoryEventStore implements EventStore {
       if (event.bead) {
         worker.beadsCompleted++;
       }
+      // Clear active files on completion
+      worker.activeFiles = [];
     } else if (event.msg.includes('Starting') || event.msg.includes('starting')) {
       worker.status = 'active';
     }
 
     // Update last event
     worker.lastEvent = event;
+
+    // Update collision status
+    worker.hasCollision = this.getWorkerCollisions(worker.id).length > 0;
+  }
+
+  /**
+   * Check if event represents a file modification
+   */
+  private isFileModification(event: LogEvent): boolean {
+    if (!event.tool) return false;
+    return FILE_MODIFICATION_TOOLS.includes(event.tool);
+  }
+
+  /**
+   * Detect collision when a file modification event occurs
+   */
+  private detectCollision(event: LogEvent): void {
+    if (!event.path || !this.isFileModification(event)) {
+      return;
+    }
+
+    const path = event.path;
+    const workerId = event.worker;
+
+    // Look for other workers modifying the same file within the time window
+    const recentEvents = this.events.filter(e => {
+      if (e.path !== path) return false;
+      if (e.worker === workerId) return false;
+      if (!this.isFileModification(e)) return false;
+      if (Math.abs(e.ts - event.ts) > COLLISION_WINDOW_MS) return false;
+      return true;
+    });
+
+    if (recentEvents.length > 0) {
+      // Collision detected!
+      const collisionKey = path;
+      const workers = new Set<string>([workerId]);
+      const collisionEvents: LogEvent[] = [event];
+
+      for (const e of recentEvents) {
+        workers.add(e.worker);
+        collisionEvents.push(e);
+      }
+
+      // Update or create collision record
+      const existing = this.collisions.get(collisionKey);
+      if (existing) {
+        // Add new worker if not already tracked
+        for (const w of workers) {
+          if (!existing.workers.includes(w)) {
+            existing.workers.push(w);
+          }
+        }
+        existing.events.push(event);
+        existing.detectedAt = event.ts;
+      } else {
+        const collision: FileCollision = {
+          path,
+          workers: Array.from(workers),
+          detectedAt: event.ts,
+          events: collisionEvents,
+          isActive: true,
+        };
+        this.collisions.set(collisionKey, collision);
+      }
+
+      // Update collision status for all involved workers
+      for (const w of workers) {
+        const workerInfo = this.workers.get(w);
+        if (workerInfo) {
+          workerInfo.hasCollision = true;
+        }
+      }
+    }
+  }
+
+  /**
+   * Clean up collisions that are no longer active
+   */
+  private cleanupStaleCollisions(): void {
+    const now = Date.now();
+    const staleThreshold = 30000; // 30 seconds
+
+    for (const [key, collision] of this.collisions) {
+      // Check if all involved workers are still active on this file
+      const isStale = collision.workers.every(workerId => {
+        const worker = this.workers.get(workerId);
+        if (!worker) return true;
+        if (!worker.activeFiles.includes(collision.path)) return true;
+        if (now - collision.detectedAt > staleThreshold) return true;
+        return false;
+      });
+
+      if (isStale) {
+        collision.isActive = false;
+        // Update worker collision status
+        for (const workerId of collision.workers) {
+          const worker = this.workers.get(workerId);
+          if (worker) {
+            worker.hasCollision = this.getWorkerCollisions(workerId).some(c => c.isActive);
+          }
+        }
+      }
+    }
   }
 }
 

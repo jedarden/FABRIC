@@ -1,0 +1,251 @@
+{
+  "generated_at": "2026-03-03T08:38:56Z",
+  "source": "br-list-workaround",
+  "br_ready_status": "working",
+  "total_available": 22,
+  "workers_should_read": "This file contains available work. Read .beads[0] to get the highest priority bead.",
+  "beads": [
+    {
+      "id": "bd-2zt",
+      "title": "ALT-001: Fix br ready schema bug (root cause fix)",
+      "priority": 0,
+      "type": "task",
+      "labels": [
+        "br",
+        "bug",
+        "worker-starvation"
+      ]
+    },
+    {
+      "id": "bd-2ed",
+      "title": "Fix br ready schema bug (created_by column)",
+      "priority": 0,
+      "type": "task",
+      "labels": [
+        "blocking",
+        "br",
+        "bug"
+      ]
+    },
+    {
+      "id": "bd-1mq",
+      "title": "ALT-003: Use br list JSON instead of br ready",
+      "priority": 1,
+      "type": "task",
+      "labels": [
+        "alternative",
+        "discovery",
+        "worker"
+      ]
+    },
+    {
+      "id": "bd-2r0",
+      "title": "P3-007: Add web command to CLI",
+      "priority": 1,
+      "type": "task",
+      "labels": [
+        "cli",
+        "phase-3",
+        "web"
+      ]
+    },
+    {
+      "id": "bd-2qm",
+      "title": "P3-003: Create web frontend scaffold with Vite + React",
+      "priority": 1,
+      "type": "task",
+      "labels": [
+        "frontend",
+        "phase-3",
+        "web"
+      ]
+    },
+    {
+      "id": "bd-2fa",
+      "title": "P3-002: Implement WebSocket server for real-time events",
+      "priority": 1,
+      "type": "task",
+      "labels": [
+        "phase-3",
+        "web",
+        "websocket"
+      ]
+    },
+    {
+      "id": "bd-2qr",
+      "title": "P1: Create React frontend for web dashboard",
+      "priority": 1,
+      "type": "task",
+      "labels": [
+        "frontend",
+        "phase-3",
+        "react",
+        "web"
+      ]
+    },
+    {
+      "id": "bd-1sk",
+      "title": "P1: Add WebSocket server for real-time updates",
+      "priority": 1,
+      "type": "task",
+      "labels": [
+        "phase-3",
+        "realtime",
+        "web",
+        "websocket"
+      ]
+    },
+    {
+      "id": "bd-1fk",
+      "title": "P1: Add Express HTTP server for web dashboard",
+      "priority": 1,
+      "type": "task",
+      "labels": [
+        "http",
+        "phase-3",
+        "server",
+        "web"
+      ]
+    },
+    {
+      "id": "bd-2it",
+      "title": "ALT-005: Environment variable override for br ready",
+      "priority": 2,
+      "type": "task",
+      "labels": [
+        "alternative",
+        "discovery",
+        "worker"
+      ]
+    },
+    {
+      "id": "bd-33w",
+      "title": "ALT-004: Pre-computed ready queue file",
+      "priority": 2,
+      "type": "task",
+      "labels": [
+        "alternative",
+        "discovery",
+        "worker"
+      ]
+    },
+    {
+      "id": "bd-1c6",
+      "title": "TEST-002: Add store integration tests",
+      "priority": 2,
+      "type": "task",
+      "labels": [
+        "store",
+        "testing"
+      ]
+    },
+    {
+      "id": "bd-5eh",
+      "title": "TEST-001: Add comprehensive parser tests",
+      "priority": 2,
+      "type": "task",
+      "labels": [
+        "parser",
+        "testing"
+      ]
+    },
+    {
+      "id": "bd-1wo",
+      "title": "P3-005: Build Activity Feed component with filtering",
+      "priority": 2,
+      "type": "task",
+      "labels": [
+        "frontend",
+        "phase-3",
+        "web"
+      ]
+    },
+    {
+      "id": "bd-31n",
+      "title": "P3-004: Build Worker Overview Cards component",
+      "priority": 2,
+      "type": "task",
+      "labels": [
+        "frontend",
+        "phase-3",
+        "web"
+      ]
+    },
+    {
+      "id": "bd-2en",
+      "title": "P2: Add unit tests for store.ts",
+      "priority": 2,
+      "type": "task",
+      "labels": [
+        "store",
+        "testing",
+        "unit-test"
+      ]
+    },
+    {
+      "id": "bd-1a2",
+      "title": "P2: Add unit tests for parser.ts",
+      "priority": 2,
+      "type": "task",
+      "labels": [
+        "parser",
+        "testing",
+        "unit-test"
+      ]
+    },
+    {
+      "id": "bd-3tj",
+      "title": "TEST-003: Add TUI component tests",
+      "priority": 3,
+      "type": "task",
+      "labels": [
+        "testing",
+        "tui"
+      ]
+    },
+    {
+      "id": "bd-r5c",
+      "title": "P4-002: Implement Worker Collision Detection",
+      "priority": 3,
+      "type": "task",
+      "labels": [
+        "collision",
+        "intelligence",
+        "phase-4"
+      ]
+    },
+    {
+      "id": "bd-2u8",
+      "title": "P4-001: Implement Cross-Reference Hyperlinking",
+      "priority": 3,
+      "type": "task",
+      "labels": [
+        "hyperlinks",
+        "intelligence",
+        "phase-4"
+      ]
+    },
+    {
+      "id": "bd-269",
+      "title": "P3-006: Implement Timeline Visualization with Canvas",
+      "priority": 3,
+      "type": "task",
+      "labels": [
+        "frontend",
+        "phase-3",
+        "web"
+      ]
+    },
+    {
+      "id": "bd-3a0",
+      "title": "P4-003: Add Session Replay Feature",
+      "priority": 4,
+      "type": "task",
+      "labels": [
+        "intelligence",
+        "phase-4",
+        "replay"
+      ]
+    }
+  ]
+}

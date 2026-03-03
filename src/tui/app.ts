@@ -1,0 +1,307 @@
+/**
+ * FABRIC TUI Application
+ *
+ * Main TUI application class using blessed for terminal rendering.
+ */
+
+import * as blessed from 'blessed';
+import { LogEvent, WorkerInfo } from '../types.js';
+import { InMemoryEventStore } from '../store.js';
+import { colors } from './utils/colors.js';
+import { WorkerGrid } from './components/WorkerGrid.js';
+import { ActivityStream } from './components/ActivityStream.js';
+import { WorkerDetail } from './components/WorkerDetail.js';
+import { CommandPalette } from './components/CommandPalette.js';
+
+export interface TuiOptions {
+  /** Log file path to tail */
+  logPath?: string;
+
+  /** Maximum events to display */
+  maxEvents?: number;
+
+  /** Refresh interval in ms */
+  refreshInterval?: number;
+}
+
+export class FabricTuiApp {
+  private screen: blessed.Widgets.Screen;
+  private store: InMemoryEventStore;
+  private options: Required<TuiOptions>;
+  private isRunning = false;
+
+  // UI Components
+  private headerBox!: blessed.Widgets.BoxElement;
+  private workerGrid!: WorkerGrid;
+  private activityStream!: ActivityStream;
+  private workerDetail!: WorkerDetail;
+  private commandPalette!: CommandPalette;
+  private footerBox!: blessed.Widgets.BoxElement;
+  private helpOverlay?: blessed.Widgets.BoxElement;
+
+  constructor(store: InMemoryEventStore, options: TuiOptions = {}) {
+    this.store = store;
+    this.options = {
+      logPath: options.logPath || '',
+      maxEvents: options.maxEvents || 1000,
+      refreshInterval: options.refreshInterval || 100,
+    };
+
+    this.screen = this.createScreen();
+    this.createLayout();
+    this.bindKeys();
+  }
+
+  /**
+   * Create the blessed screen
+   */
+  private createScreen(): blessed.Widgets.Screen {
+    return blessed.screen({
+      smartCSR: true,
+      title: 'FABRIC - Flow Analysis & Bead Reporting Interface Console',
+      fullUnicode: true,
+    });
+  }
+
+  /**
+   * Create the UI layout
+   */
+  private createLayout(): void {
+    // Header
+    this.headerBox = blessed.box({
+      parent: this.screen,
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 1,
+      content: ' FABRIC - Worker Activity Monitor',
+      style: {
+        fg: colors.header,
+        bold: true,
+      },
+    });
+
+    // Worker grid panel (left side)
+    this.workerGrid = new WorkerGrid({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '40%',
+      bottom: 1,
+    });
+
+    // Activity stream (right side)
+    this.activityStream = new ActivityStream({
+      parent: this.screen,
+      top: 1,
+      right: 0,
+      width: '60%',
+      bottom: 1,
+      maxLines: this.options.maxEvents,
+    });
+
+    // Worker detail panel (hidden by default)
+    this.workerDetail = new WorkerDetail({
+      parent: this.screen,
+      top: 'center',
+      left: 'center',
+      width: '50%',
+      height: '60%',
+    });
+
+    // Command palette (hidden by default, Ctrl+K)
+    this.commandPalette = new CommandPalette({
+      parent: this.screen,
+      onSubmit: (cmd) => this.handleCommand(cmd),
+    });
+
+    // Footer with key hints
+    this.footerBox = blessed.box({
+      parent: this.screen,
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: 1,
+      content: ' [Tab] Switch  [j/k] Scroll  [/] Search  [?] Help  [q] Quit',
+      style: {
+        fg: colors.muted,
+      },
+    });
+  }
+
+  /**
+   * Bind keyboard shortcuts
+   */
+  private bindKeys(): void {
+    // Quit
+    this.screen.key(['q', 'C-c'], () => {
+      this.stop();
+    });
+
+    // Help toggle
+    this.screen.key(['?'], () => {
+      this.toggleHelp();
+    });
+
+    // Tab switching
+    this.screen.key(['tab'], () => {
+      this.screen.focusNext();
+    });
+
+    this.screen.key(['S-tab'], () => {
+      this.screen.focusPrevious();
+    });
+
+    // Refresh
+    this.screen.key(['r'], () => {
+      this.render();
+    });
+
+    // Command palette
+    this.screen.key(['C-k'], () => {
+      this.commandPalette.toggle();
+    });
+
+    // Toggle worker detail
+    this.screen.key(['enter'], () => {
+      const selected = this.workerGrid.getSelected();
+      if (selected) {
+        this.showWorkerDetail(selected);
+      }
+    });
+  }
+
+  /**
+   * Handle command from palette
+   */
+  private handleCommand(cmd: string): void {
+    if (cmd === 'clear') {
+      this.activityStream.clearFilter();
+    } else if (cmd === 'pause') {
+      this.activityStream.togglePause();
+    } else if (cmd === 'refresh') {
+      this.render();
+    } else if (cmd === 'help') {
+      this.toggleHelp();
+    } else if (cmd === 'quit') {
+      this.stop();
+    } else if (cmd.startsWith('filter:worker:')) {
+      const workerId = cmd.replace('filter:worker:', '');
+      this.activityStream.setFilter({ workerId });
+    } else if (cmd.startsWith('filter:level:')) {
+      const level = cmd.replace('filter:level:', '');
+      this.activityStream.setFilter({ level });
+    }
+  }
+
+  /**
+   * Show worker detail panel
+   */
+  private showWorkerDetail(worker: WorkerInfo): void {
+    const events = this.store.query({ worker: worker.id });
+    this.workerDetail.setWorker(worker);
+    this.workerDetail.setRecentEvents(events);
+    this.workerDetail.show();
+  }
+
+  /**
+   * Toggle help overlay
+   */
+  private toggleHelp(): void {
+    if (this.helpOverlay) {
+      this.helpOverlay.destroy();
+      this.helpOverlay = undefined;
+    } else {
+      this.helpOverlay = blessed.box({
+        parent: this.screen,
+        top: 'center',
+        left: 'center',
+        width: '50%',
+        height: '50%',
+        label: ' Help ',
+        content: `
+Keyboard Shortcuts
+==================
+
+Navigation:
+  j/k     - Scroll down/up
+  g/G     - Scroll to top/bottom
+  Tab     - Next panel
+  Shift+Tab - Previous panel
+
+Actions:
+  /       - Search
+  f       - Filter
+  r       - Refresh
+  p       - Pause scroll
+
+General:
+  ?       - Toggle this help
+  q       - Quit
+  Ctrl+C  - Quit
+`,
+        border: { type: 'line' },
+        style: {
+          border: { fg: colors.border },
+          label: { fg: colors.header },
+        },
+        keys: true,
+        vi: true,
+      });
+      this.helpOverlay.focus();
+    }
+    this.screen.render();
+  }
+
+  /**
+   * Render workers panel
+   */
+  private renderWorkers(): void {
+    const workers = this.store.getWorkers();
+    this.workerGrid.updateWorkers(workers);
+  }
+
+  /**
+   * Add event to activity stream
+   */
+  addEvent(event: LogEvent): void {
+    this.activityStream.addEvent(event);
+    this.renderWorkers();
+    this.screen.render();
+  }
+
+  /**
+   * Render the entire UI
+   */
+  render(): void {
+    this.renderWorkers();
+    this.screen.render();
+  }
+
+  /**
+   * Start the TUI event loop
+   */
+  start(): void {
+    if (this.isRunning) return;
+
+    this.isRunning = true;
+    this.render();
+    this.screen.render();
+  }
+
+  /**
+   * Stop the TUI and cleanup
+   */
+  stop(): void {
+    this.isRunning = false;
+    this.screen.destroy();
+    process.exit(0);
+  }
+}
+
+/**
+ * Create and start a TUI app
+ */
+export function createTuiApp(store: InMemoryEventStore, options?: TuiOptions): FabricTuiApp {
+  return new FabricTuiApp(store, options);
+}
