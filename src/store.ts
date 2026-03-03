@@ -3,9 +3,11 @@
  *
  * Stores and indexes LogEvents for efficient querying.
  * Includes collision detection for concurrent file modifications.
+ * Includes error grouping for smart error clustering.
  */
 
-import { LogEvent, WorkerInfo, WorkerStatus, EventFilter, EventStore, FileCollision } from './types.js';
+import { LogEvent, WorkerInfo, WorkerStatus, EventFilter, EventStore, FileCollision, ErrorGroup, ErrorCategory } from './types.js';
+import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -17,10 +19,12 @@ export class InMemoryEventStore implements EventStore {
   private events: LogEvent[] = [];
   private workers: Map<string, WorkerInfo> = new Map();
   private collisions: Map<string, FileCollision> = new Map();
+  private errorGroupManager: ErrorGroupManager;
   private maxEvents: number;
 
   constructor(maxEvents: number = 10000) {
     this.maxEvents = maxEvents;
+    this.errorGroupManager = new ErrorGroupManager();
   }
 
   /**
@@ -30,6 +34,11 @@ export class InMemoryEventStore implements EventStore {
     this.events.push(event);
     this.updateWorkerInfo(event);
     this.detectCollision(event);
+
+    // Track errors in error groups
+    if (event.level === 'error') {
+      this.errorGroupManager.addError(event);
+    }
 
     // Trim if over limit
     if (this.events.length > this.maxEvents) {
@@ -93,6 +102,48 @@ export class InMemoryEventStore implements EventStore {
     this.events = [];
     this.workers.clear();
     this.collisions.clear();
+    this.errorGroupManager.clear();
+  }
+
+  /**
+   * Get all error groups
+   */
+  getErrorGroups(): ErrorGroup[] {
+    return this.errorGroupManager.getGroups();
+  }
+
+  /**
+   * Get active error groups only
+   */
+  getActiveErrorGroups(): ErrorGroup[] {
+    return this.errorGroupManager.getActiveGroups();
+  }
+
+  /**
+   * Get error groups for a specific worker
+   */
+  getWorkerErrorGroups(workerId: string): ErrorGroup[] {
+    return this.errorGroupManager.getWorkerGroups(workerId);
+  }
+
+  /**
+   * Get error groups by category
+   */
+  getErrorGroupsByCategory(category: ErrorCategory): ErrorGroup[] {
+    return this.errorGroupManager.getGroupsByCategory(category);
+  }
+
+  /**
+   * Get error group statistics
+   */
+  getErrorStats(): {
+    totalGroups: number;
+    activeGroups: number;
+    totalErrors: number;
+    byCategory: Record<ErrorCategory, number>;
+    bySeverity: Record<string, number>;
+  } {
+    return this.errorGroupManager.getStats();
   }
 
   /**

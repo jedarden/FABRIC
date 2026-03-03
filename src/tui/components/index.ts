@@ -17,3 +17,6 @@ export type { CommandPaletteOptions, CommandSuggestion } from './CommandPalette.
 
 export { DiffView, parseDiff } from './DiffView.js';
 export type { DiffViewOptions, DiffLine, DiffHunk } from './DiffView.js';
+
+export { SessionReplay } from './SessionReplay.js';
+export type { SessionReplayOptions, ReplaySessionData } from './SessionReplay.js';

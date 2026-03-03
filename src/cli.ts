@@ -6,15 +6,18 @@
  *   fabric tui   - Launch terminal UI
  *   fabric web   - Launch web dashboard
  *   fabric tail  - Raw log tail
+ *   fabric replay - Replay session history
  */
 
 import { Command } from 'commander';
+import * as blessed from 'blessed';
 import { VERSION } from './index.js';
 import { LogTailer, tailLogFile } from './tailer.js';
 import { formatEvent } from './parser.js';
 import { getStore } from './store.js';
 import { createTuiApp } from './tui/index.js';
 import { createWebServer } from './web/index.js';
+import { SessionReplay } from './tui/components/SessionReplay.js';
 
 const program = new Command();
 
@@ -207,6 +210,93 @@ program
       }
     } catch (err) {
       console.error(`Failed to tail: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('replay')
+  .description('Replay worker session history chronologically')
+  .option('-f, --file <path>', 'Log file to replay', '~/.needle/logs/workers.log')
+  .option('-w, --worker <id>', 'Filter by worker ID')
+  .option('-l, --level <level>', 'Filter by log level (debug/info/warn/error)')
+  .option('-s, --speed <speed>', 'Playback speed (0.5/1/2/5/10)', '1')
+  .option('--auto', 'Start playback automatically')
+  .action(async (options) => {
+    const filePath = options.file.replace('~', process.env.HOME || '');
+    const speed = parseFloat(options.speed) as 0.5 | 1 | 2 | 5 | 10;
+
+    console.log(`FABRIC Session Replay - Loading: ${filePath}`);
+
+    const validLevels = ['debug', 'info', 'warn', 'error'];
+    const levelFilter = options.level?.toLowerCase();
+    if (levelFilter && !validLevels.includes(levelFilter)) {
+      console.error(`Invalid level: ${options.level}. Must be one of: ${validLevels.join(', ')}`);
+      process.exit(1);
+    }
+
+    try {
+      // Create blessed screen
+      const screen = blessed.screen({
+        smartCSR: true,
+        title: 'FABRIC Session Replay',
+        fullUnicode: true,
+      });
+
+      // Create session replay component
+      const replay = new SessionReplay({
+        parent: screen,
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        onEvent: (event, index, total) => {
+          // Could emit to store if needed
+        },
+        onStateChange: (state) => {
+          if (state === 'ended') {
+            // Show ended message
+          }
+        },
+      });
+
+      // Set initial speed
+      if ([0.5, 1, 2, 5, 10].includes(speed)) {
+        replay.setSpeed(speed);
+      }
+
+      // Bind global keys
+      screen.key(['q', 'C-c'], () => {
+        replay.destroy();
+        screen.destroy();
+        process.exit(0);
+      });
+
+      screen.key(['escape'], () => {
+        replay.destroy();
+        screen.destroy();
+        process.exit(0);
+      });
+
+      // Build filter
+      const filter: { worker?: string; level?: string } = {};
+      if (options.worker) filter.worker = options.worker;
+      if (levelFilter) filter.level = levelFilter;
+
+      // Load the log file
+      await replay.loadFile(filePath, Object.keys(filter).length > 0 ? filter : undefined);
+
+      // Focus and render
+      replay.focus();
+      screen.render();
+
+      // Auto-start if requested
+      if (options.auto) {
+        setTimeout(() => replay.play(), 500);
+      }
+
+    } catch (err) {
+      console.error(`Failed to start replay: ${(err as Error).message}`);
       process.exit(1);
     }
   });

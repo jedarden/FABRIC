@@ -9,3 +9,4 @@ export * from './utils/colors.js';
 export * from './utils/keyboard.js';
 export * from './utils/stuckDetection.js';
 export * from './utils/costTracking.js';
+export * from './components/index.js';
