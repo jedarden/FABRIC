@@ -1,0 +1,40 @@
+{
+  "name": "@needle/fabric",
+  "version": "0.1.0",
+  "description": "Flow Analysis & Bead Reporting Interface Console - Live display for NEEDLE worker activity",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "fabric": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "tui": "node dist/cli.js tui",
+    "web": "node dist/cli.js web",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "needle",
+    "worker",
+    "monitoring",
+    "tui",
+    "dashboard"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.0.0"
+  }
+}
