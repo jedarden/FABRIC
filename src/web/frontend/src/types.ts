@@ -140,3 +140,37 @@ export interface CollisionAlert {
   collision: FileCollision | BeadCollision | TaskCollision;
   suggestion?: string;
 }
+
+// File Heatmap Types
+export type HeatLevel = 'cold' | 'warm' | 'hot' | 'critical';
+
+export interface WorkerFileContribution {
+  workerId: string;
+  modifications: number;
+  lastModified: number;
+  percentage: number;
+}
+
+export interface FileHeatmapEntry {
+  path: string;
+  modifications: number;
+  heatLevel: HeatLevel;
+  workers: WorkerFileContribution[];
+  firstModified: number;
+  lastModified: number;
+  hasCollision: boolean;
+  activeWorkers: number;
+  avgModificationInterval: number;
+}
+
+export interface FileHeatmapStats {
+  totalFiles: number;
+  totalModifications: number;
+  collisionFiles: number;
+  activeFiles: number;
+  heatDistribution: Record<HeatLevel, number>;
+  mostActiveDirectory: string;
+  avgModificationsPerFile: number;
+}
+
+export type HeatmapSortMode = 'modifications' | 'recent' | 'workers' | 'collisions';

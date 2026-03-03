@@ -3,7 +3,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import CollisionAlert from '../src/components/CollisionAlert';
 import { CollisionAlert as CollisionAlertData } from '../src/types';
@@ -35,6 +35,10 @@ describe('CollisionAlert', () => {
     mockOnAcknowledge.mockClear();
     mockOnAcknowledgeAll.mockClear();
     mockOnClose.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   describe('rendering', () => {

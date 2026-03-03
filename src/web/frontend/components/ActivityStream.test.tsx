@@ -3,8 +3,8 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, cleanup } from '@testing-library/react';
 import ActivityStream from '../src/components/ActivityStream';
 import { LogEvent } from '../src/types';
 
@@ -30,6 +30,10 @@ describe('ActivityStream', () => {
 
   beforeEach(() => {
     mockScrollTo.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   describe('rendering', () => {
