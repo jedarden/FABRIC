@@ -502,6 +502,326 @@ describe('Web Server API Endpoints', () => {
       expect(server.getPort).toBeDefined();
       expect(server.getPort()).toBe(port);
     });
+
+    it('should accept WebSocket connections', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      const openPromise = new Promise<void>((resolve) => {
+        ws.on('open', () => {
+          ws.close();
+          resolve();
+        });
+      });
+
+      await openPromise;
+    });
+
+    it('should send init message on connection', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      const initMessage = await new Promise<any>((resolve) => {
+        ws.on('message', (data) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'init') {
+            ws.close();
+            resolve(msg);
+          }
+        });
+      });
+
+      expect(initMessage.type).toBe('init');
+      expect(initMessage.data).toHaveProperty('workers');
+      expect(initMessage.data).toHaveProperty('recentEvents');
+      expect(initMessage.data).toHaveProperty('collisions');
+      expect(Array.isArray(initMessage.data.workers)).toBe(true);
+      expect(Array.isArray(initMessage.data.recentEvents)).toBe(true);
+      expect(Array.isArray(initMessage.data.collisions)).toBe(true);
+    });
+
+    it('should include current state in init message', async () => {
+      // Add some events first
+      store.add(createEvent({ worker: 'w1', msg: 'Starting work' }));
+      store.add(createEvent({ worker: 'w2', msg: 'Another event' }));
+
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      const initMessage = await new Promise<any>((resolve) => {
+        ws.on('message', (data) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'init') {
+            ws.close();
+            resolve(msg);
+          }
+        });
+      });
+
+      expect(initMessage.data.workers).toHaveLength(2);
+      const workerIds = initMessage.data.workers.map((w: { id: string }) => w.id).sort();
+      expect(workerIds).toEqual(['w1', 'w2']);
+    });
+  });
+
+  describe('WebSocket broadcast', () => {
+    it('should broadcast events to connected clients', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      // Set up message listener before connection (to catch init)
+      const messagePromise = new Promise<any>((resolve) => {
+        ws.on('message', (data) => {
+          const msg = JSON.parse(data.toString());
+          // Skip init messages, wait for event
+          if (msg.type === 'event') {
+            resolve(msg);
+          }
+        });
+      });
+
+      // Wait for connection
+      await new Promise<void>((resolve) => {
+        ws.on('open', resolve);
+      });
+
+      // Small delay to ensure connection is established and init sent
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Broadcast an event
+      const testEvent = createEvent({ worker: 'w-broadcast', msg: 'Broadcast test' });
+      server.broadcast(testEvent);
+
+      const message = await messagePromise;
+      expect(message.type).toBe('event');
+      expect(message.data.worker).toBe('w-broadcast');
+      expect(message.data.msg).toBe('Broadcast test');
+
+      ws.close();
+    });
+
+    it('should broadcast to multiple clients', async () => {
+      const WebSocket = (await import('ws')).default;
+      const clients: any[] = [];
+      const messagePromises: Promise<any>[] = [];
+
+      // Connect multiple clients with listeners set up first
+      for (let i = 0; i < 3; i++) {
+        const ws = new WebSocket(`ws://localhost:${port}`);
+
+        // Set up listener before connection
+        const msgPromise = new Promise<any>((resolve) => {
+          ws.on('message', (data: Buffer) => {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === 'event') {
+              resolve(msg);
+            }
+          });
+        });
+        messagePromises.push(msgPromise);
+
+        await new Promise<void>((resolve) => {
+          ws.on('open', resolve);
+        });
+        clients.push(ws);
+      }
+
+      // Small delay to ensure all connections are ready
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Broadcast an event
+      const testEvent = createEvent({ worker: 'w-multi', msg: 'Multi-client broadcast' });
+      server.broadcast(testEvent);
+
+      // All clients should receive the message
+      const messages = await Promise.all(messagePromises);
+      expect(messages).toHaveLength(3);
+      messages.forEach(msg => {
+        expect(msg.type).toBe('event');
+        expect(msg.data.worker).toBe('w-multi');
+      });
+
+      // Cleanup
+      clients.forEach(ws => ws.close());
+    });
+
+    it('should not broadcast to closed clients', async () => {
+      const WebSocket = (await import('ws')).default;
+
+      // Connect and immediately close one client
+      const closedWs = new WebSocket(`ws://localhost:${port}`);
+      await new Promise<void>((resolve) => {
+        closedWs.on('open', () => {
+          closedWs.close();
+          resolve();
+        });
+      });
+
+      // Connect another client that stays open (set up listener first)
+      const openWs = new WebSocket(`ws://localhost:${port}`);
+      const messagePromise = new Promise<any>((resolve) => {
+        openWs.on('message', (data: Buffer) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'event') {
+            resolve(msg);
+          }
+        });
+      });
+
+      await new Promise<void>((resolve) => {
+        openWs.on('open', resolve);
+      });
+
+      // Wait for close to complete
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+      const testEvent = createEvent({ worker: 'w-after-close', msg: 'After close' });
+      server.broadcast(testEvent);
+
+      const message = await messagePromise;
+      expect(message.data.worker).toBe('w-after-close');
+
+      openWs.close();
+    });
+  });
+
+  describe('WebSocket broadcastCollisions', () => {
+    it('should broadcast collision updates', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      // Set up listener for collision message before connection
+      const messagePromise = new Promise<any>((resolve) => {
+        ws.on('message', (data: Buffer) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'collision') {
+            resolve(msg);
+          }
+        });
+      });
+
+      // Wait for connection
+      await new Promise<void>((resolve) => {
+        ws.on('open', resolve);
+      });
+
+      // Small delay to ensure connection is ready
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Create a collision
+      const ts = Date.now();
+      store.add(createEvent({ worker: 'w1', path: '/src/collision.ts', tool: 'Edit', ts }));
+      store.add(createEvent({ worker: 'w2', path: '/src/collision.ts', tool: 'Edit', ts: ts + 100 }));
+
+      server.broadcastCollisions();
+
+      const message = await messagePromise;
+      expect(message.type).toBe('collision');
+      expect(message.data).toHaveProperty('collisions');
+      expect(message.data).toHaveProperty('workers');
+      expect(Array.isArray(message.data.collisions)).toBe(true);
+
+      ws.close();
+    });
+
+    it('should include worker data in collision broadcast', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      // Set up listener before connection
+      const messagePromise = new Promise<any>((resolve) => {
+        ws.on('message', (data: Buffer) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'collision') {
+            resolve(msg);
+          }
+        });
+      });
+
+      // Wait for connection
+      await new Promise<void>((resolve) => {
+        ws.on('open', resolve);
+      });
+
+      // Small delay to ensure connection is ready
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Add workers
+      store.add(createEvent({ worker: 'w-collision-1', msg: 'Working' }));
+      store.add(createEvent({ worker: 'w-collision-2', msg: 'Working' }));
+
+      server.broadcastCollisions();
+
+      const message = await messagePromise;
+      expect(message.data.workers).toBeDefined();
+      expect(Array.isArray(message.data.workers)).toBe(true);
+
+      ws.close();
+    });
+  });
+
+  describe('WebSocket client lifecycle', () => {
+    it('should handle client disconnect gracefully', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      await new Promise<void>((resolve) => {
+        ws.on('open', resolve);
+      });
+
+      // Close the connection
+      const closePromise = new Promise<void>((resolve) => {
+        ws.on('close', resolve);
+      });
+
+      ws.close();
+      await closePromise;
+
+      // Server should still work after client disconnect
+      const response = await fetchApi('/api/health');
+      expect(response.status).toBe(200);
+    });
+
+    it('should handle multiple connections and disconnections', async () => {
+      const WebSocket = (await import('ws')).default;
+
+      // Connect and disconnect multiple clients rapidly
+      for (let i = 0; i < 5; i++) {
+        const ws = new WebSocket(`ws://localhost:${port}`);
+        await new Promise<void>((resolve) => {
+          ws.on('open', () => {
+            setTimeout(() => {
+              ws.close();
+              resolve();
+            }, 50);
+          });
+        });
+      }
+
+      // Server should still be responsive
+      const response = await fetchApi('/api/health');
+      expect(response.status).toBe(200);
+    });
+
+    it('should handle WebSocket errors gracefully', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      await new Promise<void>((resolve) => {
+        ws.on('open', resolve);
+      });
+
+      // Simulate an error by sending invalid data (this should not crash the server)
+      // The server handles errors in the ws.on('error') handler
+      ws.terminate();
+
+      // Wait a bit for cleanup
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Server should still work
+      const response = await fetchApi('/api/health');
+      expect(response.status).toBe(200);
+    });
   });
 
   describe('Error handling', () => {
