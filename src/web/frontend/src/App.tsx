@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { LogEvent, WorkerInfo, WebSocketMessage, CollisionAlert as CollisionAlertData } from './types';
+import { LogEvent, WorkerInfo, WebSocketMessage, CollisionAlert as CollisionAlertData, RecoverySuggestion } from './types';
 import WorkerGrid from './components/WorkerGrid';
 import ActivityStream from './components/ActivityStream';
 import WorkerDetail from './components/WorkerDetail';
 import CollisionAlert from './components/CollisionAlert';
 import FileHeatmap from './components/FileHeatmap';
 import DependencyDag from './components/DependencyDag';
+import RecoveryPanel from './components/RecoveryPanel';
 
 const App: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
@@ -16,6 +17,8 @@ const App: React.FC = () => {
   const [showCollisionPanel, setShowCollisionPanel] = useState(false);
   const [showFileHeatmap, setShowFileHeatmap] = useState(false);
   const [showDependencyDag, setShowDependencyDag] = useState(false);
+  const [showRecoveryPanel, setShowRecoveryPanel] = useState(false);
+  const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
 
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
     if (message.type === 'init') {
