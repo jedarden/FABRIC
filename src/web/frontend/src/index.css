@@ -74,6 +74,32 @@ body {
   font-size: 0.875rem;
 }
 
+.recovery-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: rgba(233, 69, 96, 0.2);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 0.375rem 0.625rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.recovery-toggle:hover {
+  background: rgba(233, 69, 96, 0.3);
+}
+
+.recovery-toggle-icon {
+  font-size: 0.875rem;
+}
+
+.recovery-toggle-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .dag-toggle-label {
   font-size: 0.75rem;
   font-weight: 600;

@@ -132,6 +132,14 @@ const App: React.FC = () => {
             <span className="dag-toggle-label">DAG</span>
           </button>
           <button
+            className="recovery-toggle"
+            onClick={() => setShowRecoveryPanel(!showRecoveryPanel)}
+            title="View recovery suggestions"
+          >
+            <span className="recovery-toggle-icon">💊</span>
+            <span className="recovery-toggle-label">Recovery</span>
+          </button>
+          <button
             className="file-heatmap-toggle"
             onClick={() => setShowFileHeatmap(!showFileHeatmap)}
             title="View file heatmap"
@@ -197,6 +205,14 @@ const App: React.FC = () => {
           <DependencyDag
             visible={showDependencyDag}
             onClose={() => setShowDependencyDag(false)}
+          />
+        )}
+
+        {showRecoveryPanel && (
+          <RecoveryPanel
+            suggestions={recoverySuggestions}
+            visible={showRecoveryPanel}
+            onClose={() => setShowRecoveryPanel(false)}
           />
         )}
       </main>
