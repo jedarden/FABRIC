@@ -88,3 +88,13 @@ export interface CrossReferencePath {
   length: number;
   description: string;
 }
+
+// Session Replay Types
+export type ReplaySpeed = 0.5 | 1 | 2 | 5 | 10;
+export type ReplayState = 'idle' | 'playing' | 'paused' | 'ended';
+
+export interface ReplayProgress {
+  current: number;
+  total: number;
+  percent: number;
+}

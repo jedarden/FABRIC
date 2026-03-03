@@ -1,6 +1,92 @@
 {
-  "generated_at": "2026-03-03T13:26:26Z",
-  "source": "br-list-refresh",
-  "total_available": 0,
-  "beads": []
+  "generated_at": "2026-03-03T14:29:59Z",
+  "source": "manual-refresh",
+  "total_available": 17,
+  "beads": [
+    {
+      "id": "bd-129",
+      "title": "Add blessed TUI tests for ActivityStream component",
+      "priority": 3
+    },
+    {
+      "id": "bd-1cc",
+      "title": "Port FileHeatmap component to web dashboard",
+      "priority": 3
+    },
+    {
+      "id": "bd-1fe",
+      "title": "Add RecoveryPanel component to web frontend",
+      "priority": 2
+    },
+    {
+      "id": "bd-1fz",
+      "title": "Add React Testing Library tests for WorkerGrid component",
+      "priority": 2
+    },
+    {
+      "id": "bd-1mh",
+      "title": "Add DependencyDag component to web frontend",
+      "priority": 2
+    },
+    {
+      "id": "bd-2ar",
+      "title": "Add blessed TUI tests for app.ts main TUI class",
+      "priority": 3
+    },
+    {
+      "id": "bd-2uo",
+      "title": "Add Vitest tests for web server API endpoints",
+      "priority": 2
+    },
+    {
+      "id": "bd-2vc",
+      "title": "Add FileHeatmap component to web frontend",
+      "priority": 2
+    },
+    {
+      "id": "bd-2yr",
+      "title": "Add TUI app integration tests",
+      "priority": 3
+    },
+    {
+      "id": "bd-38s",
+      "title": "Port CollisionAlert component to web dashboard",
+      "priority": 2
+    },
+    {
+      "id": "bd-396",
+      "title": "Port DependencyDag component to web dashboard",
+      "priority": 3
+    },
+    {
+      "id": "bd-3fs",
+      "title": "Add CollisionAlert component to web frontend",
+      "priority": 2
+    },
+    {
+      "id": "bd-5d8",
+      "title": "Add SessionReplay component to web frontend",
+      "priority": 2
+    },
+    {
+      "id": "bd-6dk",
+      "title": "Update ROADMAP.md to reflect completed Phase 3",
+      "priority": 3
+    },
+    {
+      "id": "bd-ak8",
+      "title": "Add web server unit tests",
+      "priority": 2
+    },
+    {
+      "id": "bd-b0c",
+      "title": "Add WorkerDetail component to web frontend",
+      "priority": 2
+    },
+    {
+      "id": "bd-noj",
+      "title": "Add React Testing Library tests for ActivityStream component",
+      "priority": 2
+    }
+  ]
 }
