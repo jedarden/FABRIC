@@ -7,7 +7,7 @@ This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead R
 ## Current Status
 
 **Completed:**
-- Phase 1: Core Infrastructure
+- Phase 1: Core Infrastructure ✅ COMPLETE
   - types.ts - Core type definitions
   - parser.ts - Log line parsing
   - store.ts - In-memory event store
@@ -27,8 +27,17 @@ This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead R
   - P4: Command Palette
   - P4: Cost Tracking (src/tui/utils/costTracking.ts)
 
+- Phase 3: Web Dashboard ✅ COMPLETE (2026-03-03)
+  - P1: Express HTTP server with static file serving (src/web/server.ts)
+  - P1: WebSocket server for real-time updates
+  - P1: React frontend scaffold with Vite (src/web/frontend/)
+  - P1: WorkerGrid component for web
+  - P1: ActivityStream component for web
+  - P1: Web command added to CLI
+  - Dark theme styling
+
 **In Progress:**
-- Phase 3: Web Dashboard
+- Phase 3.5: Web Frontend Parity (tests & enhancements)
 
 ## Phase 2: TUI Implementation
 
@@ -75,16 +84,33 @@ src/
 └── ...
 ```
 
-## Phase 3: Web Dashboard
+## Phase 3: Web Dashboard ✅ COMPLETE
 
-After Phase 2 is complete:
+| Priority | Feature | Description | Status |
+|----------|---------|-------------|--------|
+| P1 | **HTTP Server** | Express server with static file serving | ✅ Done |
+| P1 | **WebSocket** | Real-time updates via ws | ✅ Done |
+| P1 | **React Frontend** | Browser UI with Vite build | ✅ Done |
+| P1 | **Worker Grid** | Worker cards with status | ✅ Done |
+| P1 | **Activity Stream** | Real-time event feed | ✅ Done |
+| P1 | **CLI Web Command** | `fabric web` starts server | ✅ Done |
 
-| Priority | Feature | Description |
-|----------|---------|-------------|
-| P1 | **HTTP Server** | Express/Fastify server |
-| P1 | **WebSocket** | Real-time updates |
-| P1 | **React Frontend** | Browser UI components |
-| P2 | **Timeline Viz** | Worker activity timeline |
+**Implementation Files:**
+- `src/web/server.ts` - Express + WebSocket server
+- `src/web/frontend/src/App.tsx` - Main React app with WebSocket
+- `src/web/frontend/src/components/WorkerGrid.tsx` - Worker cards
+- `src/web/frontend/src/components/ActivityStream.tsx` - Event stream
+- `src/web/frontend/src/index.css` - Dark theme styling
+- `vite.config.ts` - Build configuration
+
+## Phase 3.5: Web Frontend Parity (Remaining Work)
+
+| Priority | Feature | Description | Bead |
+|----------|---------|-------------|------|
+| P2 | Parser Tests | Unit tests for parser.ts | bd-1a2 |
+| P2 | Store Tests | Unit tests for store.ts | bd-2en |
+| P2 | Worker Overview Cards | Enhanced worker cards component | bd-31n |
+| P2 | Activity Feed Filtering | Filter activity feed by worker/type | bd-1wo |
 
 ## Intelligence Features (Phase 4+)
 
