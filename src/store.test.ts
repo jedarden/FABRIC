@@ -303,6 +303,220 @@ describe('InMemoryEventStore', () => {
       expect(store.size).toBe(2);
     });
   });
+
+  describe('collision detection', () => {
+    it('should detect collision when multiple workers modify same file', () => {
+      const ts = Date.now();
+      const path = '/src/test.ts';
+
+      // Worker 1 modifies file
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Edit',
+        ts
+      }));
+
+      // Worker 2 modifies same file within collision window
+      store.add(createEvent({
+        worker: 'w2',
+        path,
+        tool: 'Edit',
+        ts: ts + 1000 // Within 5 second window
+      }));
+
+      const collisions = store.getCollisions();
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].path).toBe(path);
+      expect(collisions[0].workers).toContain('w1');
+      expect(collisions[0].workers).toContain('w2');
+      expect(collisions[0].isActive).toBe(true);
+    });
+
+    it('should not detect collision for events outside time window', () => {
+      const ts = Date.now();
+      const path = '/src/test.ts';
+
+      // Worker 1 modifies file
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Edit',
+        ts
+      }));
+
+      // Worker 2 modifies same file after collision window
+      store.add(createEvent({
+        worker: 'w2',
+        path,
+        tool: 'Edit',
+        ts: ts + 10000 // Outside 5 second window
+      }));
+
+      const collisions = store.getCollisions();
+      expect(collisions).toHaveLength(0);
+    });
+
+    it('should not detect collision for different files', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/src/a.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path: '/src/b.ts',
+        tool: 'Edit',
+        ts: ts + 1000
+      }));
+
+      const collisions = store.getCollisions();
+      expect(collisions).toHaveLength(0);
+    });
+
+    it('should not detect collision for same worker modifying same file', () => {
+      const ts = Date.now();
+      const path = '/src/test.ts';
+
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Write',
+        ts: ts + 1000
+      }));
+
+      const collisions = store.getCollisions();
+      expect(collisions).toHaveLength(0);
+    });
+
+    it('should only detect collisions for file modification tools', () => {
+      const ts = Date.now();
+      const path = '/src/test.ts';
+
+      // Read tool - not a modification
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Read',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path,
+        tool: 'Read',
+        ts: ts + 1000
+      }));
+
+      const collisions = store.getCollisions();
+      expect(collisions).toHaveLength(0);
+    });
+
+    it('should detect collisions for Edit, Write, and NotebookEdit tools', () => {
+      const ts = Date.now();
+      const path = '/src/test.ts';
+
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path,
+        tool: 'Write',
+        ts: ts + 1000
+      }));
+
+      store.add(createEvent({
+        worker: 'w3',
+        path,
+        tool: 'NotebookEdit',
+        ts: ts + 2000
+      }));
+
+      const collisions = store.getCollisions();
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].workers).toHaveLength(3);
+    });
+
+    it('should set hasCollision flag on worker info', () => {
+      const ts = Date.now();
+      const path = '/src/test.ts';
+
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Edit',
+        ts
+      }));
+
+      expect(store.getWorker('w1')?.hasCollision).toBe(false);
+
+      store.add(createEvent({
+        worker: 'w2',
+        path,
+        tool: 'Edit',
+        ts: ts + 1000
+      }));
+
+      expect(store.getWorker('w1')?.hasCollision).toBe(true);
+      expect(store.getWorker('w2')?.hasCollision).toBe(true);
+    });
+
+    it('should track active files for workers', () => {
+      const ts = Date.now();
+      const path = '/src/test.ts';
+
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Edit',
+        ts
+      }));
+
+      const worker = store.getWorker('w1');
+      expect(worker?.activeFiles).toContain(path);
+    });
+
+    it('should get collisions for specific worker', () => {
+      const ts = Date.now();
+      const path = '/src/test.ts';
+
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path,
+        tool: 'Edit',
+        ts: ts + 1000
+      }));
+
+      const worker1Collisions = store.getWorkerCollisions('w1');
+      expect(worker1Collisions).toHaveLength(1);
+
+      const worker3Collisions = store.getWorkerCollisions('w3');
+      expect(worker3Collisions).toHaveLength(0);
+    });
+  });
 });
 
 describe('getStore and resetStore', () => {
