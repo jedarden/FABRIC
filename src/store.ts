@@ -23,8 +23,12 @@ import {
   BeadCollision,
   TaskCollision,
   CollisionAlert,
+  RecoverySuggestion,
+  RecoveryOptions,
+  RecoveryStats,
 } from './types.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
+import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -66,14 +70,15 @@ export class InMemoryEventStore implements EventStore {
   private taskCollisions: Map<string, TaskCollision> = new Map();
   private fileModifications: Map<string, FileModificationTracker> = new Map();
   private errorGroupManager: ErrorGroupManager;
+  private recoveryManager: RecoveryManager;
   private maxEvents: number;
   private alertCounter = 0;
 
   constructor(maxEvents: number = 10000) {
     this.maxEvents = maxEvents;
     this.errorGroupManager = new ErrorGroupManager();
+    this.recoveryManager = getRecoveryManager();
   }
-}
 
   /**
    * Add an event to the store
@@ -993,6 +998,56 @@ export class InMemoryEventStore implements EventStore {
       workersWithCollisions: workers.filter(w => w.hasCollision).length,
       criticalAlerts: this.generateCollisionAlerts().filter(a => a.severity === 'error' || a.severity === 'critical').length,
     };
+  }
+
+  // ============================================
+  // Recovery Suggestion Methods
+  // ============================================
+
+  /**
+   * Get recovery suggestions for all active errors
+   */
+  getRecoverySuggestions(options?: RecoveryOptions): RecoverySuggestion[] {
+    const errorGroups = this.getActiveErrorGroups();
+    return this.recoveryManager.generateAllSuggestions(errorGroups, options);
+  }
+
+  /**
+   * Get recovery suggestions for a specific worker
+   */
+  getWorkerRecoverySuggestions(workerId: string): RecoverySuggestion[] {
+    const errorGroups = this.getWorkerErrorGroups(workerId);
+    return this.recoveryManager.generateAllSuggestions(errorGroups, { workerId });
+  }
+
+  /**
+   * Get recovery suggestions for a specific error group
+   */
+  getErrorRecoverySuggestions(errorGroupId: string): RecoverySuggestion | null {
+    const errorGroup = this.errorGroupManager.getGroup(errorGroupId);
+    if (!errorGroup) return null;
+    return this.recoveryManager.generateSuggestion(errorGroup);
+  }
+
+  /**
+   * Get recovery statistics
+   */
+  getRecoveryStats(): RecoveryStats {
+    return this.recoveryManager.getStats();
+  }
+
+  /**
+   * Get all available recovery playbooks
+   */
+  getRecoveryPlaybooks() {
+    return this.recoveryManager.getPlaybooks();
+  }
+
+  /**
+   * Clear all recovery suggestions
+   */
+  clearRecoverySuggestions(): void {
+    this.recoveryManager.clear();
   }
 }
 

@@ -792,3 +792,183 @@ export interface CrossReferencePath {
   /** Path description */
   description: string;
 }
+
+// ============================================
+// Recovery Playbook Types
+// ============================================
+
+/**
+ * Priority level for recovery actions
+ */
+export type RecoveryPriority = 'immediate' | 'high' | 'normal' | 'low';
+
+/**
+ * Type of recovery action
+ */
+export type RecoveryActionType =
+  | 'retry'           // Simple retry the operation
+  | 'backoff'         // Retry with exponential backoff
+  | 'alternative'     // Use alternative approach
+  | 'escalate'        // Escalate to human
+  | 'skip'            // Skip and continue
+  | 'fix_config'      // Fix configuration
+  | 'install_dep'     // Install missing dependency
+  | 'fix_permissions' // Fix file permissions
+  | 'cleanup'         // Clean up resources
+  | 'restart'         // Restart service/process
+  | 'investigate';    // Requires further investigation
+
+/**
+ * A single recovery action step
+ */
+export interface RecoveryAction {
+  /** Unique action ID */
+  id: string;
+
+  /** Action type */
+  type: RecoveryActionType;
+
+  /** Human-readable title */
+  title: string;
+
+  /** Detailed description of the action */
+  description: string;
+
+  /** Priority for ordering actions */
+  priority: RecoveryPriority;
+
+  /** Whether this action can be automated */
+  automated: boolean;
+
+  /** Command or code snippet to execute (if applicable) */
+  command?: string;
+
+  /** Expected outcome */
+  expectedOutcome?: string;
+
+  /** Prerequisites before this action */
+  prerequisites?: string[];
+
+  /** Risk level of this action */
+  riskLevel?: 'safe' | 'moderate' | 'risky';
+
+  /** Estimated time to complete (seconds) */
+  estimatedTime?: number;
+}
+
+/**
+ * A recovery playbook entry mapping error patterns to actions
+ */
+export interface RecoveryPlaybookEntry {
+  /** Unique playbook ID */
+  id: string;
+
+  /** Error category this applies to */
+  category: ErrorCategory;
+
+  /** Title for this recovery playbook */
+  title: string;
+
+  /** Description of the error pattern */
+  description: string;
+
+  /** Pattern to match error messages */
+  patterns: RegExp[];
+
+  /** Recovery actions in order */
+  actions: RecoveryAction[];
+
+  /** When this playbook was created */
+  createdAt: number;
+
+  /** When this playbook was last updated */
+  updatedAt: number;
+
+  /** Tags for categorization */
+  tags: string[];
+}
+
+/**
+ * A specific recovery suggestion for an error
+ */
+export interface RecoverySuggestion {
+  /** Unique suggestion ID */
+  id: string;
+
+  /** The error group this suggestion is for */
+  errorGroupId: string;
+
+  /** The playbook entry this came from (if any) */
+  playbookId?: string;
+
+  /** Error category */
+  category: ErrorCategory;
+
+  /** Title for the suggestion */
+  title: string;
+
+  /** Summary of the error */
+  errorSummary: string;
+
+  /** Recommended actions in order */
+  actions: RecoveryAction[];
+
+  /** When this suggestion was generated */
+  generatedAt: number;
+
+  /** Confidence level (0-1) */
+  confidence: number;
+
+  /** Related workers affected */
+  affectedWorkers: string[];
+
+  /** Similar past errors (if any) */
+  relatedErrors?: string[];
+
+  /** Whether this is still relevant */
+  isActive: boolean;
+}
+
+/**
+ * Options for recovery suggestion generation
+ */
+export interface RecoveryOptions {
+  /** Maximum actions to include per suggestion */
+  maxActions?: number;
+
+  /** Only include automated actions */
+  automatedOnly?: boolean;
+
+  /** Minimum confidence threshold */
+  minConfidence?: number;
+
+  /** Filter by category */
+  category?: ErrorCategory;
+
+  /** Filter by worker */
+  workerId?: string;
+}
+
+/**
+ * Statistics about recovery suggestions
+ */
+export interface RecoveryStats {
+  /** Total suggestions generated */
+  totalSuggestions: number;
+
+  /** Active suggestions */
+  activeSuggestions: number;
+
+  /** Suggestions by category */
+  byCategory: Record<ErrorCategory, number>;
+
+  /** Automated vs manual actions */
+  automatedActions: number;
+  manualActions: number;
+
+  /** Average confidence */
+  avgConfidence: number;
+
+  /** Most common recovery action types */
+  topActionTypes: Array<{ type: RecoveryActionType; count: number }>;
+}

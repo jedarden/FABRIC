@@ -14,6 +14,7 @@ export const colors = {
   debug: 'gray',
   info: 'white',
   warn: 'yellow',
+  warning: 'yellow',
   error_level: 'red',
 
   // UI colors
@@ -21,6 +22,8 @@ export const colors = {
   header: 'cyan',
   focus: 'green',
   muted: 'gray',
+  text: 'white',
+  selected: 'green',
 
   // Background colors
   bgPanel: 'black',
@@ -31,6 +34,20 @@ export const colors = {
   heatWarm: 'yellow',
   heatHot: 'magenta',
   heatCritical: 'red',
+
+  // Named colors (for components that reference by name)
+  green: 'green',
+  yellow: 'yellow',
+  blue: 'blue',
+  red: 'red',
+  cyan: 'cyan',
+  magenta: 'magenta',
+  orange: 'orange',
+  purple: 'magenta',
+  teal: 'cyan',
+  white: 'white',
+  black: 'black',
+  gray: 'gray',
 } as const;
 
 export type ColorName = keyof typeof colors;

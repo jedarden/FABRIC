@@ -26,3 +26,7 @@ export type { FileHeatmapOptions, HeatmapSortMode } from './FileHeatmap.js';
 
 export { DependencyDag } from './DependencyDag.js';
 export type { DependencyDagOptions } from './DependencyDag.js';
+
+export { RecoveryPanel } from './RecoveryPanel.js';
+export type { RecoveryPanelOptions } from './RecoveryPanel.js';
+export { formatRecoveryForConsole, getRecoverySummary } from './RecoveryPanel.js';

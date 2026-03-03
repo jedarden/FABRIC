@@ -122,7 +122,7 @@ export class CrossReferencePanel {
     this.list.key(['escape'], () => {
       if (this.viewMode !== 'links') {
         this.viewMode = 'links';
-        this.render();
+        this.refresh();
       }
     });
   }
@@ -312,7 +312,7 @@ export class CrossReferencePanel {
    * Navigate to the selected link's target entity
    */
   private navigateSelected(): void {
-    const selected = this.list.selected;
+    const selected = (this.list as any).selected;
     if (selected < 0 || selected >= this.links.length) return;
 
     const linkDisplay = this.links[selected];
