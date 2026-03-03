@@ -95,8 +95,8 @@ export class SessionReplay extends EventEmitter {
       height: 1,
       content: this.formatTimeline(),
       style: {
-        fg: colors.text,
-        bg: colors.background,
+        fg: colors.info,
+        bg: colors.bgPanel,
       },
     });
 
@@ -113,7 +113,7 @@ export class SessionReplay extends EventEmitter {
       vi: true,
       mouse: true,
       style: {
-        fg: colors.text,
+        fg: colors.info,
       },
     });
 

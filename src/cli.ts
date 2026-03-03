@@ -18,6 +18,7 @@ import { getStore } from './store.js';
 import { createTuiApp } from './tui/index.js';
 import { createWebServer } from './web/index.js';
 import { SessionReplay } from './tui/components/SessionReplay.js';
+import type { LogLevel, EventFilter } from './types.js';
 
 const program = new Command();
 
@@ -279,9 +280,9 @@ program
       });
 
       // Build filter
-      const filter: { worker?: string; level?: string } = {};
+      const filter: EventFilter = {};
       if (options.worker) filter.worker = options.worker;
-      if (levelFilter) filter.level = levelFilter;
+      if (levelFilter) filter.level = levelFilter as LogLevel;
 
       // Load the log file
       await replay.loadFile(filePath, Object.keys(filter).length > 0 ? filter : undefined);

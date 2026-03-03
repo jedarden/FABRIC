@@ -275,3 +275,107 @@ export interface ReplayControls {
   /** Stop and reset replay */
   reset(): void;
 }
+
+// ============================================
+// File Heatmap Types
+// ============================================
+
+/**
+ * Heat level for a file based on modification frequency
+ */
+export type HeatLevel = 'cold' | 'warm' | 'hot' | 'critical';
+
+/**
+ * Worker contribution to a file's modification history
+ */
+export interface WorkerFileContribution {
+  /** Worker ID */
+  workerId: string;
+
+  /** Number of modifications by this worker */
+  modifications: number;
+
+  /** Last modification timestamp */
+  lastModified: number;
+
+  /** Percentage of total modifications (0-100) */
+  percentage: number;
+}
+
+/**
+ * Single file entry in the heatmap
+ */
+export interface FileHeatmapEntry {
+  /** File path */
+  path: string;
+
+  /** Total modification count */
+  modifications: number;
+
+  /** Heat level based on frequency */
+  heatLevel: HeatLevel;
+
+  /** Workers who have modified this file */
+  workers: WorkerFileContribution[];
+
+  /** First modification timestamp */
+  firstModified: number;
+
+  /** Most recent modification timestamp */
+  lastModified: number;
+
+  /** Whether this file is currently being modified by multiple workers */
+  hasCollision: boolean;
+
+  /** Number of workers currently active on this file */
+  activeWorkers: number;
+
+  /** Average time between modifications (ms) */
+  avgModificationInterval: number;
+}
+
+/**
+ * Options for heatmap generation
+ */
+export interface HeatmapOptions {
+  /** Minimum modifications to be included in heatmap */
+  minModifications?: number;
+
+  /** Maximum entries to return */
+  maxEntries?: number;
+
+  /** Sort by: 'modifications' | 'recent' | 'workers' | 'collisions' */
+  sortBy?: 'modifications' | 'recent' | 'workers' | 'collisions';
+
+  /** Filter by directory prefix */
+  directoryFilter?: string;
+
+  /** Only show files with collisions */
+  collisionsOnly?: boolean;
+}
+
+/**
+ * Statistics for the entire file heatmap
+ */
+export interface FileHeatmapStats {
+  /** Total files being tracked */
+  totalFiles: number;
+
+  /** Total modifications across all files */
+  totalModifications: number;
+
+  /** Files with collisions */
+  collisionFiles: number;
+
+  /** Files currently being modified */
+  activeFiles: number;
+
+  /** Heat level distribution */
+  heatDistribution: Record<HeatLevel, number>;
+
+  /** Most active directory */
+  mostActiveDirectory: string;
+
+  /** Average modifications per file */
+  avgModificationsPerFile: number;
+}

@@ -6,7 +6,7 @@
  * Includes error grouping for smart error clustering.
  */
 
-import { LogEvent, WorkerInfo, WorkerStatus, EventFilter, EventStore, FileCollision, ErrorGroup, ErrorCategory } from './types.js';
+import { LogEvent, WorkerInfo, WorkerStatus, EventFilter, EventStore, FileCollision, ErrorGroup, ErrorCategory, FileHeatmapEntry, FileHeatmapStats, HeatLevel, WorkerFileContribution, HeatmapOptions } from './types.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 
 /** Time window (in ms) to consider events as concurrent */
@@ -14,6 +14,26 @@ const COLLISION_WINDOW_MS = 5000;
 
 /** File operations that indicate modification */
 const FILE_MODIFICATION_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
+
+/** Heat level thresholds (modifications count) */
+const HEAT_THRESHOLDS = {
+  cold: 1,      // 1-2 modifications
+  warm: 3,      // 3-5 modifications
+  hot: 6,       // 6-10 modifications
+  critical: 11, // 11+ modifications
+};
+
+/**
+ * Internal tracking structure for file modifications
+ */
+interface FileModificationTracker {
+  path: string;
+  modifications: number;
+  firstModified: number;
+  lastModified: number;
+  workerModifications: Map<string, { count: number; lastModified: number }>;
+  timestamps: number[];
+}
 
 export class InMemoryEventStore implements EventStore {
   private events: LogEvent[] = [];
