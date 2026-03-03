@@ -174,3 +174,66 @@ export interface FileHeatmapStats {
 }
 
 export type HeatmapSortMode = 'modifications' | 'recent' | 'workers' | 'collisions';
+
+// Dependency DAG Types
+export type BeadStatus = 'open' | 'in_progress' | 'blocked' | 'completed' | 'closed' | 'deferred';
+
+export interface BeadNode {
+  id: string;
+  title: string;
+  status: BeadStatus;
+  priority: number;
+  depth: number;
+  dependentCount: number;
+  dependencyCount: number;
+  isCriticalPath: boolean;
+  estimatedEffort?: number;
+}
+
+export interface DependencyEdge {
+  from: string;
+  to: string;
+  isCritical: boolean;
+}
+
+export interface DagComponent {
+  nodes: BeadNode[];
+  edges: DependencyEdge[];
+  roots: string[];
+  hasCycle: boolean;
+  criticalPath: string[];
+  maxDepth: number;
+}
+
+export interface DependencyGraph {
+  components: DagComponent[];
+  totalNodes: number;
+  totalEdges: number;
+  totalComponents: number;
+  globalCriticalPath: string[];
+  generatedAt: number;
+}
+
+export interface DagStats {
+  totalBeads: number;
+  blockedCount: number;
+  readyCount: number;
+  avgDependencies: number;
+  avgDependents: number;
+  maxDepth: number;
+  cycleCount: number;
+  criticalPathLength: number;
+  criticalPathBeads: number;
+}
+
+export interface DagOptions {
+  status?: BeadStatus | 'all';
+  minPriority?: number;
+  maxPriority?: number;
+  criticalOnly?: boolean;
+  maxDepth?: number;
+  sortBy?: 'priority' | 'depth' | 'dependents';
+  includeClosed?: boolean;
+}
+
+export type DagViewMode = 'tree' | 'blockers' | 'ready' | 'stats';

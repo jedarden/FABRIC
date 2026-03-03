@@ -10,9 +10,10 @@ import { EventEmitter } from 'events';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
-import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship } from '../types.js';
+import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { CrossReferenceManager, getCrossReferenceManager } from '../crossReferenceManager.js';
+import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -123,6 +124,72 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const workerId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const collisions = store.getWorkerCollisions(workerId);
       res.json(collisions);
+    });
+
+    // ============================================
+    // File Heatmap API Endpoints
+    // ============================================
+
+    // Get file heatmap entries
+    app.get('/api/heatmap', (req: Request, res: Response) => {
+      const sortBy = req.query.sortBy as 'modifications' | 'recent' | 'workers' | 'collisions' || undefined;
+      const maxEntries = req.query.maxEntries ? parseInt(req.query.maxEntries as string) : 100;
+      const collisionsOnly = req.query.collisionsOnly === 'true';
+      const directoryFilter = req.query.directoryFilter as string | undefined;
+
+      const entries = store.getFileHeatmap({
+        sortBy,
+        maxEntries,
+        collisionsOnly,
+        directoryFilter,
+      });
+
+      res.json(entries);
+    });
+
+    // Get file heatmap statistics
+    app.get('/api/heatmap/stats', (_req: Request, res: Response) => {
+      const stats = store.getFileHeatmapStats();
+      res.json(stats);
+    });
+
+    // ============================================
+    // Dependency DAG API Endpoints
+    // ============================================
+
+    // Get dependency graph
+    app.get('/api/dag', (req: Request, res: Response) => {
+      try {
+        const status = req.query.status as BeadStatus | 'all' | undefined;
+        const criticalOnly = req.query.criticalOnly === 'true';
+        const maxDepth = req.query.maxDepth ? parseInt(req.query.maxDepth as string) : undefined;
+        const includeClosed = req.query.includeClosed === 'true';
+
+        const options: DagOptions = {};
+        if (status && status !== 'all') {
+          options.status = status as BeadStatus;
+        }
+        if (criticalOnly) {
+          options.criticalOnly = true;
+        }
+        if (maxDepth !== undefined) {
+          options.maxDepth = maxDepth;
+        }
+        if (includeClosed) {
+          options.includeClosed = true;
+        }
+
+        const graph = refreshDependencyGraph(options);
+        const stats = getDagStats(graph);
+
+        res.json({ graph, stats });
+      } catch (error) {
+        console.error('Error generating dependency graph:', error);
+        res.status(500).json({
+          error: 'Failed to generate dependency graph',
+          message: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
     });
 
     // ============================================
