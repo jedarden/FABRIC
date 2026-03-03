@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LogEvent, WorkerInfo, WebSocketMessage } from './types';
 import WorkerGrid from './components/WorkerGrid';
 import ActivityStream from './components/ActivityStream';
+import WorkerDetail from './components/WorkerDetail';
 
 const App: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
@@ -106,47 +107,11 @@ const App: React.FC = () => {
         />
 
         {selectedWorkerInfo && (
-          <aside className="worker-detail">
-            <h2>{selectedWorkerInfo.id}</h2>
-
-            <div className="detail-section">
-              <h3>Status</h3>
-              <div className="detail-row">
-                <span className="detail-label">State</span>
-                <span className={`detail-value worker-status ${selectedWorkerInfo.status}`}>
-                  {selectedWorkerInfo.status}
-                </span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">Events</span>
-                <span className="detail-value">{selectedWorkerInfo.eventCount}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">Current Tool</span>
-                <span className="detail-value">{selectedWorkerInfo.currentTool || '-'}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">Last Seen</span>
-                <span className="detail-value">
-                  {new Date(selectedWorkerInfo.lastSeen).toLocaleTimeString()}
-                </span>
-              </div>
-            </div>
-
-            <div className="detail-section">
-              <h3>Recent Events</h3>
-              {selectedWorkerInfo.recentEvents.slice(-5).map((event, i) => (
-                <div key={i} className="detail-row">
-                  <span className={`detail-label event-level ${event.level}`}>
-                    {event.level}
-                  </span>
-                  <span className="detail-value" style={{ fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {event.message.slice(0, 50)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </aside>
+          <WorkerDetail
+            worker={selectedWorkerInfo}
+            onClose={() => setSelectedWorker(null)}
+            allWorkerEvents={selectedWorker ? filteredEvents : undefined}
+          />
         )}
       </main>
     </div>
