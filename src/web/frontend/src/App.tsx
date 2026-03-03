@@ -4,6 +4,7 @@ import WorkerGrid from './components/WorkerGrid';
 import ActivityStream from './components/ActivityStream';
 import WorkerDetail from './components/WorkerDetail';
 import CollisionAlert from './components/CollisionAlert';
+import FileHeatmap from './components/FileHeatmap';
 
 const App: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
@@ -12,6 +13,7 @@ const App: React.FC = () => {
   const [connected, setConnected] = useState(false);
   const [collisionAlerts, setCollisionAlerts] = useState<CollisionAlertData[]>([]);
   const [showCollisionPanel, setShowCollisionPanel] = useState(false);
+  const [showFileHeatmap, setShowFileHeatmap] = useState(false);
 
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
     if (message.type === 'init') {
@@ -116,6 +118,14 @@ const App: React.FC = () => {
       <header className="header">
         <h1>FABRIC</h1>
         <div className="header-actions">
+          <button
+            className="file-heatmap-toggle"
+            onClick={() => setShowFileHeatmap(!showFileHeatmap)}
+            title="View file heatmap"
+          >
+            <span className="file-heatmap-icon">🔥</span>
+            <span className="file-heatmap-label">Heatmap</span>
+          </button>
           {unacknowledgedAlertCount > 0 && (
             <button
               className="collision-alert-toggle"
@@ -160,6 +170,13 @@ const App: React.FC = () => {
             onAcknowledgeAll={handleAcknowledgeAllAlerts}
             visible={showCollisionPanel}
             onClose={() => setShowCollisionPanel(false)}
+          />
+        )}
+
+        {showFileHeatmap && (
+          <FileHeatmap
+            visible={showFileHeatmap}
+            onClose={() => setShowFileHeatmap(false)}
           />
         )}
       </main>
