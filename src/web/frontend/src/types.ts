@@ -28,12 +28,13 @@ export interface FileCollision {
 }
 
 export interface WebSocketMessage {
-  type: 'init' | 'event' | 'collision';
+  type: 'init' | 'event' | 'collision' | 'collision-alert';
   data: {
     workers?: WorkerInfo[];
     recentEvents?: LogEvent[];
     collisions?: FileCollision[];
-  } | LogEvent | FileCollision;
+    alerts?: CollisionAlert[];
+  } | LogEvent | FileCollision | CollisionAlert;
 }
 
 // Cross-Reference Types
@@ -97,4 +98,45 @@ export interface ReplayProgress {
   current: number;
   total: number;
   percent: number;
+}
+
+// Collision Alert Types
+export interface FileCollision {
+  path: string;
+  workers: string[];
+  detectedAt: number;
+  isActive: boolean;
+  events?: LogEvent[];
+}
+
+export interface BeadCollision {
+  beadId: string;
+  workers: string[];
+  detectedAt: number;
+  isActive: boolean;
+  severity: 'warning' | 'critical';
+  events?: LogEvent[];
+}
+
+export interface TaskCollision {
+  type: 'directory' | 'related_files' | 'dependency';
+  description: string;
+  workers: string[];
+  affectedResources: string[];
+  detectedAt: number;
+  isActive: boolean;
+  riskLevel: 'low' | 'medium' | 'high';
+}
+
+export interface CollisionAlert {
+  id: string;
+  type: 'file' | 'bead' | 'task';
+  severity: 'info' | 'warning' | 'error' | 'critical';
+  title: string;
+  description: string;
+  workers: string[];
+  timestamp: number;
+  acknowledged: boolean;
+  collision: FileCollision | BeadCollision | TaskCollision;
+  suggestion?: string;
 }
