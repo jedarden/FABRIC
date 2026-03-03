@@ -10,8 +10,9 @@ import { EventEmitter } from 'events';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
-import { LogEvent, EventFilter } from '../types.js';
+import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
+import { CrossReferenceManager, getCrossReferenceManager } from '../crossReferenceManager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -122,6 +123,97 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const workerId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const collisions = store.getWorkerCollisions(workerId);
       res.json(collisions);
+    });
+
+    // ============================================
+    // Cross-Reference API Endpoints
+    // ============================================
+
+    // Get cross-reference manager instance
+    const xrefManager = getCrossReferenceManager();
+
+    // Get cross-reference statistics
+    app.get('/api/xref/stats', (_req: Request, res: Response) => {
+      const stats = xrefManager.getStats();
+      res.json(stats);
+    });
+
+    // Get all cross-reference links
+    app.get('/api/xref/links', (req: Request, res: Response) => {
+      const sourceType = req.query.sourceType as CrossReferenceEntityType | undefined;
+      const targetType = req.query.targetType as CrossReferenceEntityType | undefined;
+      const relationship = req.query.relationship as CrossReferenceRelationship | undefined;
+      const minStrength = req.query.minStrength ? parseFloat(req.query.minStrength as string) : undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+
+      const links = xrefManager.query({
+        sourceType,
+        targetType,
+        relationship,
+        minStrength,
+        limit,
+      });
+
+      res.json(links);
+    });
+
+    // Get all tracked entities
+    app.get('/api/xref/entities', (_req: Request, res: Response) => {
+      const entities = xrefManager.getAllEntities();
+      res.json(entities);
+    });
+
+    // Get a specific entity
+    app.get('/api/xref/entities/:type/:id', (req: Request, res: Response) => {
+      const type = req.params.type as CrossReferenceEntityType;
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const entity = xrefManager.getEntity(type, id);
+
+      if (!entity) {
+        res.status(404).json({ error: 'Entity not found' });
+        return;
+      }
+
+      res.json(entity);
+    });
+
+    // Get links for a specific entity
+    app.get('/api/xref/entities/:type/:id/links', (req: Request, res: Response) => {
+      const type = req.params.type as CrossReferenceEntityType;
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const links = xrefManager.getLinksForEntity(type, id);
+      res.json(links);
+    });
+
+    // Get linked entities for a specific entity
+    app.get('/api/xref/entities/:type/:id/related', (req: Request, res: Response) => {
+      const type = req.params.type as CrossReferenceEntityType;
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const related = xrefManager.getLinkedEntities(type, id);
+      res.json(related);
+    });
+
+    // Find a navigation path between two entities
+    app.get('/api/xref/path', (req: Request, res: Response) => {
+      const sourceType = req.query.sourceType as CrossReferenceEntityType;
+      const sourceId = req.query.sourceId as string;
+      const targetType = req.query.targetType as CrossReferenceEntityType;
+      const targetId = req.query.targetId as string;
+      const maxDepth = req.query.maxDepth ? parseInt(req.query.maxDepth as string) : 5;
+
+      if (!sourceType || !sourceId || !targetType || !targetId) {
+        res.status(400).json({ error: 'Missing required parameters: sourceType, sourceId, targetType, targetId' });
+        return;
+      }
+
+      const path = xrefManager.findPath(sourceType, sourceId, targetType, targetId, maxDepth);
+
+      if (!path) {
+        res.status(404).json({ error: 'No path found between entities' });
+        return;
+      }
+
+      res.json(path);
     });
 
     // Serve static frontend files

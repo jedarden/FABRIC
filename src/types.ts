@@ -64,6 +64,15 @@ export interface WorkerInfo {
 
   /** Whether this worker is involved in any collisions */
   hasCollision: boolean;
+
+  /** Current bead/task being worked on */
+  activeBead?: string;
+
+  /** Directories this worker is active in */
+  activeDirectories: string[];
+
+  /** All collision types this worker is involved in */
+  collisionTypes: ('file' | 'bead' | 'task')[];
 }
 
 export interface EventFilter {
@@ -104,6 +113,90 @@ export interface FileCollision {
 
   /** Whether the collision is still active */
   isActive: boolean;
+}
+
+/**
+ * Bead collision - when multiple workers work on the same bead/task
+ */
+export interface BeadCollision {
+  /** Bead ID being contested */
+  beadId: string;
+
+  /** Workers working on this bead */
+  workers: string[];
+
+  /** Timestamp when collision was detected */
+  detectedAt: number;
+
+  /** Events that triggered the collision */
+  events: LogEvent[];
+
+  /** Whether the collision is still active */
+  isActive: boolean;
+
+  /** Collision severity based on operation types */
+  severity: 'warning' | 'critical';
+}
+
+/**
+ * Task collision - when workers work on tasks that may conflict
+ */
+export interface TaskCollision {
+  /** Type of collision */
+  type: 'directory' | 'related_files' | 'dependency';
+
+  /** Human-readable description */
+  description: string;
+
+  /** Workers involved */
+  workers: string[];
+
+  /** Affected paths/beads */
+  affectedResources: string[];
+
+  /** Timestamp when collision was detected */
+  detectedAt: number;
+
+  /** Whether the collision is still active */
+  isActive: boolean;
+
+  /** Risk level */
+  riskLevel: 'low' | 'medium' | 'high';
+}
+
+/**
+ * Collision alert for user notification
+ */
+export interface CollisionAlert {
+  /** Unique alert ID */
+  id: string;
+
+  /** Alert type */
+  type: 'file' | 'bead' | 'task';
+
+  /** Severity level */
+  severity: 'info' | 'warning' | 'error' | 'critical';
+
+  /** Human-readable title */
+  title: string;
+
+  /** Detailed description */
+  description: string;
+
+  /** Workers involved */
+  workers: string[];
+
+  /** Timestamp when alert was generated */
+  timestamp: number;
+
+  /** Whether the alert has been acknowledged */
+  acknowledged: boolean;
+
+  /** Related collision data */
+  collision: FileCollision | BeadCollision | TaskCollision;
+
+  /** Suggested resolution */
+  suggestion?: string;
 }
 
 export interface EventStore {
@@ -535,4 +628,167 @@ export interface DagStats {
 
   /** Beads on critical path */
   criticalPathBeads: number;
+}
+
+// ============================================
+// Cross-Reference Types
+// ============================================
+
+/**
+ * Type of entity that can be cross-referenced
+ */
+export type CrossReferenceEntityType = 'event' | 'bead' | 'file' | 'worker' | 'session';
+
+/**
+ * A single cross-reference link
+ */
+export interface CrossReferenceLink {
+  /** Unique link ID */
+  id: string;
+
+  /** Source entity type */
+  sourceType: CrossReferenceEntityType;
+
+  /** Source entity ID */
+  sourceId: string;
+
+  /** Target entity type */
+  targetType: CrossReferenceEntityType;
+
+  /** Target entity ID */
+  targetId: string;
+
+  /** Relationship type */
+  relationship: CrossReferenceRelationship;
+
+  /** Strength of the relationship (0-1) */
+  strength: number;
+
+  /** When this link was detected */
+  detectedAt: number;
+
+  /** Optional context about why this link exists */
+  context?: string;
+}
+
+/**
+ * Types of relationships between entities
+ */
+export type CrossReferenceRelationship =
+  | 'same_bead'         // Events working on the same bead/task
+  | 'same_file'         // Events modifying the same file
+  | 'same_worker'       // Events from the same worker
+  | 'temporal_proximity' // Events happening close together in time
+  | 'same_session'      // Events in the same worker session
+  | 'dependency'        // One bead depends on another
+  | 'collision'         // Workers colliding on the same file
+  | 'parent_child'      // Hierarchical relationship
+  | 'error_related'     // Events related to the same error
+  | 'tool_sequence';    // Tool calls that form a logical sequence
+
+/**
+ * A cross-reference entity with its links
+ */
+export interface CrossReferenceEntity {
+  /** Entity type */
+  type: CrossReferenceEntityType;
+
+  /** Entity ID */
+  id: string;
+
+  /** Human-readable label */
+  label: string;
+
+  /** All links from this entity */
+  outgoingLinks: CrossReferenceLink[];
+
+  /** All links to this entity */
+  incomingLinks: CrossReferenceLink[];
+
+  /** Related entities grouped by type */
+  relatedEntities: Map<CrossReferenceEntityType, CrossReferenceLink[]>;
+
+  /** Total link count */
+  linkCount: number;
+
+  /** Most recent link timestamp */
+  lastLinkedAt: number;
+
+  /** First seen timestamp */
+  firstSeen: number;
+
+  /** Number of occurrences */
+  occurrenceCount: number;
+}
+
+/**
+ * Options for cross-reference queries
+ */
+export interface CrossReferenceQueryOptions {
+  /** Filter by source entity type */
+  sourceType?: CrossReferenceEntityType;
+
+  /** Filter by target entity type */
+  targetType?: CrossReferenceEntityType;
+
+  /** Filter by relationship type */
+  relationship?: CrossReferenceRelationship;
+
+  /** Minimum relationship strength */
+  minStrength?: number;
+
+  /** Time range start */
+  since?: number;
+
+  /** Time range end */
+  until?: number;
+
+  /** Maximum results */
+  limit?: number;
+}
+
+/** Alias for backward compatibility */
+export type CrossReferenceFilter = CrossReferenceQueryOptions;
+
+/**
+ * Statistics about cross-references
+ */
+export interface CrossReferenceStats {
+  /** Total links tracked */
+  totalLinks: number;
+
+  /** Total entities tracked */
+  totalEntities: number;
+
+  /** Links by relationship type */
+  byRelationship: Record<CrossReferenceRelationship, number>;
+
+  /** Entities by type */
+  byEntityType: Record<CrossReferenceEntityType, number>;
+
+  /** Most linked entities */
+  mostLinked: CrossReferenceEntity[];
+
+  /** Recent links */
+  recentLinks: CrossReferenceLink[];
+}
+
+/**
+ * A navigation path through cross-references
+ */
+export interface CrossReferencePath {
+  /** Starting entity */
+  start: CrossReferenceEntity;
+
+  /** Ending entity */
+  end: CrossReferenceEntity;
+
+  /** Path steps */
+  steps: CrossReferenceLink[];
+
+  /** Total path length */
+  length: number;
+
+  /** Path description */
+  description: string;
 }
