@@ -6,10 +6,10 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { LogEvent } from '../types';
+import { LogEvent, ReplaySpeed, ReplayState } from '../types';
 
-export type ReplaySpeed = 0.5 | 1 | 2 | 5 | 10;
-export type ReplayState = 'idle' | 'playing' | 'paused' | 'ended';
+// Re-export types for external use
+export type { ReplaySpeed, ReplayState };
 
 interface SessionReplayProps {
   /** Events to replay */
