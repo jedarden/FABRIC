@@ -39,6 +39,7 @@ export class InMemoryEventStore implements EventStore {
   private events: LogEvent[] = [];
   private workers: Map<string, WorkerInfo> = new Map();
   private collisions: Map<string, FileCollision> = new Map();
+  private fileModifications: Map<string, FileModificationTracker> = new Map();
   private errorGroupManager: ErrorGroupManager;
   private maxEvents: number;
 
@@ -54,6 +55,7 @@ export class InMemoryEventStore implements EventStore {
     this.events.push(event);
     this.updateWorkerInfo(event);
     this.detectCollision(event);
+    this.trackFileModification(event);
 
     // Track errors in error groups
     if (event.level === 'error') {
@@ -122,6 +124,7 @@ export class InMemoryEventStore implements EventStore {
     this.events = [];
     this.workers.clear();
     this.collisions.clear();
+    this.fileModifications.clear();
     this.errorGroupManager.clear();
   }
 
@@ -322,6 +325,244 @@ export class InMemoryEventStore implements EventStore {
         }
       }
     }
+  }
+
+  /**
+   * Track file modifications for heatmap
+   */
+  private trackFileModification(event: LogEvent): void {
+    if (!event.path || !this.isFileModification(event)) {
+      return;
+    }
+
+    const path = event.path;
+    const workerId = event.worker;
+    let tracker = this.fileModifications.get(path);
+
+    if (!tracker) {
+      tracker = {
+        path,
+        modifications: 0,
+        firstModified: event.ts,
+        lastModified: event.ts,
+        workerModifications: new Map(),
+        timestamps: [],
+      };
+      this.fileModifications.set(path, tracker);
+    }
+
+    // Update modification count
+    tracker.modifications++;
+    tracker.lastModified = event.ts;
+    tracker.timestamps.push(event.ts);
+
+    // Track worker contribution
+    const workerMods = tracker.workerModifications.get(workerId);
+    if (workerMods) {
+      workerMods.count++;
+      workerMods.lastModified = event.ts;
+    } else {
+      tracker.workerModifications.set(workerId, {
+        count: 1,
+        lastModified: event.ts,
+      });
+    }
+  }
+
+  /**
+   * Get heat level based on modification count
+   */
+  private getHeatLevel(modifications: number): HeatLevel {
+    if (modifications >= HEAT_THRESHOLDS.critical) return 'critical';
+    if (modifications >= HEAT_THRESHOLDS.hot) return 'hot';
+    if (modifications >= HEAT_THRESHOLDS.warm) return 'warm';
+    return 'cold';
+  }
+
+  /**
+   * Calculate average modification interval
+   */
+  private calculateAvgInterval(timestamps: number[]): number {
+    if (timestamps.length < 2) return 0;
+
+    const sorted = [...timestamps].sort((a, b) => a - b);
+    let totalInterval = 0;
+
+    for (let i = 1; i < sorted.length; i++) {
+      totalInterval += sorted[i] - sorted[i - 1];
+    }
+
+    return Math.floor(totalInterval / (sorted.length - 1));
+  }
+
+  /**
+   * Get file heatmap entries
+   */
+  getFileHeatmap(options: HeatmapOptions = {}): FileHeatmapEntry[] {
+    const {
+      minModifications = 1,
+      maxEntries = 50,
+      sortBy = 'modifications',
+      directoryFilter,
+      collisionsOnly = false,
+    } = options;
+
+    const entries: FileHeatmapEntry[] = [];
+    const now = Date.now();
+
+    for (const tracker of this.fileModifications.values()) {
+      // Apply filters
+      if (tracker.modifications < minModifications) continue;
+
+      if (directoryFilter && !tracker.path.startsWith(directoryFilter)) {
+        continue;
+      }
+
+      const hasCollision = this.collisions.has(tracker.path) &&
+        this.collisions.get(tracker.path)!.isActive;
+
+      if (collisionsOnly && !hasCollision) continue;
+
+      // Count active workers
+      let activeWorkers = 0;
+      for (const workerId of tracker.workerModifications.keys()) {
+        const worker = this.workers.get(workerId);
+        if (worker?.activeFiles.includes(tracker.path)) {
+          activeWorkers++;
+        }
+      }
+
+      // Build worker contributions
+      const workers: WorkerFileContribution[] = [];
+      for (const [workerId, data] of tracker.workerModifications) {
+        workers.push({
+          workerId,
+          modifications: data.count,
+          lastModified: data.lastModified,
+          percentage: Math.round((data.count / tracker.modifications) * 100),
+        });
+      }
+
+      // Sort workers by modification count
+      workers.sort((a, b) => b.modifications - a.modifications);
+
+      entries.push({
+        path: tracker.path,
+        modifications: tracker.modifications,
+        heatLevel: this.getHeatLevel(tracker.modifications),
+        workers,
+        firstModified: tracker.firstModified,
+        lastModified: tracker.lastModified,
+        hasCollision,
+        activeWorkers,
+        avgModificationInterval: this.calculateAvgInterval(tracker.timestamps),
+      });
+    }
+
+    // Sort entries
+    switch (sortBy) {
+      case 'modifications':
+        entries.sort((a, b) => b.modifications - a.modifications);
+        break;
+      case 'recent':
+        entries.sort((a, b) => b.lastModified - a.lastModified);
+        break;
+      case 'workers':
+        entries.sort((a, b) => b.workers.length - a.workers.length);
+        break;
+      case 'collisions':
+        entries.sort((a, b) => {
+          // Prioritize files with collisions, then by modification count
+          if (a.hasCollision !== b.hasCollision) {
+            return a.hasCollision ? -1 : 1;
+          }
+          return b.modifications - a.modifications;
+        });
+        break;
+    }
+
+    return entries.slice(0, maxEntries);
+  }
+
+  /**
+   * Get heatmap statistics
+   */
+  getFileHeatmapStats(): FileHeatmapStats {
+    const entries = this.getFileHeatmap({ maxEntries: Infinity });
+
+    let totalModifications = 0;
+    let collisionFiles = 0;
+    let activeFiles = 0;
+    const heatDistribution: Record<HeatLevel, number> = {
+      cold: 0,
+      warm: 0,
+      hot: 0,
+      critical: 0,
+    };
+
+    const directoryCounts: Map<string, number> = new Map();
+
+    for (const entry of entries) {
+      totalModifications += entry.modifications;
+      heatDistribution[entry.heatLevel]++;
+      if (entry.hasCollision) collisionFiles++;
+      if (entry.activeWorkers > 0) activeFiles++;
+
+      // Track directory activity
+      const dir = entry.path.substring(0, entry.path.lastIndexOf('/')) || '/';
+      directoryCounts.set(dir, (directoryCounts.get(dir) || 0) + entry.modifications);
+    }
+
+    // Find most active directory
+    let mostActiveDirectory = '/';
+    let maxCount = 0;
+    for (const [dir, count] of directoryCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostActiveDirectory = dir;
+      }
+    }
+
+    return {
+      totalFiles: entries.length,
+      totalModifications,
+      collisionFiles,
+      activeFiles,
+      heatDistribution,
+      mostActiveDirectory,
+      avgModificationsPerFile: entries.length > 0
+        ? Math.round(totalModifications / entries.length * 10) / 10
+        : 0,
+    };
+  }
+
+  /**
+   * Get files modified by a specific worker
+   */
+  getWorkerFiles(workerId: string): FileHeatmapEntry[] {
+    const entries = this.getFileHeatmap({ maxEntries: Infinity });
+    return entries.filter(entry =>
+      entry.workers.some(w => w.workerId === workerId)
+    ).map(entry => ({
+      ...entry,
+      workers: entry.workers.filter(w => w.workerId === workerId),
+    }));
+  }
+
+  /**
+   * Get top collision risk files (high modification count + multiple workers)
+   */
+  getCollisionRiskFiles(threshold: number = 3): FileHeatmapEntry[] {
+    const entries = this.getFileHeatmap({ maxEntries: Infinity });
+    return entries
+      .filter(entry => entry.workers.length >= threshold)
+      .sort((a, b) => {
+        // Sort by collision risk score: workers * modifications
+        const scoreA = a.workers.length * a.modifications;
+        const scoreB = b.workers.length * b.modifications;
+        return scoreB - scoreA;
+      })
+      .slice(0, 20);
   }
 }
 

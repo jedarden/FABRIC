@@ -20,3 +20,9 @@ export type { DiffViewOptions, DiffLine, DiffHunk } from './DiffView.js';
 
 export { SessionReplay } from './SessionReplay.js';
 export type { SessionReplayOptions, ReplaySessionData } from './SessionReplay.js';
+
+export { FileHeatmap } from './FileHeatmap.js';
+export type { FileHeatmapOptions, HeatmapSortMode } from './FileHeatmap.js';
+
+export { DependencyDag } from './DependencyDag.js';
+export type { DependencyDagOptions } from './DependencyDag.js';

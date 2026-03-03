@@ -379,3 +379,160 @@ export interface FileHeatmapStats {
   /** Average modifications per file */
   avgModificationsPerFile: number;
 }
+
+// ============================================
+// Dependency DAG Types
+// ============================================
+
+/**
+ * Bead status type
+ */
+export type BeadStatus = 'open' | 'in_progress' | 'blocked' | 'completed' | 'closed' | 'deferred';
+
+/**
+ * Single node in the dependency graph
+ */
+export interface BeadNode {
+  /** Bead ID (e.g., 'bd-abc123') */
+  id: string;
+
+  /** Bead title */
+  title: string;
+
+  /** Current status */
+  status: BeadStatus;
+
+  /** Priority level (0-4) */
+  priority: number;
+
+  /** Depth in the dependency tree (0 = root) */
+  depth: number;
+
+  /** Number of dependents (beads that depend on this) */
+  dependentCount: number;
+
+  /** Number of dependencies (beads this depends on) */
+  dependencyCount: number;
+
+  /** Whether this is on the critical path */
+  isCriticalPath: boolean;
+
+  /** Estimated effort (if available) */
+  estimatedEffort?: number;
+}
+
+/**
+ * Edge in the dependency graph
+ */
+export interface DependencyEdge {
+  /** Source bead ID (the one that depends) */
+  from: string;
+
+  /** Target bead ID (the dependency) */
+  to: string;
+
+  /** Whether this edge is part of the critical path */
+  isCritical: boolean;
+}
+
+/**
+ * Connected component in the dependency graph
+ */
+export interface DagComponent {
+  /** All nodes in this component */
+  nodes: BeadNode[];
+
+  /** All edges in this component */
+  edges: DependencyEdge[];
+
+  /** Root nodes (no incoming edges) */
+  roots: string[];
+
+  /** Whether this component contains cycles */
+  hasCycle: boolean;
+
+  /** Critical path through this component (bead IDs) */
+  criticalPath: string[];
+
+  /** Total depth of the component */
+  maxDepth: number;
+}
+
+/**
+ * Full dependency graph
+ */
+export interface DependencyGraph {
+  /** All connected components */
+  components: DagComponent[];
+
+  /** Total nodes across all components */
+  totalNodes: number;
+
+  /** Total edges across all components */
+  totalEdges: number;
+
+  /** Total components */
+  totalComponents: number;
+
+  /** Overall critical path (longest path across all components) */
+  globalCriticalPath: string[];
+
+  /** Timestamp when graph was generated */
+  generatedAt: number;
+}
+
+/**
+ * Options for DAG visualization
+ */
+export interface DagOptions {
+  /** Filter by status */
+  status?: BeadStatus | 'all';
+
+  /** Filter by priority range */
+  minPriority?: number;
+  maxPriority?: number;
+
+  /** Show only critical path */
+  criticalOnly?: boolean;
+
+  /** Maximum depth to display */
+  maxDepth?: number;
+
+  /** Sort order: 'priority' | 'depth' | 'dependents' */
+  sortBy?: 'priority' | 'depth' | 'dependents';
+
+  /** Include closed/completed beads */
+  includeClosed?: boolean;
+}
+
+/**
+ * Statistics about the dependency graph
+ */
+export interface DagStats {
+  /** Total beads tracked */
+  totalBeads: number;
+
+  /** Blocked beads count */
+  blockedCount: number;
+
+  /** Ready beads (unblocked, open) */
+  readyCount: number;
+
+  /** Average dependencies per bead */
+  avgDependencies: number;
+
+  /** Average dependents per bead */
+  avgDependents: number;
+
+  /** Maximum depth found */
+  maxDepth: number;
+
+  /** Number of cycles detected */
+  cycleCount: number;
+
+  /** Critical path length */
+  criticalPathLength: number;
+
+  /** Beads on critical path */
+  criticalPathBeads: number;
+}

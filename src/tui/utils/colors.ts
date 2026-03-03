@@ -25,6 +25,12 @@ export const colors = {
   // Background colors
   bgPanel: 'black',
   bgFocus: 'blue',
+
+  // Heat level colors
+  heatCold: 'blue',
+  heatWarm: 'yellow',
+  heatHot: 'magenta',
+  heatCritical: 'red',
 } as const;
 
 export type ColorName = keyof typeof colors;
@@ -45,5 +51,29 @@ export function getLevelColor(level: 'debug' | 'info' | 'warn' | 'error'): strin
     case 'info': return colors.info;
     case 'warn': return colors.warn;
     case 'error': return colors.error_level;
+  }
+}
+
+/**
+ * Get color for heat level
+ */
+export function getHeatColor(level: 'cold' | 'warm' | 'hot' | 'critical'): string {
+  switch (level) {
+    case 'cold': return colors.heatCold;
+    case 'warm': return colors.heatWarm;
+    case 'hot': return colors.heatHot;
+    case 'critical': return colors.heatCritical;
+  }
+}
+
+/**
+ * Get heat icon
+ */
+export function getHeatIcon(level: 'cold' | 'warm' | 'hot' | 'critical'): string {
+  switch (level) {
+    case 'cold': return '○';
+    case 'warm': return '◐';
+    case 'hot': return '●';
+    case 'critical': return '🔥';
   }
 }

@@ -12,6 +12,8 @@ import { WorkerGrid } from './components/WorkerGrid.js';
 import { ActivityStream } from './components/ActivityStream.js';
 import { WorkerDetail } from './components/WorkerDetail.js';
 import { CommandPalette } from './components/CommandPalette.js';
+import { FileHeatmap } from './components/FileHeatmap.js';
+import { DependencyDag } from './components/DependencyDag.js';
 
 export interface TuiOptions {
   /** Log file path to tail */
@@ -30,12 +32,17 @@ export class FabricTuiApp {
   private options: Required<TuiOptions>;
   private isRunning = false;
 
+  // View mode
+  private viewMode: 'default' | 'heatmap' | 'dag' = 'default';
+
   // UI Components
   private headerBox!: blessed.Widgets.BoxElement;
   private workerGrid!: WorkerGrid;
   private activityStream!: ActivityStream;
   private workerDetail!: WorkerDetail;
   private commandPalette!: CommandPalette;
+  private fileHeatmap!: FileHeatmap;
+  private dependencyDag!: DependencyDag;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -115,6 +122,25 @@ export class FabricTuiApp {
       onSubmit: (cmd) => this.handleCommand(cmd),
     });
 
+    // File heatmap panel (hidden by default, 'H' key)
+    this.fileHeatmap = new FileHeatmap({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      bottom: 1,
+    });
+    this.fileHeatmap.getElement().hide();
+
+    // Dependency DAG panel (hidden by default, 'D' key)
+    this.dependencyDag = new DependencyDag({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      bottom: 1,
+    });
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -122,7 +148,7 @@ export class FabricTuiApp {
       left: 0,
       right: 0,
       height: 1,
-      content: ' [Tab] Switch  [j/k] Scroll  [/] Search  [?] Help  [q] Quit',
+      content: ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [?] Help  [q] Quit',
       style: {
         fg: colors.muted,
       },
@@ -169,6 +195,23 @@ export class FabricTuiApp {
         this.showWorkerDetail(selected);
       }
     });
+
+    // Toggle file heatmap view
+    this.screen.key(['H'], () => {
+      this.toggleHeatmapView();
+    });
+
+    // Toggle dependency DAG view
+    this.screen.key(['D'], () => {
+      this.toggleDagView();
+    });
+
+    // Escape to return to default view
+    this.screen.key(['escape'], () => {
+      if (this.viewMode !== 'default') {
+        this.setViewMode('default');
+      }
+    });
   }
 
   /**
@@ -185,6 +228,10 @@ export class FabricTuiApp {
       this.toggleHelp();
     } else if (cmd === 'quit') {
       this.stop();
+    } else if (cmd === 'heatmap') {
+      this.toggleHeatmapView();
+    } else if (cmd === 'dag') {
+      this.toggleDagView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
@@ -192,6 +239,81 @@ export class FabricTuiApp {
       const level = cmd.replace('filter:level:', '');
       this.activityStream.setFilter({ level });
     }
+  }
+
+  /**
+   * Toggle heatmap view
+   */
+  private toggleHeatmapView(): void {
+    if (this.viewMode === 'heatmap') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('heatmap');
+    }
+  }
+
+  /**
+   * Toggle dependency DAG view
+   */
+  private toggleDagView(): void {
+    if (this.viewMode === 'dag') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('dag');
+    }
+  }
+
+  /**
+   * Set view mode
+   */
+  private setViewMode(mode: 'default' | 'heatmap' | 'dag'): void {
+    this.viewMode = mode;
+
+    if (mode === 'heatmap') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.dependencyDag.getElement().hide();
+
+      // Show heatmap
+      this.fileHeatmap.getElement().show();
+      this.fileHeatmap.updateData(
+        (opts) => this.store.getFileHeatmap(opts),
+        () => this.store.getFileHeatmapStats()
+      );
+      this.fileHeatmap.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - File Heatmap');
+      this.footerBox.setContent(' [s] Sort  [c] Collisions  [Esc] Back  [?] Help  [q] Quit');
+    } else if (mode === 'dag') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+
+      // Show dependency DAG
+      this.dependencyDag.getElement().show();
+      this.dependencyDag.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Task Dependency DAG');
+      this.footerBox.setContent(' [t]ree [b]lockers [r]eady [s]tats [f]ilter [R]efresh [Esc] Back  [q] Quit');
+    } else {
+      // Hide special views
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+
+      // Show default panels
+      this.workerGrid.getElement().show();
+      this.activityStream.getElement().show();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Worker Activity Monitor');
+      this.footerBox.setContent(' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [?] Help  [q] Quit');
+    }
+
+    this.screen.render();
   }
 
   /**
@@ -217,7 +339,7 @@ export class FabricTuiApp {
         top: 'center',
         left: 'center',
         width: '50%',
-        height: '50%',
+        height: '55%',
         label: ' Help ',
         content: `
 Keyboard Shortcuts
@@ -234,6 +356,22 @@ Actions:
   f       - Filter
   r       - Refresh
   p       - Pause scroll
+  H       - Toggle file heatmap
+  D       - Toggle dependency DAG
+
+Heatmap View:
+  s       - Cycle sort mode
+  c       - Toggle collisions only
+  Esc     - Return to default view
+
+Dependency DAG View:
+  t       - Tree view
+  b       - Top blockers
+  r       - Ready tasks
+  s       - Statistics
+  f       - Cycle filters
+  R       - Force refresh
+  Esc     - Return to default view
 
 General:
   ?       - Toggle this help
@@ -267,6 +405,17 @@ General:
   addEvent(event: LogEvent): void {
     this.activityStream.addEvent(event);
     this.renderWorkers();
+
+    // Update heatmap if visible
+    if (this.viewMode === 'heatmap') {
+      this.fileHeatmap.updateData(
+        (opts) => this.store.getFileHeatmap(opts),
+        () => this.store.getFileHeatmapStats()
+      );
+    }
+
+    // DAG view auto-refreshes on its own schedule
+
     this.screen.render();
   }
 
@@ -274,7 +423,17 @@ General:
    * Render the entire UI
    */
   render(): void {
-    this.renderWorkers();
+    if (this.viewMode === 'heatmap') {
+      this.fileHeatmap.updateData(
+        (opts) => this.store.getFileHeatmap(opts),
+        () => this.store.getFileHeatmapStats()
+      );
+    } else if (this.viewMode === 'dag') {
+      // DAG view handles its own refresh
+      this.dependencyDag.refresh();
+    } else {
+      this.renderWorkers();
+    }
     this.screen.render();
   }
 
