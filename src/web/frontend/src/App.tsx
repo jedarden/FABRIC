@@ -5,6 +5,7 @@ import ActivityStream from './components/ActivityStream';
 import WorkerDetail from './components/WorkerDetail';
 import CollisionAlert from './components/CollisionAlert';
 import FileHeatmap from './components/FileHeatmap';
+import DependencyDag from './components/DependencyDag';
 
 const App: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
@@ -14,6 +15,7 @@ const App: React.FC = () => {
   const [collisionAlerts, setCollisionAlerts] = useState<CollisionAlertData[]>([]);
   const [showCollisionPanel, setShowCollisionPanel] = useState(false);
   const [showFileHeatmap, setShowFileHeatmap] = useState(false);
+  const [showDependencyDag, setShowDependencyDag] = useState(false);
 
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
     if (message.type === 'init') {
@@ -119,6 +121,14 @@ const App: React.FC = () => {
         <h1>FABRIC</h1>
         <div className="header-actions">
           <button
+            className="dag-toggle"
+            onClick={() => setShowDependencyDag(!showDependencyDag)}
+            title="View task dependency graph"
+          >
+            <span className="dag-toggle-icon">🔗</span>
+            <span className="dag-toggle-label">DAG</span>
+          </button>
+          <button
             className="file-heatmap-toggle"
             onClick={() => setShowFileHeatmap(!showFileHeatmap)}
             title="View file heatmap"
@@ -177,6 +187,13 @@ const App: React.FC = () => {
           <FileHeatmap
             visible={showFileHeatmap}
             onClose={() => setShowFileHeatmap(false)}
+          />
+        )}
+
+        {showDependencyDag && (
+          <DependencyDag
+            visible={showDependencyDag}
+            onClose={() => setShowDependencyDag(false)}
           />
         )}
       </main>

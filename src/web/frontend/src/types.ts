@@ -237,3 +237,72 @@ export interface DagOptions {
 }
 
 export type DagViewMode = 'tree' | 'blockers' | 'ready' | 'stats';
+
+// ============================================
+// Recovery Playbook Types
+// ============================================
+
+export type ErrorCategory =
+  | 'network'
+  | 'permission'
+  | 'validation'
+  | 'resource'
+  | 'not_found'
+  | 'timeout'
+  | 'syntax'
+  | 'tool'
+  | 'unknown';
+
+export type RecoveryPriority = 'immediate' | 'high' | 'normal' | 'low';
+
+export type RecoveryActionType =
+  | 'retry'
+  | 'backoff'
+  | 'alternative'
+  | 'escalate'
+  | 'skip'
+  | 'fix_config'
+  | 'install_dep'
+  | 'fix_permissions'
+  | 'cleanup'
+  | 'restart'
+  | 'investigate';
+
+export interface RecoveryAction {
+  id: string;
+  type: RecoveryActionType;
+  title: string;
+  description: string;
+  priority: RecoveryPriority;
+  automated: boolean;
+  command?: string;
+  expectedOutcome?: string;
+  prerequisites?: string[];
+  riskLevel?: 'safe' | 'moderate' | 'risky';
+  estimatedTime?: number;
+}
+
+export interface RecoverySuggestion {
+  id: string;
+  errorGroupId: string;
+  playbookId?: string;
+  category: ErrorCategory;
+  title: string;
+  errorSummary: string;
+  actions: RecoveryAction[];
+  generatedAt: number;
+  confidence: number;
+  affectedWorkers: string[];
+  relatedErrors?: string[];
+  isActive: boolean;
+}
+
+export interface RecoveryStats {
+  totalSuggestions: number;
+  activeSuggestions: number;
+  byCategory: Record<ErrorCategory, number>;
+  automatedActions: number;
+  manualActions: number;
+  avgConfidence: number;
+  topActionTypes: Array<{ type: RecoveryActionType; count: number }>;
+}
