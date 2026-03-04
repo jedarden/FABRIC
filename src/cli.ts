@@ -18,6 +18,9 @@ import { getStore } from './store.js';
 import { createTuiApp } from './tui/index.js';
 import { createWebServer } from './web/index.js';
 import { SessionReplay } from './tui/components/SessionReplay.js';
+import { SessionDigestGenerator, formatDigestAsMarkdown } from './sessionDigest.js';
+import { getCostTracker } from './tui/utils/costTracking.js';
+import * as fs from 'fs';
 import type { LogLevel, EventFilter } from './types.js';
 
 const program = new Command();
@@ -298,6 +301,97 @@ program
 
     } catch (err) {
       console.error(`Failed to start replay: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('digest')
+  .description('Generate session digest from log file')
+  .option('-f, --file <path>', 'Log file to analyze', '~/.needle/logs/workers.log')
+  .option('-o, --output <path>', 'Output file (default: stdout)')
+  .option('-w, --worker <ids>', 'Filter by worker IDs (comma-separated)')
+  .option('--since <timestamp>', 'Start time (Unix timestamp in ms)')
+  .option('--until <timestamp>', 'End time (Unix timestamp in ms)')
+  .option('--max-files <number>', 'Maximum files to list', '50')
+  .option('--max-errors <number>', 'Maximum errors to list', '20')
+  .option('--no-cost', 'Exclude cost information')
+  .option('--no-errors', 'Exclude error information')
+  .action(async (options) => {
+    const filePath = options.file.replace('~', process.env.HOME || '');
+
+    console.error(`FABRIC Digest - Analyzing: ${filePath}`);
+
+    try {
+      // Load events from file
+      const store = getStore();
+      const tailer = new LogTailer({
+        path: filePath,
+        parseJson: true,
+        follow: false,
+        lines: 0, // Load all lines
+      });
+
+      let eventCount = 0;
+      tailer.on('event', (event) => {
+        store.add(event);
+        eventCount++;
+      });
+
+      tailer.on('error', (err) => {
+        console.error(`Tailer error: ${err.message}`);
+      });
+
+      // Start tailing and wait for completion
+      tailer.start();
+
+      // Wait for file to be fully read
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          tailer.stop();
+          resolve();
+        }, 500);
+      });
+
+      console.error(`Loaded ${eventCount} events`);
+
+      // Generate digest
+      const costTracker = getCostTracker();
+      const generator = new SessionDigestGenerator(store, costTracker);
+
+      const digestOptions: any = {
+        includeCost: options.cost !== false,
+        includeErrors: options.errors !== false,
+        maxFiles: parseInt(options.maxFiles, 10) || 50,
+        maxErrors: parseInt(options.maxErrors, 10) || 20,
+      };
+
+      if (options.worker) {
+        digestOptions.workers = options.worker.split(',').map((w: string) => w.trim());
+      }
+
+      if (options.since) {
+        digestOptions.startTime = parseInt(options.since, 10);
+      }
+
+      if (options.until) {
+        digestOptions.endTime = parseInt(options.until, 10);
+      }
+
+      const digest = generator.generateDigest(digestOptions);
+      const markdown = formatDigestAsMarkdown(digest);
+
+      // Output
+      if (options.output) {
+        const outputPath = options.output.replace('~', process.env.HOME || '');
+        fs.writeFileSync(outputPath, markdown, 'utf8');
+        console.error(`Digest written to: ${outputPath}`);
+      } else {
+        console.log(markdown);
+      }
+
+    } catch (err) {
+      console.error(`Failed to generate digest: ${(err as Error).message}`);
       process.exit(1);
     }
   });

@@ -23,3 +23,4 @@ export interface WorkerState {
 
 // Re-export submodules
 export * from './types.js';
+export { SessionDigestGenerator, formatDigestAsMarkdown } from './sessionDigest.js';

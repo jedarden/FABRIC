@@ -972,3 +972,164 @@ export interface RecoveryStats {
   /** Most common recovery action types */
   topActionTypes: Array<{ type: RecoveryActionType; count: number }>;
 }
+
+// ============================================
+// Session Digest Types
+// ============================================
+
+/**
+ * Bead completion summary
+ */
+export interface BeadCompletion {
+  /** Bead ID */
+  beadId: string;
+
+  /** Worker that completed the bead */
+  workerId: string;
+
+  /** Completion timestamp */
+  completedAt: number;
+
+  /** Duration in milliseconds */
+  durationMs?: number;
+}
+
+/**
+ * File modification summary
+ */
+export interface FileModificationSummary {
+  /** File path */
+  path: string;
+
+  /** Number of modifications */
+  modifications: number;
+
+  /** Workers who modified this file */
+  workers: string[];
+
+  /** Tools used */
+  tools: string[];
+}
+
+/**
+ * Error occurrence in session
+ */
+export interface ErrorOccurrence {
+  /** Error message */
+  message: string;
+
+  /** Error category */
+  category: ErrorCategory;
+
+  /** Worker that encountered the error */
+  workerId: string;
+
+  /** Timestamp */
+  timestamp: number;
+
+  /** Error fingerprint */
+  fingerprint?: string;
+}
+
+/**
+ * Worker session summary
+ */
+export interface WorkerSessionSummary {
+  /** Worker ID */
+  workerId: string;
+
+  /** Beads completed */
+  beadsCompleted: number;
+
+  /** Files modified */
+  filesModified: number;
+
+  /** Errors encountered */
+  errorsEncountered: number;
+
+  /** Total events */
+  totalEvents: number;
+
+  /** Active time in milliseconds */
+  activeTimeMs: number;
+
+  /** First activity timestamp */
+  firstActivity: number;
+
+  /** Last activity timestamp */
+  lastActivity: number;
+}
+
+/**
+ * Complete session digest
+ */
+export interface SessionDigest {
+  /** Session ID or identifier */
+  sessionId: string;
+
+  /** Session start timestamp */
+  startTime: number;
+
+  /** Session end timestamp */
+  endTime: number;
+
+  /** Total duration in milliseconds */
+  durationMs: number;
+
+  /** Beads completed */
+  beadsCompleted: BeadCompletion[];
+
+  /** Files modified */
+  filesModified: FileModificationSummary[];
+
+  /** Errors encountered */
+  errors: ErrorOccurrence[];
+
+  /** Worker summaries */
+  workers: WorkerSessionSummary[];
+
+  /** Token usage and cost */
+  cost: {
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+  };
+
+  /** Overall statistics */
+  stats: {
+    totalEvents: number;
+    totalWorkers: number;
+    totalBeads: number;
+    totalFiles: number;
+    totalErrors: number;
+    avgEventsPerWorker: number;
+    avgBeadsPerWorker: number;
+  };
+}
+
+/**
+ * Options for session digest generation
+ */
+export interface SessionDigestOptions {
+  /** Start time filter */
+  startTime?: number;
+
+  /** End time filter */
+  endTime?: number;
+
+  /** Include only specific workers */
+  workers?: string[];
+
+  /** Include error details */
+  includeErrors?: boolean;
+
+  /** Include cost breakdown */
+  includeCost?: boolean;
+
+  /** Maximum files to list */
+  maxFiles?: number;
+
+  /** Maximum errors to list */
+  maxErrors?: number;
+}
