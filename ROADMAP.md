@@ -8,16 +8,14 @@ This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead R
 
 | Metric | Count |
 |--------|-------|
-| **Open beads** | 10 |
-| **Closed beads** | 144 |
-| **Completion** | ~94% |
+| **Open beads** | 1 |
+| **Closed beads** | 162 |
+| **Completion** | ~99% |
 
 ### Completion by Priority
 | Priority | Open | Description |
 |----------|------|-------------|
-| P0 | 1 | Epic/feature |
-| P3 | 5 | TUI enhancements |
-| P4 | 4 | Nice-to-have |
+| P0 | 1 | Epic container (bd-2kf) - all children complete |
 
 **Completed:**
 - Phase 1: Core Infrastructure ✅ COMPLETE
@@ -58,8 +56,9 @@ This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead R
   - ✅ Conversation parsing
   - ✅ Git status and diff parsing
 
-**In Progress:**
-- Phase 4: Remaining Intelligence Features
+**Remaining (Untracked):**
+- Phase 4+ Intelligence Features are nice-to-have and not tracked as beads
+- Project is considered complete for core functionality
 
 ## Phase 2: TUI Implementation
 
@@ -125,14 +124,14 @@ src/
 - `src/web/frontend/src/index.css` - Dark theme styling
 - `vite.config.ts` - Build configuration
 
-## Phase 3.5: Web Frontend Parity (Remaining Work)
+## Phase 3.5: Web Frontend Parity ✅ COMPLETE
 
-| Priority | Feature | Description | Bead |
-|----------|---------|-------------|------|
-| P2 | Parser Tests | Unit tests for parser.ts | bd-1a2 |
-| P2 | Store Tests | Unit tests for store.ts | bd-2en |
-| P2 | Worker Overview Cards | Enhanced worker cards component | bd-31n |
-| P2 | Activity Feed Filtering | Filter activity feed by worker/type | bd-1wo |
+| Priority | Feature | Description | Bead | Status |
+|----------|---------|-------------|------|--------|
+| P2 | Parser Tests | Unit tests for parser.ts | bd-1a2 | ✅ Closed |
+| P2 | Store Tests | Unit tests for store.ts | bd-2en | ✅ Closed |
+| P2 | Worker Overview Cards | Enhanced worker cards component | bd-31n | ✅ Closed |
+| P2 | Activity Feed Filtering | Filter activity feed by worker/type | bd-1wo | ✅ Closed |
 
 ## Intelligence Features (Phase 4+)
 
