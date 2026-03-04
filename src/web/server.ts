@@ -12,7 +12,6 @@ import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
-import { CrossReferenceManager, getCrossReferenceManager } from '../crossReferenceManager.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -196,12 +195,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // Cross-Reference API Endpoints
     // ============================================
 
-    // Get cross-reference manager instance
-    const xrefManager = getCrossReferenceManager();
-
     // Get cross-reference statistics
     app.get('/api/xref/stats', (_req: Request, res: Response) => {
-      const stats = xrefManager.getStats();
+      const stats = store.getCrossReferenceStats();
       res.json(stats);
     });
 
@@ -213,7 +209,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const minStrength = req.query.minStrength ? parseFloat(req.query.minStrength as string) : undefined;
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
 
-      const links = xrefManager.query({
+      const links = store.queryCrossReferences({
         sourceType,
         targetType,
         relationship,
@@ -226,7 +222,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
     // Get all tracked entities
     app.get('/api/xref/entities', (_req: Request, res: Response) => {
-      const entities = xrefManager.getAllEntities();
+      const entities = store.getAllCrossReferenceEntities();
       res.json(entities);
     });
 
@@ -234,7 +230,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     app.get('/api/xref/entities/:type/:id', (req: Request, res: Response) => {
       const type = req.params.type as CrossReferenceEntityType;
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const entity = xrefManager.getEntity(type, id);
+      const entity = store.getCrossReferenceEntity(type, id);
 
       if (!entity) {
         res.status(404).json({ error: 'Entity not found' });
@@ -248,7 +244,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     app.get('/api/xref/entities/:type/:id/links', (req: Request, res: Response) => {
       const type = req.params.type as CrossReferenceEntityType;
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const links = xrefManager.getLinksForEntity(type, id);
+      const links = store.getCrossReferenceLinksForEntity(type, id);
       res.json(links);
     });
 
@@ -256,7 +252,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     app.get('/api/xref/entities/:type/:id/related', (req: Request, res: Response) => {
       const type = req.params.type as CrossReferenceEntityType;
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const related = xrefManager.getLinkedEntities(type, id);
+      const related = store.getLinkedEntities(type, id);
       res.json(related);
     });
 
@@ -273,7 +269,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
         return;
       }
 
-      const path = xrefManager.findPath(sourceType, sourceId, targetType, targetId, maxDepth);
+      const path = store.findCrossReferencePath(sourceType, sourceId, targetType, targetId, maxDepth);
 
       if (!path) {
         res.status(404).json({ error: 'No path found between entities' });

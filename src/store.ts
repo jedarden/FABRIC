@@ -26,9 +26,16 @@ import {
   RecoverySuggestion,
   RecoveryOptions,
   RecoveryStats,
+  CrossReferenceLink,
+  CrossReferenceEntity,
+  CrossReferenceEntityType,
+  CrossReferenceQueryOptions,
+  CrossReferenceStats,
+  CrossReferencePath,
 } from './types.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
+import { CrossReferenceManager, getCrossReferenceManager } from './crossReferenceManager.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -71,13 +78,17 @@ export class InMemoryEventStore implements EventStore {
   private fileModifications: Map<string, FileModificationTracker> = new Map();
   private errorGroupManager: ErrorGroupManager;
   private recoveryManager: RecoveryManager;
+  private crossReferenceManager: CrossReferenceManager;
   private maxEvents: number;
   private alertCounter = 0;
+  private batchBuffer: LogEvent[] = [];
+  private batchTimeout: NodeJS.Timeout | null = null;
 
   constructor(maxEvents: number = 10000) {
     this.maxEvents = maxEvents;
     this.errorGroupManager = new ErrorGroupManager();
     this.recoveryManager = getRecoveryManager();
+    this.crossReferenceManager = getCrossReferenceManager();
   }
 
   /**
@@ -96,10 +107,34 @@ export class InMemoryEventStore implements EventStore {
       this.errorGroupManager.addError(event);
     }
 
+    // Process event for cross-references (immediate)
+    this.crossReferenceManager.processEvent(event);
+
+    // Add to batch buffer for relationship detection
+    this.batchBuffer.push(event);
+    this.scheduleBatchProcessing();
+
     // Trim if over limit
     if (this.events.length > this.maxEvents) {
       this.events.shift();
     }
+  }
+
+  /**
+   * Schedule batch processing for cross-reference relationship detection
+   */
+  private scheduleBatchProcessing(): void {
+    if (this.batchTimeout) {
+      clearTimeout(this.batchTimeout);
+    }
+
+    this.batchTimeout = setTimeout(() => {
+      if (this.batchBuffer.length > 0) {
+        this.crossReferenceManager.processBatch([...this.batchBuffer]);
+        this.batchBuffer = [];
+      }
+      this.batchTimeout = null;
+    }, 1000); // Process batch every 1 second
   }
 
   /**
@@ -162,6 +197,12 @@ export class InMemoryEventStore implements EventStore {
     this.taskCollisions.clear();
     this.fileModifications.clear();
     this.errorGroupManager.clear();
+    this.crossReferenceManager.clear();
+    this.batchBuffer = [];
+    if (this.batchTimeout) {
+      clearTimeout(this.batchTimeout);
+      this.batchTimeout = null;
+    }
   }
 
   /**
@@ -1048,6 +1089,94 @@ export class InMemoryEventStore implements EventStore {
    */
   clearRecoverySuggestions(): void {
     this.recoveryManager.clear();
+  }
+
+  // ============================================
+  // Cross-Reference Methods
+  // ============================================
+
+  /**
+   * Query cross-references with optional filter
+   */
+  queryCrossReferences(filter?: CrossReferenceQueryOptions): CrossReferenceLink[] {
+    return this.crossReferenceManager.query(filter);
+  }
+
+  /**
+   * Get all links for a specific entity
+   */
+  getCrossReferenceLinksForEntity(
+    type: CrossReferenceEntityType,
+    id: string
+  ): CrossReferenceLink[] {
+    return this.crossReferenceManager.getLinksForEntity(type, id);
+  }
+
+  /**
+   * Get linked entities for a specific entity
+   */
+  getLinkedEntities(
+    type: CrossReferenceEntityType,
+    id: string
+  ): CrossReferenceEntity[] {
+    return this.crossReferenceManager.getLinkedEntities(type, id);
+  }
+
+  /**
+   * Find a navigation path between two entities
+   */
+  findCrossReferencePath(
+    sourceType: CrossReferenceEntityType,
+    sourceId: string,
+    targetType: CrossReferenceEntityType,
+    targetId: string,
+    maxDepth?: number
+  ): CrossReferencePath | null {
+    return this.crossReferenceManager.findPath(
+      sourceType,
+      sourceId,
+      targetType,
+      targetId,
+      maxDepth
+    );
+  }
+
+  /**
+   * Get cross-reference statistics
+   */
+  getCrossReferenceStats(): CrossReferenceStats {
+    return this.crossReferenceManager.getStats();
+  }
+
+  /**
+   * Get entity by type and ID
+   */
+  getCrossReferenceEntity(
+    type: CrossReferenceEntityType,
+    id: string
+  ): CrossReferenceEntity | undefined {
+    return this.crossReferenceManager.getEntity(type, id);
+  }
+
+  /**
+   * Get all cross-reference entities
+   */
+  getAllCrossReferenceEntities(): CrossReferenceEntity[] {
+    return this.crossReferenceManager.getAllEntities();
+  }
+
+  /**
+   * Get all cross-reference links
+   */
+  getAllCrossReferenceLinks(): CrossReferenceLink[] {
+    return this.crossReferenceManager.getAllLinks();
+  }
+
+  /**
+   * Clear all cross-references
+   */
+  clearCrossReferences(): void {
+    this.crossReferenceManager.clear();
   }
 }
 

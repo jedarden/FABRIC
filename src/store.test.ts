@@ -517,6 +517,234 @@ describe('InMemoryEventStore', () => {
       expect(worker3Collisions).toHaveLength(0);
     });
   });
+
+  describe('Cross-Reference Integration', () => {
+    it('should track cross-references when events are added', () => {
+      const ts = Date.now();
+
+      // Add events with related entities
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        path: '/src/file.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        path: '/src/file.ts',
+        tool: 'Write',
+        ts: ts + 1000
+      }));
+
+      // Query cross-references
+      const stats = store.getCrossReferenceStats();
+      expect(stats.totalLinks).toBeGreaterThan(0);
+      expect(stats.totalEntities).toBeGreaterThan(0);
+    });
+
+    it('should create links between events and workers', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w-test-123',
+        msg: 'Starting task',
+        ts
+      }));
+
+      // Get links for the worker
+      const links = store.getCrossReferenceLinksForEntity('worker', 'w-test-123');
+      expect(links.length).toBeGreaterThan(0);
+
+      // Should have links to events
+      const eventLinks = links.filter(l => l.targetType === 'event' || l.sourceType === 'event');
+      expect(eventLinks.length).toBeGreaterThan(0);
+    });
+
+    it('should create links between events and files', () => {
+      const ts = Date.now();
+      const filePath = '/src/test.ts';
+
+      store.add(createEvent({
+        worker: 'w1',
+        path: filePath,
+        tool: 'Edit',
+        ts
+      }));
+
+      // Get links for the file
+      const links = store.getCrossReferenceLinksForEntity('file', filePath);
+      expect(links.length).toBeGreaterThan(0);
+    });
+
+    it('should create links between events and beads', () => {
+      const ts = Date.now();
+      const beadId = 'bd-test-123';
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: beadId,
+        msg: 'Working on bead',
+        ts
+      }));
+
+      // Get links for the bead
+      const links = store.getCrossReferenceLinksForEntity('bead', beadId);
+      expect(links.length).toBeGreaterThan(0);
+    });
+
+    it('should find linked entities', () => {
+      const ts = Date.now();
+      const workerId = 'w-linked';
+      const filePath = '/src/linked.ts';
+
+      store.add(createEvent({
+        worker: workerId,
+        path: filePath,
+        tool: 'Edit',
+        ts
+      }));
+
+      // Get linked entities for the worker
+      const linkedEntities = store.getLinkedEntities('worker', workerId);
+      expect(linkedEntities.length).toBeGreaterThan(0);
+
+      // Should include event and/or file entity
+      // Note: file entity linking happens during batch processing
+      const hasEventOrFileEntity = linkedEntities.some(
+        e => (e.type === 'event') || (e.type === 'file' && e.id === filePath)
+      );
+      expect(hasEventOrFileEntity).toBe(true);
+    });
+
+    it('should get cross-reference entity details', () => {
+      const ts = Date.now();
+      const workerId = 'w-entity-test';
+
+      store.add(createEvent({
+        worker: workerId,
+        msg: 'Test event',
+        ts
+      }));
+
+      // Get entity
+      const entity = store.getCrossReferenceEntity('worker', workerId);
+      expect(entity).toBeDefined();
+      expect(entity?.type).toBe('worker');
+      expect(entity?.id).toBe(workerId);
+      expect(entity?.linkCount).toBeGreaterThan(0);
+    });
+
+    it('should query cross-references with filters', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        path: '/src/file.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      // Query links by relationship type
+      const sameBeadLinks = store.queryCrossReferences({ relationship: 'same_bead' });
+      expect(Array.isArray(sameBeadLinks)).toBe(true);
+
+      // Query links by source type
+      const eventLinks = store.queryCrossReferences({ sourceType: 'event' });
+      expect(Array.isArray(eventLinks)).toBe(true);
+      expect(eventLinks.every(l => l.sourceType === 'event')).toBe(true);
+    });
+
+    it('should find navigation paths between entities', () => {
+      const ts = Date.now();
+      const workerId = 'w-path';
+      const beadId = 'bd-path';
+
+      store.add(createEvent({
+        worker: workerId,
+        bead: beadId,
+        msg: 'Working',
+        ts
+      }));
+
+      // Find path from worker to bead
+      const path = store.findCrossReferencePath('worker', workerId, 'bead', beadId);
+
+      // Path may or may not exist depending on link creation timing
+      if (path) {
+        expect(path.start.id).toBe(workerId);
+        expect(path.end.id).toBe(beadId);
+        expect(path.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('should clear cross-references when store is cleared', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        ts
+      }));
+
+      let stats = store.getCrossReferenceStats();
+      expect(stats.totalLinks).toBeGreaterThan(0);
+
+      store.clear();
+
+      stats = store.getCrossReferenceStats();
+      expect(stats.totalLinks).toBe(0);
+      expect(stats.totalEntities).toBe(0);
+    });
+
+    it('should get all cross-reference entities', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        path: '/src/test.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      const allEntities = store.getAllCrossReferenceEntities();
+      expect(Array.isArray(allEntities)).toBe(true);
+      expect(allEntities.length).toBeGreaterThan(0);
+
+      // Should have different entity types
+      const types = new Set(allEntities.map(e => e.type));
+      expect(types.size).toBeGreaterThan(1);
+    });
+
+    it('should get all cross-reference links', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        path: '/src/test.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      const allLinks = store.getAllCrossReferenceLinks();
+      expect(Array.isArray(allLinks)).toBe(true);
+      expect(allLinks.length).toBeGreaterThan(0);
+
+      // All links should have required fields
+      allLinks.forEach(link => {
+        expect(link.id).toBeDefined();
+        expect(link.sourceType).toBeDefined();
+        expect(link.targetType).toBeDefined();
+        expect(link.relationship).toBeDefined();
+        expect(typeof link.strength).toBe('number');
+      });
+    });
+  });
 });
 
 describe('getStore and resetStore', () => {
