@@ -14,6 +14,7 @@ import { WorkerDetail } from './components/WorkerDetail.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { FileHeatmap } from './components/FileHeatmap.js';
 import { DependencyDag } from './components/DependencyDag.js';
+import { SessionReplay } from './components/SessionReplay.js';
 
 export interface TuiOptions {
   /** Log file path to tail */
@@ -33,7 +34,7 @@ export class FabricTuiApp {
   private isRunning = false;
 
   // View mode
-  private viewMode: 'default' | 'heatmap' | 'dag' = 'default';
+  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' = 'default';
 
   // UI Components
   private headerBox!: blessed.Widgets.BoxElement;
@@ -43,6 +44,7 @@ export class FabricTuiApp {
   private commandPalette!: CommandPalette;
   private fileHeatmap!: FileHeatmap;
   private dependencyDag!: DependencyDag;
+  private sessionReplay!: SessionReplay;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -141,6 +143,25 @@ export class FabricTuiApp {
       bottom: 1,
     });
 
+    // Session Replay panel (hidden by default, 'R' key)
+    this.sessionReplay = new SessionReplay({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      height: '100%-2',
+      onEvent: (event, index, total) => {
+        // Could add event to activity stream if needed
+      },
+      onStateChange: (state) => {
+        if (state === 'ended') {
+          // Update footer to show replay ended
+          this.updateFooter();
+        }
+      },
+    });
+    this.sessionReplay.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -206,6 +227,11 @@ export class FabricTuiApp {
       this.toggleDagView();
     });
 
+    // Toggle session replay view
+    this.screen.key(['R'], () => {
+      this.toggleReplayView();
+    });
+
     // Escape to return to default view
     this.screen.key(['escape'], () => {
       if (this.viewMode !== 'default') {
@@ -232,6 +258,8 @@ export class FabricTuiApp {
       this.toggleHeatmapView();
     } else if (cmd === 'dag') {
       this.toggleDagView();
+    } else if (cmd === 'replay') {
+      this.toggleReplayView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
@@ -264,9 +292,20 @@ export class FabricTuiApp {
   }
 
   /**
+   * Toggle session replay view
+   */
+  private toggleReplayView(): void {
+    if (this.viewMode === 'replay') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('replay');
+    }
+  }
+
+  /**
    * Set view mode
    */
-  private setViewMode(mode: 'default' | 'heatmap' | 'dag'): void {
+  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay'): void {
     this.viewMode = mode;
 
     if (mode === 'heatmap') {
@@ -299,10 +338,32 @@ export class FabricTuiApp {
       // Update header
       this.headerBox.setContent(' FABRIC - Task Dependency DAG');
       this.footerBox.setContent(' [t]ree [b]lockers [r]eady [s]tats [f]ilter [R]efresh [Esc] Back  [q] Quit');
+    } else if (mode === 'replay') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+
+      // Show session replay
+      this.sessionReplay.show();
+
+      // Load all current events into replay
+      const allEvents = this.store.query();
+      if (allEvents.length > 0) {
+        this.sessionReplay.loadEvents(allEvents);
+      }
+
+      this.sessionReplay.focus();
+
+      // Update header and footer
+      this.headerBox.setContent(' FABRIC - Session Replay');
+      this.updateFooter();
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
       this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
@@ -310,10 +371,23 @@ export class FabricTuiApp {
 
       // Update header
       this.headerBox.setContent(' FABRIC - Worker Activity Monitor');
-      this.footerBox.setContent(' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [?] Help  [q] Quit');
+      this.footerBox.setContent(' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [R] Replay  [?] Help  [q] Quit');
     }
 
     this.screen.render();
+  }
+
+  /**
+   * Update footer based on replay state
+   */
+  private updateFooter(): void {
+    if (this.viewMode === 'replay') {
+      const state = this.sessionReplay.getState();
+      const speed = this.sessionReplay.getSpeed();
+      const stateText = state === 'playing' ? 'PLAYING' : state === 'paused' ? 'PAUSED' : state === 'ended' ? 'ENDED' : 'READY';
+      this.footerBox.setContent(` [${stateText}] [Space] Play/Pause  [←/→] Step  [↑/↓] Speed(${speed}x)  [Home/End] Jump  [r] Reset  [Esc] Back  [q] Quit`);
+      this.screen.render();
+    }
   }
 
   /**
@@ -358,6 +432,7 @@ Actions:
   p       - Pause scroll
   H       - Toggle file heatmap
   D       - Toggle dependency DAG
+  R       - Toggle session replay
 
 Heatmap View:
   s       - Cycle sort mode
@@ -371,6 +446,15 @@ Dependency DAG View:
   s       - Statistics
   f       - Cycle filters
   R       - Force refresh
+  Esc     - Return to default view
+
+Session Replay:
+  Space   - Play/Pause
+  ←/→     - Step backward/forward
+  ↑/↓     - Speed up/down
+  1-5     - Set speed (0.5x-10x)
+  Home/End - Jump to start/end
+  r       - Reset to beginning
   Esc     - Return to default view
 
 General:
