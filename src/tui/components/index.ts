@@ -39,3 +39,6 @@ export type { ErrorGroupPanelOptions } from './ErrorGroupPanel.js';
 
 export { SessionDigest, createSessionDigest, generateSessionDigest } from './SessionDigest.js';
 export type { SessionDigestOptions, DigestViewTab } from './SessionDigest.js';
+
+export { GitIntegration } from './GitIntegration.js';
+export type { GitIntegrationOptions } from './GitIntegration.js';

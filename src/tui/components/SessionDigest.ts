@@ -12,7 +12,7 @@ import * as blessed from 'blessed';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  SessionDigest,
+  SessionDigest as SessionDigestData,
   BeadCompletion,
   FileModificationSummary,
   ErrorOccurrence,
@@ -44,7 +44,7 @@ export class SessionDigest {
   private tabBar: blessed.Widgets.BoxElement;
   private headerBox: blessed.Widgets.BoxElement;
   private footerBox: blessed.Widgets.BoxElement;
-  private digest: SessionDigest | null = null;
+  private digest: SessionDigestData | null = null;
   private currentTab: DigestViewTab = 'summary';
   private scrollOffset = 0;
   private onExport?: (format: 'json' | 'markdown' | 'text', path: string) => void;
@@ -178,7 +178,7 @@ export class SessionDigest {
   /**
    * Set the session digest data
    */
-  setDigest(digest: SessionDigest): void {
+  setDigest(digest: SessionDigestData): void {
     this.digest = digest;
     this.scrollOffset = 0;
     this.updateHeader();
@@ -791,7 +791,7 @@ export function generateSessionDigest(
     endTime?: number;
     includeCost?: boolean;
   } = {}
-): SessionDigest {
+): SessionDigestData {
   const startTime = options.startTime || (events.length > 0 ? events[0].ts : Date.now());
   const endTime = options.endTime || (events.length > 0 ? events[events.length - 1].ts : Date.now());
   const sessionId = options.sessionId || `session-${Date.now()}`;

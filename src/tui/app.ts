@@ -18,8 +18,10 @@ import { SessionReplay } from './components/SessionReplay.js';
 import { ErrorGroupPanel } from './components/ErrorGroupPanel.js';
 import { SessionDigest, generateSessionDigest } from './components/SessionDigest.js';
 import { CollisionAlert } from './components/CollisionAlert.js';
+import { GitIntegration } from './components/GitIntegration.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
+import { parseGitEvents } from '../gitParser.js';
 
 export interface TuiOptions {
   /** Log file path to tail */
@@ -39,7 +41,7 @@ export class FabricTuiApp {
   private isRunning = false;
 
   // View mode
-  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' = 'default';
+  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' = 'default';
 
   // Focus mode state
   private focusModeEnabled = false;
@@ -58,6 +60,7 @@ export class FabricTuiApp {
   private errorGroupPanel!: ErrorGroupPanel;
   private sessionDigest!: SessionDigest;
   private collisionAlert!: CollisionAlert;
+  private gitIntegration!: GitIntegration;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -215,6 +218,18 @@ export class FabricTuiApp {
     });
     this.collisionAlert.hide();
 
+    // Git Integration panel (hidden by default, 'I' key)
+    this.gitIntegration = new GitIntegration({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      bottom: 1,
+      maxCommits: 10,
+      maxFiles: 15,
+    });
+    this.gitIntegration.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -328,6 +343,11 @@ export class FabricTuiApp {
       this.toggleCollisionsView();
     });
 
+    // Toggle git integration view
+    this.screen.key(['I'], () => {
+      this.toggleGitView();
+    });
+
     // Escape to return to default view
     this.screen.key(['escape'], () => {
       if (this.viewMode !== 'default') {
@@ -375,6 +395,8 @@ export class FabricTuiApp {
       this.toggleDigestView();
     } else if (cmd === 'collisions') {
       this.toggleCollisionsView();
+    } else if (cmd === 'git') {
+      this.toggleGitView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
@@ -447,6 +469,17 @@ export class FabricTuiApp {
       this.setViewMode('default');
     } else {
       this.setViewMode('collisions');
+    }
+  }
+
+  /**
+   * Toggle git integration view
+   */
+  private toggleGitView(): void {
+    if (this.viewMode === 'git') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('git');
     }
   }
 
@@ -734,6 +767,7 @@ Actions:
   R       - Toggle session replay
   E       - Toggle error groups
   C       - Toggle collision alerts
+  G       - Toggle session digest
 
 Focus Mode:
   F       - Toggle focus mode
@@ -761,6 +795,14 @@ Session Replay:
   1-5     - Set speed (0.5x-10x)
   Home/End - Jump to start/end
   r       - Reset to beginning
+  Esc     - Return to default view
+
+Session Digest:
+  G       - Toggle session digest view
+  1-5     - Switch tabs (Summary/Beads/Files/Errors/Workers)
+  e       - Export as JSON
+  m       - Export as Markdown
+  j/k     - Scroll content
   Esc     - Return to default view
 
 Collision Alerts:
