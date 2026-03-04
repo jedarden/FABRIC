@@ -3,8 +3,18 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseLogLine, parseLogLines, formatEvent } from './parser.js';
-import { LogEvent, LogLevel } from './types.js';
+import {
+  parseLogLine,
+  parseLogLines,
+  formatEvent,
+  isConversationEvent,
+  parseConversationEvent,
+  parseConversationEvents,
+  parseConversationLine,
+  parseConversationContent,
+  formatConversationEvent,
+} from './parser.js';
+import { LogEvent, LogLevel, ConversationEvent } from './types.js';
 
 describe('parseLogLine', () => {
   describe('valid inputs', () => {

@@ -8,6 +8,228 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export type WorkerStatus = 'active' | 'idle' | 'error';
 
+// ============================================
+// Conversation Event Types
+// ============================================
+
+/**
+ * Role in a conversation
+ */
+export type ConversationRole = 'system' | 'user' | 'assistant' | 'tool';
+
+/**
+ * Type of conversation event
+ */
+export type ConversationEventType =
+  | 'prompt'        // User input/prompt
+  | 'response'      // Assistant response text
+  | 'thinking'      // Internal reasoning/thinking block
+  | 'tool_call'     // Tool being called with arguments
+  | 'tool_result';  // Result from a tool call
+
+/**
+ * Base interface for all conversation events
+ */
+export interface ConversationEventBase {
+  /** Unique event identifier */
+  id: string;
+
+  /** Type of conversation event */
+  type: ConversationEventType;
+
+  /** Role in conversation */
+  role: ConversationRole;
+
+  /** Unix timestamp in milliseconds */
+  ts: number;
+
+  /** Worker identifier */
+  worker: string;
+
+  /** Associated bead/task ID (if any) */
+  bead?: string;
+
+  /** Sequence number within the conversation */
+  sequence: number;
+
+  /** Token count for this event (if available) */
+  tokens?: number;
+}
+
+/**
+ * User prompt event
+ */
+export interface PromptEvent extends ConversationEventBase {
+  type: 'prompt';
+  role: 'user';
+
+  /** The user's prompt text */
+  content: string;
+
+  /** Whether this is a continuation of a previous prompt */
+  isContinuation?: boolean;
+}
+
+/**
+ * Assistant response event
+ */
+export interface ResponseEvent extends ConversationEventBase {
+  type: 'response';
+  role: 'assistant';
+
+  /** The response text */
+  content: string;
+
+  /** Whether the response is truncated */
+  isTruncated?: boolean;
+
+  /** Model used for this response */
+  model?: string;
+
+  /** Stop reason (if available) */
+  stopReason?: 'end_turn' | 'max_tokens' | 'stop_sequence' | 'tool_use';
+}
+
+/**
+ * Thinking/reasoning block event
+ */
+export interface ThinkingEvent extends ConversationEventBase {
+  type: 'thinking';
+  role: 'assistant';
+
+  /** The thinking content */
+  content: string;
+
+  /** Whether thinking is truncated */
+  isTruncated?: boolean;
+
+  /** Duration of thinking in ms (if available) */
+  durationMs?: number;
+}
+
+/**
+ * Tool argument types
+ */
+export type ToolArgValue = string | number | boolean | null | ToolArgValue[] | { [key: string]: ToolArgValue };
+
+/**
+ * Tool call event
+ */
+export interface ToolCallEvent extends ConversationEventBase {
+  type: 'tool_call';
+  role: 'assistant';
+
+  /** Tool name */
+  tool: string;
+
+  /** Tool arguments */
+  args: Record<string, ToolArgValue>;
+
+  /** Tool call ID (for correlating with results) */
+  toolCallId?: string;
+
+  /** Human-readable summary of the call */
+  summary?: string;
+}
+
+/**
+ * Tool result event
+ */
+export interface ToolResultEvent extends ConversationEventBase {
+  type: 'tool_result';
+  role: 'tool';
+
+  /** Tool name */
+  tool: string;
+
+  /** Tool call ID this is a response to */
+  toolCallId?: string;
+
+  /** Result content (may be truncated) */
+  content: string;
+
+  /** Whether the tool call succeeded */
+  success: boolean;
+
+  /** Error message if failed */
+  error?: string;
+
+  /** Duration of tool call in ms */
+  durationMs?: number;
+
+  /** Whether the result is truncated */
+  isTruncated?: boolean;
+
+  /** Size of full result in bytes (for context) */
+  resultSize?: number;
+}
+
+/**
+ * Union type for all conversation events
+ */
+export type ConversationEvent =
+  | PromptEvent
+  | ResponseEvent
+  | ThinkingEvent
+  | ToolCallEvent
+  | ToolResultEvent;
+
+/**
+ * A complete conversation session
+ */
+export interface ConversationSession {
+  /** Session identifier */
+  id: string;
+
+  /** Worker ID */
+  workerId: string;
+
+  /** Associated bead ID (if any) */
+  beadId?: string;
+
+  /** Start timestamp */
+  startTime: number;
+
+  /** End timestamp (if complete) */
+  endTime?: number;
+
+  /** All events in chronological order */
+  events: ConversationEvent[];
+
+  /** Total token count */
+  totalTokens: number;
+
+  /** Number of turns */
+  turnCount: number;
+
+  /** Tools used in this session */
+  toolsUsed: string[];
+
+  /** Whether the session is still active */
+  isActive: boolean;
+}
+
+/**
+ * Options for parsing conversation events
+ */
+export interface ConversationParseOptions {
+  /** Maximum content length before truncation */
+  maxContentLength?: number;
+
+  /** Include thinking blocks */
+  includeThinking?: boolean;
+
+  /** Include tool results */
+  includeToolResults?: boolean;
+
+  /** Truncate tool results longer than this */
+  maxToolResultLength?: number;
+}
+
+// ============================================
+// Core Log Event Types
+// ============================================
+
 export interface LogEvent {
   /** Unix timestamp in milliseconds */
   ts: number;

@@ -61,7 +61,7 @@ describe('Web Server API Endpoints', () => {
       const response = await fetchApi('/api/health');
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = await response.json() as any;
       expect(data.status).toBe('ok');
     });
 
@@ -70,14 +70,14 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent());
 
       const response = await fetchApi('/api/health');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data.storeSize).toBe(2);
     });
 
     it('should return 0 store size for empty store', async () => {
       const response = await fetchApi('/api/health');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data.storeSize).toBe(0);
     });
@@ -88,7 +88,7 @@ describe('Web Server API Endpoints', () => {
       const response = await fetchApi('/api/workers');
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = await response.json() as any;
       expect(data).toEqual([]);
     });
 
@@ -98,7 +98,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ worker: 'w3' }));
 
       const response = await fetchApi('/api/workers');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(3);
       const ids = data.map((w: { id: string }) => w.id).sort();
@@ -111,7 +111,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ worker: 'w-idle', msg: 'Task completed' }));
 
       const response = await fetchApi('/api/workers');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       const activeWorker = data.find((w: { id: string }) => w.id === 'w-active');
       const errorWorker = data.find((w: { id: string }) => w.id === 'w-error');
@@ -128,7 +128,7 @@ describe('Web Server API Endpoints', () => {
       const response = await fetchApi('/api/workers/unknown');
       expect(response.status).toBe(404);
 
-      const data = await response.json();
+      const data = await response.json() as any;
       expect(data.error).toBe('Worker not found');
     });
 
@@ -138,7 +138,7 @@ describe('Web Server API Endpoints', () => {
       const response = await fetchApi('/api/workers/w-test');
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = await response.json() as any;
       expect(data.id).toBe('w-test');
       expect(data.activeBead).toBe('bd-123');
     });
@@ -148,7 +148,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ worker: 'w-test', msg: 'Task completed', bead: 'bd-2' }));
 
       const response = await fetchApi('/api/workers/w-test');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data.beadsCompleted).toBe(2);
     });
@@ -159,7 +159,7 @@ describe('Web Server API Endpoints', () => {
       const response = await fetchApi('/api/events');
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = await response.json() as any;
       expect(data).toEqual([]);
     });
 
@@ -169,7 +169,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ ts: 3000, msg: 'Event 3' }));
 
       const response = await fetchApi('/api/events');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(3);
     });
@@ -180,7 +180,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ worker: 'w1', ts: 3000 }));
 
       const response = await fetchApi('/api/events?worker=w1');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(2);
       expect(data.every((e: LogEvent) => e.worker === 'w1')).toBe(true);
@@ -192,7 +192,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ level: 'info', ts: 3000 }));
 
       const response = await fetchApi('/api/events?level=error');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(1);
       expect(data[0].level).toBe('error');
@@ -204,7 +204,7 @@ describe('Web Server API Endpoints', () => {
       }
 
       const response = await fetchApi('/api/events?limit=10');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(10);
     });
@@ -215,7 +215,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ worker: 'w2', level: 'error', ts: 3000 }));
 
       const response = await fetchApi('/api/events?worker=w1&level=error');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(1);
       expect(data[0].worker).toBe('w1');
@@ -228,7 +228,7 @@ describe('Web Server API Endpoints', () => {
       const response = await fetchApi('/api/collisions');
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = await response.json() as any;
       expect(data).toEqual([]);
     });
 
@@ -251,7 +251,7 @@ describe('Web Server API Endpoints', () => {
       }));
 
       const response = await fetchApi('/api/collisions');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(1);
       expect(data[0].path).toBe(path);
@@ -270,7 +270,7 @@ describe('Web Server API Endpoints', () => {
       }));
 
       const response = await fetchApi('/api/collisions');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(0);
     });
@@ -281,7 +281,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ worker: 'w1' }));
 
       const response = await fetchApi('/api/workers/w1/collisions');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toEqual([]);
     });
@@ -304,7 +304,7 @@ describe('Web Server API Endpoints', () => {
       }));
 
       const response = await fetchApi('/api/workers/w1/collisions');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(1);
       expect(data[0].path).toBe(path);
@@ -331,7 +331,7 @@ describe('Web Server API Endpoints', () => {
       store.add(createEvent({ worker: 'w3' }));
 
       const response = await fetchApi('/api/workers/w3/collisions');
-      const data = await response.json();
+      const data = await response.json() as any;
 
       expect(data).toHaveLength(0);
     });
@@ -343,7 +343,7 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/stats');
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(data).toHaveProperty('totalLinks');
         expect(data).toHaveProperty('totalEntities');
         expect(data).toHaveProperty('byRelationship');
@@ -354,7 +354,7 @@ describe('Web Server API Endpoints', () => {
         store.add(createEvent({ worker: 'w1', path: '/src/test.ts', bead: 'bd-1' }));
 
         const response = await fetchApi('/api/xref/stats');
-        const data = await response.json();
+        const data = await response.json() as any;
 
         // Should have entities after processing events
         expect(data.totalEntities).toBeGreaterThanOrEqual(0);
@@ -366,13 +366,13 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/links');
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(Array.isArray(data)).toBe(true);
       });
 
       it('should respect limit parameter', async () => {
         const response = await fetchApi('/api/xref/links?limit=5');
-        const data = await response.json();
+        const data = await response.json() as any;
 
         expect(data.length).toBeLessThanOrEqual(5);
       });
@@ -381,7 +381,7 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/links?minStrength=0.5');
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(Array.isArray(data)).toBe(true);
       });
     });
@@ -391,7 +391,7 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/entities');
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(Array.isArray(data)).toBe(true);
       });
     });
@@ -401,7 +401,7 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/entities/worker/unknown-worker');
         expect(response.status).toBe(404);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(data.error).toBe('Entity not found');
       });
 
@@ -419,7 +419,7 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/entities/worker/w-known');
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(data.id).toBe('w-known');
         expect(data.type).toBe('worker');
       });
@@ -432,7 +432,7 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/entities/worker/w1/links');
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(Array.isArray(data)).toBe(true);
       });
     });
@@ -444,7 +444,7 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/entities/worker/w1/related');
         expect(response.status).toBe(200);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(Array.isArray(data)).toBe(true);
       });
     });
@@ -454,7 +454,7 @@ describe('Web Server API Endpoints', () => {
         const response = await fetchApi('/api/xref/path');
         expect(response.status).toBe(400);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(data.error).toContain('Missing required parameters');
       });
 
@@ -469,7 +469,7 @@ describe('Web Server API Endpoints', () => {
         );
         expect(response.status).toBe(404);
 
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(data.error).toBe('No path found between entities');
       });
 
@@ -837,7 +837,7 @@ describe('Web Server API Endpoints', () => {
 
       for (const response of responses) {
         expect(response.status).toBe(200);
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(data).toHaveLength(10);
       }
     });
@@ -858,7 +858,7 @@ describe('Web Server API Endpoints', () => {
         expect(response.status).toBe(200);
 
         // Should not throw when parsing JSON
-        const data = await response.json();
+        const data = await response.json() as any;
         expect(data).toBeDefined();
       }
     });

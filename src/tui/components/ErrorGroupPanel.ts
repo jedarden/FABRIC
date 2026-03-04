@@ -23,7 +23,10 @@ export interface ErrorGroupPanelOptions {
   width: number | string;
 
   /** Height of the panel */
-  height: number | string;
+  height?: number | string;
+
+  /** Position from bottom */
+  bottom?: number | string;
 
   /** Callback when group is selected */
   onSelect?: (groupId: string) => void;
@@ -49,7 +52,7 @@ export class ErrorGroupPanel {
       top: options.top,
       left: options.left,
       width: options.width,
-      height: options.height,
+      ...(options.bottom !== undefined ? { bottom: options.bottom } : { height: options.height }),
       label: ' Error Groups ',
       border: { type: 'line' },
       style: {
