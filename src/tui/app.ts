@@ -15,6 +15,8 @@ import { CommandPalette } from './components/CommandPalette.js';
 import { FileHeatmap } from './components/FileHeatmap.js';
 import { DependencyDag } from './components/DependencyDag.js';
 import { SessionReplay } from './components/SessionReplay.js';
+import { ErrorGroupPanel } from './components/ErrorGroupPanel.js';
+import { getErrorGroupManager } from '../errorGrouping.js';
 
 export interface TuiOptions {
   /** Log file path to tail */
@@ -34,7 +36,7 @@ export class FabricTuiApp {
   private isRunning = false;
 
   // View mode
-  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' = 'default';
+  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' = 'default';
 
   // UI Components
   private headerBox!: blessed.Widgets.BoxElement;
@@ -45,6 +47,7 @@ export class FabricTuiApp {
   private fileHeatmap!: FileHeatmap;
   private dependencyDag!: DependencyDag;
   private sessionReplay!: SessionReplay;
+  private errorGroupPanel!: ErrorGroupPanel;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -162,6 +165,19 @@ export class FabricTuiApp {
     });
     this.sessionReplay.hide();
 
+    // Error Group Panel (hidden by default, 'E' key)
+    this.errorGroupPanel = new ErrorGroupPanel({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      bottom: 1,
+      onSelect: (groupId) => {
+        // Could show detailed error view if needed
+      },
+    });
+    this.errorGroupPanel.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -169,7 +185,7 @@ export class FabricTuiApp {
       left: 0,
       right: 0,
       height: 1,
-      content: ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [?] Help  [q] Quit',
+      content: ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [?] Help  [q] Quit',
       style: {
         fg: colors.muted,
       },
@@ -232,6 +248,11 @@ export class FabricTuiApp {
       this.toggleReplayView();
     });
 
+    // Toggle error group view
+    this.screen.key(['E'], () => {
+      this.toggleErrorsView();
+    });
+
     // Escape to return to default view
     this.screen.key(['escape'], () => {
       if (this.viewMode !== 'default') {
@@ -260,6 +281,8 @@ export class FabricTuiApp {
       this.toggleDagView();
     } else if (cmd === 'replay') {
       this.toggleReplayView();
+    } else if (cmd === 'errors') {
+      this.toggleErrorsView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
@@ -303,9 +326,20 @@ export class FabricTuiApp {
   }
 
   /**
+   * Toggle error group view
+   */
+  private toggleErrorsView(): void {
+    if (this.viewMode === 'errors') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('errors');
+    }
+  }
+
+  /**
    * Set view mode
    */
-  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay'): void {
+  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors'): void {
     this.viewMode = mode;
 
     if (mode === 'heatmap') {
@@ -313,6 +347,8 @@ export class FabricTuiApp {
       this.workerGrid.getElement().hide();
       this.activityStream.getElement().hide();
       this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
 
       // Show heatmap
       this.fileHeatmap.getElement().show();
@@ -330,6 +366,8 @@ export class FabricTuiApp {
       this.workerGrid.getElement().hide();
       this.activityStream.getElement().hide();
       this.fileHeatmap.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
 
       // Show dependency DAG
       this.dependencyDag.getElement().show();
@@ -344,6 +382,7 @@ export class FabricTuiApp {
       this.activityStream.getElement().hide();
       this.fileHeatmap.getElement().hide();
       this.dependencyDag.getElement().hide();
+      this.errorGroupPanel.hide();
 
       // Show session replay
       this.sessionReplay.show();
@@ -359,11 +398,32 @@ export class FabricTuiApp {
       // Update header and footer
       this.headerBox.setContent(' FABRIC - Session Replay');
       this.updateFooter();
+    } else if (mode === 'errors') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+
+      // Show error group panel
+      this.errorGroupPanel.show();
+
+      // Get error groups from error manager
+      const errorManager = getErrorGroupManager();
+      const groups = errorManager.getGroups();
+      this.errorGroupPanel.updateGroups(groups);
+      this.errorGroupPanel.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Error Groups');
+      this.footerBox.setContent(' [↑/↓] Navigate  [Enter] Expand/Collapse  [Esc] Back  [?] Help  [q] Quit');
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
       this.dependencyDag.getElement().hide();
       this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
@@ -371,7 +431,7 @@ export class FabricTuiApp {
 
       // Update header
       this.headerBox.setContent(' FABRIC - Worker Activity Monitor');
-      this.footerBox.setContent(' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [R] Replay  [?] Help  [q] Quit');
+      this.footerBox.setContent(' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [?] Help  [q] Quit');
     }
 
     this.screen.render();

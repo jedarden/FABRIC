@@ -33,3 +33,6 @@ export type { DependencyDagOptions } from './DependencyDag.js';
 export { RecoveryPanel } from './RecoveryPanel.js';
 export type { RecoveryPanelOptions } from './RecoveryPanel.js';
 export { formatRecoveryForConsole, getRecoverySummary } from './RecoveryPanel.js';
+
+export { ErrorGroupPanel } from './ErrorGroupPanel.js';
+export type { ErrorGroupPanelOptions } from './ErrorGroupPanel.js';
