@@ -17,6 +17,7 @@ import { DependencyDag } from './components/DependencyDag.js';
 import { SessionReplay } from './components/SessionReplay.js';
 import { ErrorGroupPanel } from './components/ErrorGroupPanel.js';
 import { SessionDigest, generateSessionDigest } from './components/SessionDigest.js';
+import { CollisionAlert } from './components/CollisionAlert.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
 
@@ -38,7 +39,7 @@ export class FabricTuiApp {
   private isRunning = false;
 
   // View mode
-  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' = 'default';
+  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' = 'default';
 
   // Focus mode state
   private focusModeEnabled = false;
@@ -56,6 +57,7 @@ export class FabricTuiApp {
   private sessionReplay!: SessionReplay;
   private errorGroupPanel!: ErrorGroupPanel;
   private sessionDigest!: SessionDigest;
+  private collisionAlert!: CollisionAlert;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -199,6 +201,20 @@ export class FabricTuiApp {
     });
     this.sessionDigest.hide();
 
+    // Collision Alert panel (hidden by default, 'C' key)
+    this.collisionAlert = new CollisionAlert({
+      parent: this.screen,
+      top: 'center',
+      left: 'center',
+      width: '80%',
+      height: '70%',
+      onAcknowledge: (alertId) => {
+        this.store.acknowledgeAlert(alertId);
+        this.updateCollisionAlerts();
+      },
+    });
+    this.collisionAlert.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -218,7 +234,7 @@ export class FabricTuiApp {
    */
   private getFooterContent(): string {
     if (this.viewMode === 'default') {
-      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors';
+      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions';
 
       // Show focus mode status
       if (this.focusModeEnabled) {
@@ -238,7 +254,7 @@ export class FabricTuiApp {
     }
 
     // Return default content for other views
-    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [?] Help  [q] Quit';
+    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [?] Help  [q] Quit';
   }
 
   /**
@@ -302,6 +318,16 @@ export class FabricTuiApp {
       this.toggleErrorsView();
     });
 
+    // Toggle session digest view
+    this.screen.key(['G'], () => {
+      this.toggleDigestView();
+    });
+
+    // Toggle collision alert view
+    this.screen.key(['C'], () => {
+      this.toggleCollisionsView();
+    });
+
     // Escape to return to default view
     this.screen.key(['escape'], () => {
       if (this.viewMode !== 'default') {
@@ -345,6 +371,10 @@ export class FabricTuiApp {
       this.toggleReplayView();
     } else if (cmd === 'errors') {
       this.toggleErrorsView();
+    } else if (cmd === 'digest') {
+      this.toggleDigestView();
+    } else if (cmd === 'collisions') {
+      this.toggleCollisionsView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
@@ -399,9 +429,39 @@ export class FabricTuiApp {
   }
 
   /**
+   * Toggle session digest view
+   */
+  private toggleDigestView(): void {
+    if (this.viewMode === 'digest') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('digest');
+    }
+  }
+
+  /**
+   * Toggle collision alert view
+   */
+  private toggleCollisionsView(): void {
+    if (this.viewMode === 'collisions') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('collisions');
+    }
+  }
+
+  /**
+   * Update collision alerts from store
+   */
+  private updateCollisionAlerts(): void {
+    const alerts = this.store.getAllCollisionAlerts();
+    this.collisionAlert.updateAlerts(alerts);
+  }
+
+  /**
    * Set view mode
    */
-  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors'): void {
+  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions'): void {
     this.viewMode = mode;
 
     if (mode === 'heatmap') {
@@ -480,12 +540,66 @@ export class FabricTuiApp {
       // Update header
       this.headerBox.setContent(' FABRIC - Error Groups');
       this.footerBox.setContent(' [↑/↓] Navigate  [Enter] Expand/Collapse  [Esc] Back  [?] Help  [q] Quit');
+    } else if (mode === 'digest') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+
+      // Show session digest
+      this.sessionDigest.show();
+
+      // Generate digest from current session data
+      const allEvents = this.store.query();
+      const workers = this.store.getWorkers();
+
+      // Convert WorkerInfo to WorkerSessionSummary
+      const workerSummaries: WorkerSessionSummary[] = workers.map(w => ({
+        workerId: w.id,
+        beadsCompleted: w.beadsCompleted,
+        filesModified: w.activeFiles.length,
+        errorsEncountered: w.status === 'error' ? 1 : 0,
+        totalEvents: 0, // Would need to count per worker
+        activeTimeMs: w.lastActivity - w.firstSeen,
+        firstActivity: w.firstSeen,
+        lastActivity: w.lastActivity,
+      }));
+
+      const digest = generateSessionDigest(allEvents, workerSummaries);
+      this.sessionDigest.setDigest(digest);
+      this.sessionDigest.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Session Digest');
+      this.footerBox.setContent(' [1-5] Tabs  [e] Export JSON  [m] Export Markdown  [j/k] Scroll  [Esc] Back  [?] Help  [q] Quit');
+    } else if (mode === 'collisions') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+
+      // Show collision alert panel
+      this.updateCollisionAlerts();
+      this.collisionAlert.show();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Collision Alerts');
+      this.footerBox.setContent(' [↑/↓] or [j/k] Navigate  [Enter] Acknowledge  [a] Acknowledge All  [Esc] Close  [?] Help  [q] Quit');
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
       this.dependencyDag.getElement().hide();
       this.sessionReplay.hide();
       this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+      this.collisionAlert.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
@@ -618,6 +732,8 @@ Actions:
   H       - Toggle file heatmap
   D       - Toggle dependency DAG
   R       - Toggle session replay
+  E       - Toggle error groups
+  C       - Toggle collision alerts
 
 Focus Mode:
   F       - Toggle focus mode
@@ -645,6 +761,12 @@ Session Replay:
   1-5     - Set speed (0.5x-10x)
   Home/End - Jump to start/end
   r       - Reset to beginning
+  Esc     - Return to default view
+
+Collision Alerts:
+  ↑/↓ or j/k - Navigate alerts
+  Enter   - Acknowledge selected alert
+  a       - Acknowledge all alerts
   Esc     - Return to default view
 
 General:
@@ -692,6 +814,11 @@ General:
         (opts) => this.store.getFileHeatmap(opts),
         () => this.store.getFileHeatmapStats()
       );
+    }
+
+    // Update collision alerts if visible
+    if (this.viewMode === 'collisions') {
+      this.updateCollisionAlerts();
     }
 
     // DAG view auto-refreshes on its own schedule
