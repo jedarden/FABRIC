@@ -249,7 +249,7 @@ export class FabricTuiApp {
    */
   private getFooterContent(): string {
     if (this.viewMode === 'default') {
-      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions';
+      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions';
 
       // Show focus mode status
       if (this.focusModeEnabled) {
@@ -494,7 +494,7 @@ export class FabricTuiApp {
   /**
    * Set view mode
    */
-  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions'): void {
+  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git'): void {
     this.viewMode = mode;
 
     if (mode === 'heatmap') {
@@ -625,6 +625,29 @@ export class FabricTuiApp {
       // Update header
       this.headerBox.setContent(' FABRIC - Collision Alerts');
       this.footerBox.setContent(' [↑/↓] or [j/k] Navigate  [Enter] Acknowledge  [a] Acknowledge All  [Esc] Close  [?] Help  [q] Quit');
+    } else if (mode === 'git') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+      this.collisionAlert.hide();
+
+      // Show git integration panel
+      this.gitIntegration.show();
+
+      // Update git data from store
+      const allEvents = this.store.query();
+      const gitEvents = parseGitEvents(allEvents);
+      this.gitIntegration.updateGitEvents(gitEvents);
+      this.gitIntegration.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Git Integration');
+      this.footerBox.setContent(' [r] Refresh  [c] Clear  [Esc] Back  [?] Help  [q] Quit');
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
@@ -633,6 +656,7 @@ export class FabricTuiApp {
       this.errorGroupPanel.hide();
       this.sessionDigest.hide();
       this.collisionAlert.hide();
+      this.gitIntegration.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
