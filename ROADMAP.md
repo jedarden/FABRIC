@@ -4,7 +4,20 @@
 
 This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead Reporting Interface Console). Features are organized into phases with clear priorities.
 
-## Current Status
+## Current Status (Updated: 2026-03-04)
+
+| Metric | Count |
+|--------|-------|
+| **Open beads** | 10 |
+| **Closed beads** | 144 |
+| **Completion** | ~94% |
+
+### Completion by Priority
+| Priority | Open | Description |
+|----------|------|-------------|
+| P0 | 1 | Epic/feature |
+| P3 | 5 | TUI enhancements |
+| P4 | 4 | Nice-to-have |
 
 **Completed:**
 - Phase 1: Core Infrastructure ✅ COMPLETE
@@ -36,8 +49,17 @@ This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead R
   - P1: Web command added to CLI
   - Dark theme styling
 
+- Phase 3.5: Intelligence Features (Partial)
+  - ✅ DependencyDag TUI component
+  - ✅ GitIntegration TUI panel
+  - ✅ SessionDigest TUI component
+  - ✅ CollisionAlert integration
+  - ✅ Semantic narrative summarization
+  - ✅ Conversation parsing
+  - ✅ Git status and diff parsing
+
 **In Progress:**
-- Phase 3.5: Web Frontend Parity (tests & enhancements)
+- Phase 4: Remaining Intelligence Features
 
 ## Phase 2: TUI Implementation
 
