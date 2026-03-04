@@ -10,6 +10,9 @@ export type { WorkerGridOptions } from './WorkerGrid.js';
 export { ActivityStream } from './ActivityStream.js';
 export type { ActivityStreamOptions, ActivityFilter } from './ActivityStream.js';
 
+export { FilterPanel } from './FilterPanel.js';
+export type { FilterPanelOptions } from './FilterPanel.js';
+
 export { WorkerDetail } from './WorkerDetail.js';
 
 export { CommandPalette } from './CommandPalette.js';

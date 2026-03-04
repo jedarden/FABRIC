@@ -384,6 +384,58 @@ describe('ActivityStream', () => {
       activityStream.addEvent(createMockEvent({ worker: 'w-test', level: 'error' }));
       expect(mockLogInstance.log).toHaveBeenCalled();
     });
+
+    it('should filter by time range - since', () => {
+      const now = Date.now();
+      const fiveMinutesAgo = now - 5 * 60 * 1000;
+
+      activityStream.setFilter({ since: fiveMinutesAgo });
+
+      // Add old event (should be filtered out)
+      activityStream.addEvent(createMockEvent({ ts: fiveMinutesAgo - 1000 }));
+      expect(mockLogInstance.log).not.toHaveBeenCalled();
+
+      // Add recent event (should pass)
+      activityStream.addEvent(createMockEvent({ ts: now }));
+      expect(mockLogInstance.log).toHaveBeenCalled();
+    });
+
+    it('should filter by time range - until', () => {
+      const now = Date.now();
+      const fiveMinutesAgo = now - 5 * 60 * 1000;
+
+      activityStream.setFilter({ until: fiveMinutesAgo });
+
+      // Add recent event (should be filtered out)
+      activityStream.addEvent(createMockEvent({ ts: now }));
+      expect(mockLogInstance.log).not.toHaveBeenCalled();
+
+      // Add old event (should pass)
+      activityStream.addEvent(createMockEvent({ ts: fiveMinutesAgo - 1000 }));
+      expect(mockLogInstance.log).toHaveBeenCalled();
+    });
+
+    it('should filter by time range - since and until', () => {
+      const now = Date.now();
+      const tenMinutesAgo = now - 10 * 60 * 1000;
+      const fiveMinutesAgo = now - 5 * 60 * 1000;
+
+      activityStream.setFilter({ since: tenMinutesAgo, until: fiveMinutesAgo });
+
+      // Too old
+      activityStream.addEvent(createMockEvent({ ts: tenMinutesAgo - 1000 }));
+      expect(mockLogInstance.log).not.toHaveBeenCalled();
+
+      // In range
+      activityStream.addEvent(createMockEvent({ ts: tenMinutesAgo + 1000 }));
+      expect(mockLogInstance.log).toHaveBeenCalled();
+
+      vi.clearAllMocks();
+
+      // Too recent
+      activityStream.addEvent(createMockEvent({ ts: now }));
+      expect(mockLogInstance.log).not.toHaveBeenCalled();
+    });
   });
 
   describe('clearFilter', () => {
@@ -441,6 +493,48 @@ describe('ActivityStream', () => {
     it('should return true after pause', () => {
       activityStream.togglePause();
       expect(activityStream.getIsPaused()).toBe(true);
+    });
+  });
+
+  describe('getFilter', () => {
+    it('should return current filter', () => {
+      const filter: ActivityFilter = { workerId: 'w-test', level: 'error' };
+      activityStream.setFilter(filter);
+
+      const currentFilter = activityStream.getFilter();
+      expect(currentFilter).toEqual(filter);
+    });
+
+    it('should return a copy of the filter', () => {
+      const filter: ActivityFilter = { workerId: 'w-test' };
+      activityStream.setFilter(filter);
+
+      const currentFilter = activityStream.getFilter();
+      currentFilter.workerId = 'w-modified';
+
+      // Original filter should not be modified
+      expect(activityStream.getFilter().workerId).toBe('w-test');
+    });
+  });
+
+  describe('getEventsCount and getFilteredEventsCount', () => {
+    it('should return total events count', () => {
+      activityStream.addEvent(createMockEvent());
+      activityStream.addEvent(createMockEvent());
+      activityStream.addEvent(createMockEvent());
+
+      expect(activityStream.getEventsCount()).toBe(3);
+    });
+
+    it('should return filtered events count', () => {
+      activityStream.addEvent(createMockEvent({ worker: 'w-alpha' }));
+      activityStream.addEvent(createMockEvent({ worker: 'w-beta' }));
+      activityStream.addEvent(createMockEvent({ worker: 'w-alpha' }));
+
+      activityStream.setFilter({ workerId: 'w-alpha' });
+
+      expect(activityStream.getEventsCount()).toBe(3);
+      expect(activityStream.getFilteredEventsCount()).toBe(2);
     });
   });
 

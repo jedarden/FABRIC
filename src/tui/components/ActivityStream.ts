@@ -37,6 +37,12 @@ export interface ActivityFilter {
 
   /** Filter by search term */
   search?: string;
+
+  /** Filter by time range start (Unix timestamp in ms) */
+  since?: number;
+
+  /** Filter by time range end (Unix timestamp in ms) */
+  until?: number;
 }
 
 /**
@@ -114,6 +120,12 @@ export class ActivityStream {
       return false;
     }
     if (this.filter.level && event.level !== this.filter.level) {
+      return false;
+    }
+    if (this.filter.since && event.ts < this.filter.since) {
+      return false;
+    }
+    if (this.filter.until && event.ts > this.filter.until) {
       return false;
     }
     if (this.filter.search) {
@@ -228,6 +240,27 @@ export class ActivityStream {
    */
   getIsPaused(): boolean {
     return this.isPaused;
+  }
+
+  /**
+   * Get current filter
+   */
+  getFilter(): ActivityFilter {
+    return { ...this.filter };
+  }
+
+  /**
+   * Get current events count
+   */
+  getEventsCount(): number {
+    return this.events.length;
+  }
+
+  /**
+   * Get filtered events count
+   */
+  getFilteredEventsCount(): number {
+    return this.events.filter(e => this.passesFilter(e)).length;
   }
 }
 

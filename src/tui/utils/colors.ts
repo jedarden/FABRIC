@@ -29,6 +29,11 @@ export const colors = {
   bgPanel: 'black',
   bgFocus: 'blue',
 
+  // Input colors
+  inputBg: 'black',
+  inputFocusBg: 'blue',
+  dim: 'gray',
+
   // Heat level colors
   heatCold: 'blue',
   heatWarm: 'yellow',
