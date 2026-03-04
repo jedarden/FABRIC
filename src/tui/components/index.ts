@@ -48,3 +48,6 @@ export type { ConversationTranscriptOptions } from './ConversationTranscript.js'
 
 export { SemanticNarrativePanel } from './SemanticNarrativePanel.js';
 export type { SemanticNarrativePanelOptions } from './SemanticNarrativePanel.js';
+
+export { WorkerAnalyticsPanel } from './WorkerAnalyticsPanel.js';
+export type { WorkerAnalyticsPanelOptions } from './WorkerAnalyticsPanel.js';

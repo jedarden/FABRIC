@@ -20,6 +20,7 @@ import { SessionDigest, generateSessionDigest } from './components/SessionDigest
 import { CollisionAlert } from './components/CollisionAlert.js';
 import { GitIntegration } from './components/GitIntegration.js';
 import { SemanticNarrativePanel } from './components/SemanticNarrativePanel.js';
+import { WorkerAnalyticsPanel } from './components/WorkerAnalyticsPanel.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
 import { parseGitEvents } from '../gitParser.js';
@@ -42,7 +43,7 @@ export class FabricTuiApp {
   private isRunning = false;
 
   // View mode
-  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' = 'default';
+  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics' = 'default';
 
   // Focus mode state
   private focusModeEnabled = false;
@@ -63,6 +64,7 @@ export class FabricTuiApp {
   private collisionAlert!: CollisionAlert;
   private gitIntegration!: GitIntegration;
   private semanticNarrativePanel!: SemanticNarrativePanel;
+  private workerAnalyticsPanel!: WorkerAnalyticsPanel;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -245,6 +247,19 @@ export class FabricTuiApp {
     });
     this.semanticNarrativePanel.hide();
 
+    // Worker Analytics panel (hidden by default, 'A' key)
+    this.workerAnalyticsPanel = new WorkerAnalyticsPanel({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      bottom: 1,
+      onSelect: (workerId) => {
+        // Could highlight worker in grid
+      },
+    });
+    this.workerAnalyticsPanel.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -264,7 +279,7 @@ export class FabricTuiApp {
    */
   private getFooterContent(): string {
     if (this.viewMode === 'default') {
-      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions  [N] Narrative';
+      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions  [N] Narrative  [A] Analytics';
 
       // Show focus mode status
       if (this.focusModeEnabled) {
@@ -284,7 +299,7 @@ export class FabricTuiApp {
     }
 
     // Return default content for other views
-    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [N] Narrative  [?] Help  [q] Quit';
+    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [N] Narrative  [A] Analytics  [?] Help  [q] Quit';
   }
 
   /**
@@ -368,6 +383,11 @@ export class FabricTuiApp {
       this.toggleNarrativeView();
     });
 
+    // Toggle worker analytics view
+    this.screen.key(['A'], () => {
+      this.toggleAnalyticsView();
+    });
+
     // Escape to return to default view
     this.screen.key(['escape'], () => {
       if (this.viewMode !== 'default') {
@@ -419,6 +439,8 @@ export class FabricTuiApp {
       this.toggleGitView();
     } else if (cmd === 'narrative') {
       this.toggleNarrativeView();
+    } else if (cmd === 'analytics') {
+      this.toggleAnalyticsView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
@@ -517,6 +539,17 @@ export class FabricTuiApp {
   }
 
   /**
+   * Toggle worker analytics view
+   */
+  private toggleAnalyticsView(): void {
+    if (this.viewMode === 'analytics') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('analytics');
+    }
+  }
+
+  /**
    * Update collision alerts from store
    */
   private updateCollisionAlerts(): void {
@@ -527,7 +560,7 @@ export class FabricTuiApp {
   /**
    * Set view mode
    */
-  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative'): void {
+  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics'): void {
     this.viewMode = mode;
 
     if (mode === 'heatmap') {
@@ -701,6 +734,47 @@ export class FabricTuiApp {
       // Update header
       this.headerBox.setContent(' FABRIC - Semantic Narrative');
       this.footerBox.setContent(' [↑/↓] or [j/k] Navigate  [Enter] Detail  [f] Full View  [r] Refresh  [Esc] Back  [?] Help  [q] Quit');
+    } else if (mode === 'analytics') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+      this.collisionAlert.hide();
+      this.gitIntegration.hide();
+      this.semanticNarrativePanel.hide();
+
+      // Show worker analytics panel
+      this.workerAnalyticsPanel.show();
+
+      // Get metrics from workers in store
+      const workers = this.store.getWorkers();
+      // Convert WorkerInfo to WorkerMetrics format
+      const metrics = workers.map(w => ({
+        workerId: w.id,
+        periodStart: w.firstSeen,
+        periodEnd: w.lastActivity,
+        beadsCompleted: w.beadsCompleted,
+        beadsPerHour: w.beadsCompleted / Math.max(1, (w.lastActivity - w.firstSeen) / 3600000),
+        avgCompletionTimeMs: 0,
+        errorRate: w.status === 'error' ? 1 : 0,
+        errorCount: w.status === 'error' ? 1 : 0,
+        costPerBead: 0,
+        totalCostUsd: 0,
+        totalTokens: 0,
+        activeTimeMs: w.lastActivity - w.firstSeen,
+        idlePercentage: 0,
+        efficiencyScore: Math.min(1, w.beadsCompleted / 10),
+      }));
+      this.workerAnalyticsPanel.setMetrics(metrics);
+      this.workerAnalyticsPanel.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Worker Analytics');
+      this.footerBox.setContent(' [↑/↓] or [j/k] Navigate  [Enter] Detail  [a] Aggregated  [s] Sort  [r] Refresh  [Esc] Back  [?] Help  [q] Quit');
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
@@ -711,6 +785,7 @@ export class FabricTuiApp {
       this.collisionAlert.hide();
       this.gitIntegration.hide();
       this.semanticNarrativePanel.hide();
+      this.workerAnalyticsPanel.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
@@ -848,6 +923,7 @@ Actions:
   G       - Toggle session digest
   I       - Toggle git integration
   N       - Toggle semantic narrative
+  A       - Toggle worker analytics
 
 Focus Mode:
   F       - Toggle focus mode
@@ -897,6 +973,15 @@ Semantic Narrative:
   Enter   - Toggle detail view
   f       - Toggle full narrative
   r       - Refresh narrative
+  Esc     - Return to default view
+
+Worker Analytics:
+  A       - Toggle worker analytics view
+  ↑/↓ or j/k - Navigate workers
+  Enter   - Toggle detail view
+  a       - Toggle aggregated view
+  s       - Cycle sort mode
+  r       - Refresh metrics
   Esc     - Return to default view
 
 General:
