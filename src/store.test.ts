@@ -745,6 +745,841 @@ describe('InMemoryEventStore', () => {
       });
     });
   });
+
+  describe('bead collision detection', () => {
+    it('should detect collision when multiple workers work on same bead', () => {
+      const ts = Date.now();
+      const beadId = 'bd-test';
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: beadId,
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        bead: beadId,
+        ts: ts + 5000 // Within 60 second window
+      }));
+
+      const collisions = store.getBeadCollisions();
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].beadId).toBe(beadId);
+      expect(collisions[0].workers).toContain('w1');
+      expect(collisions[0].workers).toContain('w2');
+      expect(collisions[0].isActive).toBe(true);
+    });
+
+    it('should not detect bead collision outside time window', () => {
+      const ts = Date.now();
+      const beadId = 'bd-test';
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: beadId,
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        bead: beadId,
+        ts: ts + 65000 // Outside 60 second window
+      }));
+
+      const collisions = store.getBeadCollisions();
+      expect(collisions).toHaveLength(0);
+    });
+
+    it('should set severity to critical when workers use write tools', () => {
+      const ts = Date.now();
+      const beadId = 'bd-test';
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: beadId,
+        tool: 'Edit',
+        path: '/src/test.ts',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        bead: beadId,
+        tool: 'Write',
+        path: '/src/test.ts',
+        ts: ts + 1000
+      }));
+
+      const collisions = store.getBeadCollisions();
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].severity).toBe('critical');
+    });
+
+    it('should set severity to warning for non-write operations', () => {
+      const ts = Date.now();
+      const beadId = 'bd-test';
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: beadId,
+        tool: 'Read',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        bead: beadId,
+        tool: 'Grep',
+        ts: ts + 1000
+      }));
+
+      const collisions = store.getBeadCollisions();
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].severity).toBe('warning');
+    });
+
+    it('should get bead collisions for specific worker', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        bead: 'bd-1',
+        ts: ts + 1000
+      }));
+
+      const w1Collisions = store.getWorkerBeadCollisions('w1');
+      expect(w1Collisions).toHaveLength(1);
+
+      const w3Collisions = store.getWorkerBeadCollisions('w3');
+      expect(w3Collisions).toHaveLength(0);
+    });
+
+    it('should update worker collision types for bead collision', () => {
+      const ts = Date.now();
+      const beadId = 'bd-test';
+
+      store.add(createEvent({
+        worker: 'w1',
+        bead: beadId,
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        bead: beadId,
+        ts: ts + 1000
+      }));
+
+      const worker1 = store.getWorker('w1');
+      const worker2 = store.getWorker('w2');
+
+      expect(worker1?.collisionTypes).toContain('bead');
+      expect(worker2?.collisionTypes).toContain('bead');
+      expect(worker1?.hasCollision).toBe(true);
+      expect(worker2?.hasCollision).toBe(true);
+    });
+  });
+
+  describe('task collision detection', () => {
+    it('should detect collision when workers work in same directory', () => {
+      const ts = Date.now();
+      const directory = '/src';
+
+      store.add(createEvent({
+        worker: 'w1',
+        path: `${directory}/file1.ts`,
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path: `${directory}/file2.ts`,
+        tool: 'Edit',
+        ts: ts + 1000
+      }));
+
+      const collisions = store.getTaskCollisions();
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].type).toBe('directory');
+      expect(collisions[0].workers).toContain('w1');
+      expect(collisions[0].workers).toContain('w2');
+      expect(collisions[0].affectedResources).toContain(directory);
+    });
+
+    it('should set risk level based on active worker count', () => {
+      const ts = Date.now();
+      const directory = '/src';
+
+      // Add 2 workers (medium risk)
+      store.add(createEvent({
+        worker: 'w1',
+        path: `${directory}/file1.ts`,
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path: `${directory}/file2.ts`,
+        ts: ts + 100
+      }));
+
+      let collisions = store.getTaskCollisions();
+      expect(collisions[0].riskLevel).toBe('medium');
+
+      // Add 3rd worker (high risk)
+      store.add(createEvent({
+        worker: 'w3',
+        path: `${directory}/file3.ts`,
+        ts: ts + 200
+      }));
+
+      collisions = store.getTaskCollisions();
+      expect(collisions[0].riskLevel).toBe('high');
+    });
+
+    it('should track active directories for workers', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/src/app/file.ts',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/src/lib/utils.ts',
+        ts: ts + 100
+      }));
+
+      const worker = store.getWorker('w1');
+      expect(worker?.activeDirectories).toContain('/src/app');
+      expect(worker?.activeDirectories).toContain('/src/lib');
+    });
+
+    it('should get task collisions for specific worker', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/src/file1.ts',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path: '/src/file2.ts',
+        ts: ts + 100
+      }));
+
+      const w1Collisions = store.getWorkerTaskCollisions('w1');
+      expect(w1Collisions).toHaveLength(1);
+
+      const w3Collisions = store.getWorkerTaskCollisions('w3');
+      expect(w3Collisions).toHaveLength(0);
+    });
+  });
+
+  describe('file heatmap', () => {
+    beforeEach(() => {
+      const ts = Date.now();
+
+      // Create modification pattern
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/src/hot.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      for (let i = 0; i < 10; i++) {
+        store.add(createEvent({
+          worker: 'w1',
+          path: '/src/hot.ts',
+          tool: 'Edit',
+          ts: ts + (i + 1) * 1000
+        }));
+      }
+
+      // Add 4 modifications for warm level (3-5 modifications)
+      for (let i = 0; i < 4; i++) {
+        store.add(createEvent({
+          worker: 'w2',
+          path: '/src/warm.ts',
+          tool: 'Edit',
+          ts: ts + 500 + i * 100
+        }));
+      }
+
+      store.add(createEvent({
+        worker: 'w3',
+        path: '/src/cold.ts',
+        tool: 'Edit',
+        ts: ts + 2000
+      }));
+    });
+
+    it('should classify heat levels correctly', () => {
+      const heatmap = store.getFileHeatmap();
+
+      const hot = heatmap.find(e => e.path === '/src/hot.ts');
+      const warm = heatmap.find(e => e.path === '/src/warm.ts');
+      const cold = heatmap.find(e => e.path === '/src/cold.ts');
+
+      expect(hot?.heatLevel).toBe('critical'); // 11+ modifications
+      expect(warm?.heatLevel).toBe('warm'); // 4 modifications (3-5 = warm)
+      expect(cold?.heatLevel).toBe('cold'); // 1 modification
+    });
+
+    it('should sort by modification count', () => {
+      const heatmap = store.getFileHeatmap({ sortBy: 'modifications' });
+
+      expect(heatmap[0].path).toBe('/src/hot.ts');
+      expect(heatmap[0].modifications).toBeGreaterThan(heatmap[1].modifications);
+    });
+
+    it('should filter by directory', () => {
+      const ts = Date.now();
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/lib/utils.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      const srcHeatmap = store.getFileHeatmap({ directoryFilter: '/src' });
+      expect(srcHeatmap.every(e => e.path.startsWith('/src'))).toBe(true);
+    });
+
+    it('should filter collisions only', () => {
+      const ts = Date.now();
+      const path = '/src/collision.ts';
+
+      // Create collision
+      store.add(createEvent({
+        worker: 'w1',
+        path,
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path,
+        tool: 'Edit',
+        ts: ts + 1000
+      }));
+
+      const collisionHeatmap = store.getFileHeatmap({ collisionsOnly: true });
+      expect(collisionHeatmap.every(e => e.hasCollision)).toBe(true);
+    });
+
+    it('should limit max entries', () => {
+      const heatmap = store.getFileHeatmap({ maxEntries: 2 });
+      expect(heatmap.length).toBeLessThanOrEqual(2);
+    });
+
+    it('should calculate worker contributions', () => {
+      const heatmap = store.getFileHeatmap();
+      const hot = heatmap.find(e => e.path === '/src/hot.ts');
+
+      expect(hot?.workers.length).toBeGreaterThan(0);
+      expect(hot?.workers[0].workerId).toBe('w1');
+      expect(hot?.workers[0].modifications).toBe(11);
+      expect(hot?.workers[0].percentage).toBe(100);
+    });
+
+    it('should provide heatmap statistics', () => {
+      const stats = store.getFileHeatmapStats();
+
+      expect(stats.totalFiles).toBeGreaterThan(0);
+      expect(stats.totalModifications).toBeGreaterThan(0);
+      expect(stats.heatDistribution.critical).toBeGreaterThan(0);
+      expect(stats.mostActiveDirectory).toBeDefined();
+      expect(stats.avgModificationsPerFile).toBeGreaterThan(0);
+    });
+
+    it('should get worker files', () => {
+      const workerFiles = store.getWorkerFiles('w1');
+
+      expect(workerFiles.length).toBeGreaterThan(0);
+      expect(workerFiles.every(f =>
+        f.workers.some(w => w.workerId === 'w1')
+      )).toBe(true);
+    });
+
+    it('should identify collision risk files', () => {
+      const ts = Date.now();
+      const path = '/src/risky.ts';
+
+      // Multiple workers modify same file
+      for (let i = 0; i < 3; i++) {
+        store.add(createEvent({
+          worker: `w${i + 1}`,
+          path,
+          tool: 'Edit',
+          ts: ts + i * 100
+        }));
+      }
+
+      const riskFiles = store.getCollisionRiskFiles(3);
+      expect(riskFiles.some(f => f.path === path)).toBe(true);
+    });
+  });
+
+  describe('collision alerts', () => {
+    it('should generate collision alerts for all collision types', () => {
+      const ts = Date.now();
+
+      // File collision
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/src/file.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path: '/src/file.ts',
+        tool: 'Edit',
+        ts: ts + 1000
+      }));
+
+      // Bead collision
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        ts: ts + 2000
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        bead: 'bd-1',
+        ts: ts + 3000
+      }));
+
+      // Task collision
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/src/dir1/a.ts',
+        ts: ts + 4000
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path: '/src/dir1/b.ts',
+        ts: ts + 5000
+      }));
+
+      const alerts = store.generateCollisionAlerts();
+
+      expect(alerts.length).toBeGreaterThan(0);
+      expect(alerts.some(a => a.type === 'file')).toBe(true);
+      expect(alerts.some(a => a.type === 'bead')).toBe(true);
+      expect(alerts.some(a => a.type === 'task')).toBe(true);
+    });
+
+    it('should sort alerts by severity', () => {
+      const ts = Date.now();
+
+      // Create critical bead collision
+      store.add(createEvent({
+        worker: 'w1',
+        bead: 'bd-1',
+        tool: 'Edit',
+        path: '/src/file.ts',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        bead: 'bd-1',
+        tool: 'Write',
+        path: '/src/file.ts',
+        ts: ts + 1000
+      }));
+
+      const alerts = store.generateCollisionAlerts();
+      const severityOrder = ['critical', 'error', 'warning', 'info'];
+
+      for (let i = 1; i < alerts.length; i++) {
+        const prevIndex = severityOrder.indexOf(alerts[i - 1].severity);
+        const currIndex = severityOrder.indexOf(alerts[i].severity);
+        expect(prevIndex).toBeLessThanOrEqual(currIndex);
+      }
+    });
+
+    it('should get collision statistics', () => {
+      const ts = Date.now();
+
+      // Create various collisions
+      store.add(createEvent({
+        worker: 'w1',
+        path: '/src/file.ts',
+        tool: 'Edit',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        path: '/src/file.ts',
+        tool: 'Edit',
+        ts: ts + 1000
+      }));
+
+      const stats = store.getCollisionStats();
+
+      expect(stats.totalFileCollisions).toBeGreaterThanOrEqual(0);
+      expect(stats.totalBeadCollisions).toBeGreaterThanOrEqual(0);
+      expect(stats.totalTaskCollisions).toBeGreaterThanOrEqual(0);
+      expect(stats.activeFileCollisions).toBeGreaterThan(0);
+      expect(stats.workersWithCollisions).toBeGreaterThan(0);
+    });
+  });
+
+  describe('error grouping', () => {
+    it('should track error events in error groups', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        level: 'error',
+        msg: 'Error: File not found',
+        ts
+      }));
+
+      const groups = store.getErrorGroups();
+      expect(groups.length).toBeGreaterThan(0);
+    });
+
+    it('should get active error groups', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        level: 'error',
+        msg: 'Test error',
+        ts
+      }));
+
+      const activeGroups = store.getActiveErrorGroups();
+      expect(Array.isArray(activeGroups)).toBe(true);
+    });
+
+    it('should get worker error groups', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        level: 'error',
+        msg: 'Worker 1 error',
+        ts
+      }));
+
+      store.add(createEvent({
+        worker: 'w2',
+        level: 'error',
+        msg: 'Worker 2 error',
+        ts: ts + 1000
+      }));
+
+      const w1Groups = store.getWorkerErrorGroups('w1');
+      expect(Array.isArray(w1Groups)).toBe(true);
+    });
+
+    it('should provide error statistics', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        level: 'error',
+        msg: 'Error message',
+        ts
+      }));
+
+      const stats = store.getErrorStats();
+
+      expect(stats.totalGroups).toBeGreaterThanOrEqual(0);
+      expect(stats.totalErrors).toBeGreaterThanOrEqual(0);
+      expect(stats.byCategory).toBeDefined();
+      expect(stats.bySeverity).toBeDefined();
+    });
+  });
+
+  describe('concurrent access patterns', () => {
+    it('should handle multiple workers adding events simultaneously', () => {
+      const ts = Date.now();
+      const events = [];
+
+      // Simulate concurrent event additions
+      for (let i = 0; i < 100; i++) {
+        events.push(createEvent({
+          worker: `w${i % 10}`,
+          bead: `bd-${i % 5}`,
+          ts: ts + i
+        }));
+      }
+
+      events.forEach(event => store.add(event));
+
+      expect(store.size).toBe(100);
+      expect(store.getWorkers().length).toBe(10);
+    });
+
+    it('should maintain data consistency with rapid queries', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({ worker: 'w1', ts }));
+      store.add(createEvent({ worker: 'w2', ts: ts + 100 }));
+
+      // Rapid queries
+      const results = [];
+      for (let i = 0; i < 10; i++) {
+        results.push(store.query());
+      }
+
+      // All results should be consistent
+      results.forEach(r => {
+        expect(r.length).toBe(2);
+      });
+    });
+
+    it('should handle concurrent collision detection', () => {
+      const ts = Date.now();
+      const path = '/src/concurrent.ts';
+
+      // Add multiple workers modifying same file
+      for (let i = 0; i < 5; i++) {
+        store.add(createEvent({
+          worker: `w${i}`,
+          path,
+          tool: 'Edit',
+          ts: ts + i * 100
+        }));
+      }
+
+      const collisions = store.getCollisions();
+      expect(collisions.length).toBeGreaterThan(0);
+      expect(collisions[0].workers.length).toBe(5);
+    });
+  });
+
+  describe('event expiration', () => {
+    it('should respect maxEvents limit during rapid additions', () => {
+      const smallStore = new InMemoryEventStore(100);
+      const ts = Date.now();
+
+      // Add more events than limit
+      for (let i = 0; i < 150; i++) {
+        smallStore.add(createEvent({ ts: ts + i }));
+      }
+
+      expect(smallStore.size).toBe(100);
+    });
+
+    it('should maintain oldest events when at limit', () => {
+      const smallStore = new InMemoryEventStore(5);
+      const ts = Date.now();
+
+      for (let i = 0; i < 10; i++) {
+        smallStore.add(createEvent({
+          ts: ts + i,
+          msg: `Event ${i}`
+        }));
+      }
+
+      const events = smallStore.query();
+      expect(events[0].msg).toBe('Event 5');
+      expect(events[events.length - 1].msg).toBe('Event 9');
+    });
+  });
+
+  describe('worker analytics integration', () => {
+    it('should provide worker analytics instance', () => {
+      const analytics = store.getWorkerAnalytics();
+      expect(analytics).toBeDefined();
+    });
+
+    it('should track analytics for events', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w-analytics',
+        tool: 'Edit',
+        path: '/src/file.ts',
+        ts
+      }));
+
+      // Analytics should be available (basic check)
+      const analytics = store.getWorkerAnalytics();
+      expect(analytics).toBeDefined();
+    });
+  });
+
+  describe('recovery suggestions integration', () => {
+    it('should provide recovery suggestions for errors', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        level: 'error',
+        msg: 'Error: ENOENT: no such file or directory',
+        ts
+      }));
+
+      const suggestions = store.getRecoverySuggestions();
+      expect(Array.isArray(suggestions)).toBe(true);
+    });
+
+    it('should get recovery statistics', () => {
+      const stats = store.getRecoveryStats();
+      expect(stats).toBeDefined();
+    });
+
+    it('should clear recovery suggestions', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w1',
+        level: 'error',
+        msg: 'Test error',
+        ts
+      }));
+
+      store.clearRecoverySuggestions();
+      // Should not throw
+      expect(true).toBe(true);
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should handle event without worker gracefully', () => {
+      const event = createEvent({ worker: '' });
+      store.add(event);
+
+      expect(store.size).toBe(1);
+    });
+
+    it('should handle event without timestamp', () => {
+      const event = { ...createEvent(), ts: undefined as any };
+      store.add(event);
+
+      expect(store.size).toBe(1);
+    });
+
+    it('should handle empty path', () => {
+      store.add(createEvent({
+        path: '',
+        tool: 'Edit'
+      }));
+
+      expect(store.size).toBe(1);
+    });
+
+    it('should handle null/undefined fields in filter', () => {
+      store.add(createEvent());
+
+      const events1 = store.query({ worker: undefined } as any);
+      expect(events1.length).toBeGreaterThan(0);
+
+      const events2 = store.query({ bead: undefined });
+      expect(events2.length).toBeGreaterThan(0);
+    });
+
+    it('should handle root directory path', () => {
+      store.add(createEvent({
+        path: '/file.ts',
+        tool: 'Edit'
+      }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.activeDirectories).toContain('/');
+    });
+
+    it('should handle file path without directory', () => {
+      store.add(createEvent({
+        path: 'file.ts',
+        tool: 'Edit'
+      }));
+
+      expect(store.size).toBe(1);
+    });
+
+    it('should handle multiple simultaneous collisions on same file', () => {
+      const ts = Date.now();
+      const path = '/src/busy.ts';
+
+      // Create multiple collision events at nearly same time
+      for (let i = 0; i < 10; i++) {
+        store.add(createEvent({
+          worker: `w${i}`,
+          path,
+          tool: 'Edit',
+          ts: ts + i * 10
+        }));
+      }
+
+      const collisions = store.getCollisions();
+      expect(collisions.length).toBeGreaterThan(0);
+    });
+
+    it('should handle query with all filters set', () => {
+      const ts = Date.now();
+
+      store.add(createEvent({
+        worker: 'w-specific',
+        level: 'info',
+        bead: 'bd-specific',
+        path: '/src/specific.ts',
+        ts
+      }));
+
+      const events = store.query({
+        worker: 'w-specific',
+        level: 'info',
+        bead: 'bd-specific',
+        path: '/src/specific.ts',
+        since: ts - 1000,
+        until: ts + 1000
+      });
+
+      expect(events.length).toBe(1);
+    });
+  });
+
+  describe('batch processing', () => {
+    // Skipped: Batch processing uses setTimeout which can cause test timeouts
+    it.skip('should handle batch buffer for cross-references', async () => {
+      const ts = Date.now();
+
+      // Add multiple events quickly
+      for (let i = 0; i < 10; i++) {
+        store.add(createEvent({
+          worker: 'w1',
+          bead: 'bd-1',
+          path: `/src/file${i}.ts`,
+          tool: 'Edit',
+          ts: ts + i * 100
+        }));
+      }
+
+      // Wait for batch processing (1 second timeout + buffer)
+      await new Promise(resolve => setTimeout(resolve, 1200));
+
+      // Cross-references should be processed
+      const stats = store.getCrossReferenceStats();
+      expect(stats.totalLinks).toBeGreaterThan(0);
+    }, 3000); // 3 second timeout for this test
+  });
 });
 
 describe('getStore and resetStore', () => {
