@@ -225,6 +225,40 @@ function generateEventId(): string {
 }
 
 /**
+ * Helper: Get string value from LogEvent
+ */
+function getString(event: LogEvent, key: string): string | undefined {
+  const value = event[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Helper: Get number value from LogEvent
+ */
+function getNumber(event: LogEvent, key: string): number | undefined {
+  const value = event[key];
+  return typeof value === 'number' ? value : undefined;
+}
+
+/**
+ * Helper: Get boolean value from LogEvent
+ */
+function getBoolean(event: LogEvent, key: string): boolean | undefined {
+  const value = event[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+/**
+ * Helper: Get object value from LogEvent
+ */
+function getObject<T = Record<string, unknown>>(event: LogEvent, key: string): T | undefined {
+  const value = event[key];
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as T)
+    : undefined;
+}
+
+/**
  * Check if a log event contains conversation-related content
  */
 export function isConversationEvent(event: LogEvent): boolean {
@@ -385,8 +419,8 @@ function parsePromptEvent(
     bead: event.bead,
     sequence,
     content: truncate(content, maxLength),
-    isContinuation: event.is_continuation ?? event.continuation,
-    tokens: event.tokens ?? event.input_tokens,
+    isContinuation: getBoolean(event, 'is_continuation') ?? getBoolean(event, 'continuation'),
+    tokens: getNumber(event, 'tokens') ?? getNumber(event, 'input_tokens'),
   };
 }
 
@@ -411,9 +445,9 @@ function parseResponseEvent(
     sequence,
     content: truncate(content, maxLength),
     isTruncated: content.length > maxLength,
-    model: event.model ?? event.model_name,
-    stopReason: event.stop_reason as ResponseEvent['stopReason'],
-    tokens: event.tokens ?? event.output_tokens,
+    model: getString(event, 'model') ?? getString(event, 'model_name'),
+    stopReason: getString(event, 'stop_reason') as ResponseEvent['stopReason'],
+    tokens: getNumber(event, 'tokens') ?? getNumber(event, 'output_tokens'),
   };
 }
 
@@ -438,8 +472,8 @@ function parseThinkingEvent(
     sequence,
     content: truncate(content, maxLength),
     isTruncated: content.length > maxLength,
-    durationMs: event.thinking_duration_ms ?? event.duration_ms,
-    tokens: event.tokens,
+    durationMs: getNumber(event, 'thinking_duration_ms') ?? event.duration_ms,
+    tokens: getNumber(event, 'tokens'),
   };
 }
 
@@ -447,7 +481,7 @@ function parseThinkingEvent(
  * Parse a tool call event
  */
 function parseToolCallEvent(event: LogEvent, sequence: number): ToolCallEvent | null {
-  const tool = event.tool || event.tool_name;
+  const tool = event.tool || getString(event, 'tool_name');
   if (!tool) return null;
 
   const args = normalizeToolArgs(event);
@@ -461,10 +495,10 @@ function parseToolCallEvent(event: LogEvent, sequence: number): ToolCallEvent | 
     bead: event.bead,
     sequence,
     tool,
-    args,
-    toolCallId: event.tool_call_id ?? event.call_id,
-    summary: generateToolSummary(tool, args),
-    tokens: event.tokens,
+    args: args as Record<string, import('./types.js').ToolArgValue>,
+    toolCallId: getString(event, 'tool_call_id') ?? getString(event, 'call_id'),
+    summary: generateToolSummary(tool, args as Record<string, import('./types.js').ToolArgValue>),
+    tokens: getNumber(event, 'tokens'),
   };
 }
 
@@ -476,7 +510,7 @@ function parseToolResultEvent(
   sequence: number,
   maxLength: number
 ): ToolResultEvent | null {
-  const tool = event.tool || event.tool_name;
+  const tool = event.tool || getString(event, 'tool_name');
   if (!tool) return null;
 
   const content = extractContent(event, 'tool_result') ||
@@ -484,7 +518,7 @@ function parseToolResultEvent(
     extractContent(event, 'content') ||
     '';
 
-  const hasError = event.error || event.tool_error || event.success === false;
+  const hasError = event.error || getString(event, 'tool_error') || event.success === false;
 
   return {
     id: generateEventId(),
@@ -495,14 +529,14 @@ function parseToolResultEvent(
     bead: event.bead,
     sequence,
     tool,
-    toolCallId: event.tool_call_id ?? event.call_id,
+    toolCallId: getString(event, 'tool_call_id') ?? getString(event, 'call_id'),
     content: truncate(content, maxLength),
     success: !hasError,
-    error: event.error || event.tool_error,
-    durationMs: event.duration_ms ?? event.tool_duration_ms,
+    error: event.error || getString(event, 'tool_error'),
+    durationMs: event.duration_ms ?? getNumber(event, 'tool_duration_ms'),
     isTruncated: content.length > maxLength,
     resultSize: content.length,
-    tokens: event.tokens,
+    tokens: getNumber(event, 'tokens'),
   };
 }
 

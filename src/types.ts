@@ -853,6 +853,197 @@ export interface DagStats {
 }
 
 // ============================================
+// Git Event Types
+// ============================================
+
+/**
+ * Type of git event
+ */
+export type GitEventType =
+  | 'status'   // Git status output (staged, unstaged, untracked)
+  | 'commit'   // Git commit
+  | 'branch'   // Branch information
+  | 'diff';    // Git diff output
+
+/**
+ * File status in git
+ */
+export type GitFileStatus =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'copied'
+  | 'untracked'
+  | 'unmerged';
+
+/**
+ * Single file change in git
+ */
+export interface GitFileChange {
+  /** File path */
+  path: string;
+
+  /** Status of the file */
+  status: GitFileStatus;
+
+  /** Original path (for renames) */
+  originalPath?: string;
+
+  /** Staging area status */
+  staged: boolean;
+}
+
+/**
+ * Base interface for all git events
+ */
+export interface GitEventBase {
+  /** Unique event identifier */
+  id: string;
+
+  /** Type of git event */
+  type: GitEventType;
+
+  /** Unix timestamp in milliseconds */
+  ts: number;
+
+  /** Worker identifier */
+  worker: string;
+
+  /** Associated bead/task ID (if any) */
+  bead?: string;
+}
+
+/**
+ * Git status event
+ */
+export interface GitStatusEvent extends GitEventBase {
+  type: 'status';
+
+  /** Current branch name */
+  branch: string;
+
+  /** Commit hash (HEAD) */
+  commit?: string;
+
+  /** Staged file changes */
+  staged: GitFileChange[];
+
+  /** Unstaged file changes */
+  unstaged: GitFileChange[];
+
+  /** Untracked files */
+  untracked: string[];
+
+  /** Commits ahead of remote */
+  ahead?: number;
+
+  /** Commits behind remote */
+  behind?: number;
+
+  /** Remote tracking branch */
+  tracking?: string;
+}
+
+/**
+ * Git commit event
+ */
+export interface GitCommitEvent extends GitEventBase {
+  type: 'commit';
+
+  /** Commit hash */
+  hash: string;
+
+  /** Commit message */
+  message: string;
+
+  /** Branch name */
+  branch?: string;
+
+  /** Author name */
+  author?: string;
+
+  /** Author email */
+  email?: string;
+
+  /** Parent commit hash(es) */
+  parents?: string[];
+
+  /** Files changed in this commit */
+  files?: GitFileChange[];
+}
+
+/**
+ * Git branch event
+ */
+export interface GitBranchEvent extends GitEventBase {
+  type: 'branch';
+
+  /** Current branch name */
+  current: string;
+
+  /** All local branches */
+  branches?: string[];
+
+  /** Remote tracking branch */
+  tracking?: string;
+
+  /** Commits ahead of tracking */
+  ahead?: number;
+
+  /** Commits behind tracking */
+  behind?: number;
+}
+
+/**
+ * Git diff event
+ */
+export interface GitDiffEvent extends GitEventBase {
+  type: 'diff';
+
+  /** Diff target (e.g., 'HEAD', 'origin/main') */
+  target: string;
+
+  /** Files with changes */
+  files: GitFileChange[];
+
+  /** Total lines added */
+  linesAdded: number;
+
+  /** Total lines deleted */
+  linesDeleted: number;
+
+  /** Diff content (may be truncated) */
+  content?: string;
+
+  /** Whether diff content is truncated */
+  isTruncated?: boolean;
+}
+
+/**
+ * Union type for all git events
+ */
+export type GitEvent =
+  | GitStatusEvent
+  | GitCommitEvent
+  | GitBranchEvent
+  | GitDiffEvent;
+
+/**
+ * Options for parsing git events
+ */
+export interface GitParseOptions {
+  /** Maximum diff content length before truncation */
+  maxDiffLength?: number;
+
+  /** Include file change details */
+  includeFileChanges?: boolean;
+
+  /** Maximum files to track in a single event */
+  maxFiles?: number;
+}
+
+// ============================================
 // Cross-Reference Types
 // ============================================
 

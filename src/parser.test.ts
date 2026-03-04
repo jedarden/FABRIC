@@ -866,3 +866,690 @@ describe('formatEvent - additional edge cases', () => {
     expect(formatted).toMatch(/\d{2}:\d{2}:\d{2}/); // Timestamp still present
   });
 });
+
+// ============================================
+// Conversation Event Parsing Tests
+// ============================================
+
+describe('isConversationEvent', () => {
+  it('should return true for events with conversation_role field', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Test',
+      conversation_role: 'user',
+    };
+    expect(isConversationEvent(event)).toBe(true);
+  });
+
+  it('should return true for events with conversation_type field', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Test',
+      conversation_type: 'prompt',
+    };
+    expect(isConversationEvent(event)).toBe(true);
+  });
+
+  it('should return true for events with prompt field', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Test',
+      prompt: 'What is the weather?',
+    };
+    expect(isConversationEvent(event)).toBe(true);
+  });
+
+  it('should return true for events with response field', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Test',
+      response: 'The weather is sunny.',
+    };
+    expect(isConversationEvent(event)).toBe(true);
+  });
+
+  it('should return true for events with thinking field', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Test',
+      thinking: 'Let me think about this...',
+    };
+    expect(isConversationEvent(event)).toBe(true);
+  });
+
+  it('should return true for events with tool and tool_args', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Tool call',
+      tool: 'Read',
+      tool_args: { file_path: '/src/main.ts' },
+    };
+    expect(isConversationEvent(event)).toBe(true);
+  });
+
+  it('should return true for events with content field', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Test',
+      content: 'Some content',
+    };
+    expect(isConversationEvent(event)).toBe(true);
+  });
+
+  it('should return false for regular log events', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Starting task',
+    };
+    expect(isConversationEvent(event)).toBe(false);
+  });
+
+  it('should return true for message patterns containing "user prompt"', () => {
+    const event: LogEvent = {
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Received user prompt',
+    };
+    expect(isConversationEvent(event)).toBe(true);
+  });
+});
+
+describe('parseConversationEvent', () => {
+  const baseLogEvent: LogEvent = {
+    ts: 1709337600000,
+    worker: 'w-test',
+    level: 'info',
+    msg: 'Test',
+  };
+
+  describe('prompt events', () => {
+    it('should parse a prompt event with prompt field', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        prompt: 'What is the weather today?',
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('prompt');
+      expect(result?.role).toBe('user');
+      expect((result as any)?.content).toBe('What is the weather today?');
+    });
+
+    it('should parse a prompt event with conversation_role=user', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        conversation_role: 'user',
+        content: 'Hello world',
+      };
+
+      const result = parseConversationEvent(event, 1);
+
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('prompt');
+      expect(result?.role).toBe('user');
+      expect((result as any)?.content).toBe('Hello world');
+      expect(result?.sequence).toBe(1);
+    });
+
+    it('should include bead and tokens in prompt event', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        prompt: 'Test prompt',
+        bead: 'bd-abc',
+        tokens: 100,
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect(result?.bead).toBe('bd-abc');
+      expect(result?.tokens).toBe(100);
+    });
+  });
+
+  describe('response events', () => {
+    it('should parse a response event with response field', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        response: 'The weather is sunny today.',
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('response');
+      expect(result?.role).toBe('assistant');
+      expect((result as any)?.content).toBe('The weather is sunny today.');
+    });
+
+    it('should parse response with model and stop reason', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        response: 'Response text',
+        model: 'claude-3-opus',
+        stop_reason: 'end_turn',
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect((result as any)?.model).toBe('claude-3-opus');
+      expect((result as any)?.stopReason).toBe('end_turn');
+    });
+
+    it('should mark truncated content', () => {
+      const longContent = 'A'.repeat(15000);
+      const event: LogEvent = {
+        ...baseLogEvent,
+        response: longContent,
+      };
+
+      const result = parseConversationEvent(event, 0, { maxContentLength: 10000 });
+
+      expect((result as any)?.isTruncated).toBe(true);
+      expect((result as any)?.content.length).toBeLessThan(longContent.length);
+    });
+  });
+
+  describe('thinking events', () => {
+    it('should parse a thinking event with thinking field', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        thinking: 'Let me analyze this problem...',
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('thinking');
+      expect(result?.role).toBe('assistant');
+      expect((result as any)?.content).toBe('Let me analyze this problem...');
+    });
+
+    it('should include thinking duration', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        thinking: 'Thinking...',
+        thinking_duration_ms: 5000,
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect((result as any)?.durationMs).toBe(5000);
+    });
+
+    it('should parse thinking from message pattern', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        msg: 'Processing thinking block',
+        content: 'My thoughts...',
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect(result?.type).toBe('thinking');
+    });
+  });
+
+  describe('tool call events', () => {
+    it('should parse a tool call event', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Read',
+        tool_args: { file_path: '/src/main.ts' },
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('tool_call');
+      expect(result?.role).toBe('assistant');
+      expect((result as any)?.tool).toBe('Read');
+      expect((result as any)?.args).toEqual({ file_path: '/src/main.ts' });
+    });
+
+    it('should generate summary for tool call', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Read',
+        tool_args: { file_path: '/src/test.ts' },
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect((result as any)?.summary).toBe('Read /src/test.ts');
+    });
+
+    it('should generate summary for Bash tool', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Bash',
+        tool_args: { command: 'npm test -- --coverage' },
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect((result as any)?.summary).toContain('Run:');
+      expect((result as any)?.summary).toContain('npm test');
+    });
+
+    it('should include tool call ID', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Read',
+        tool_args: {},
+        tool_call_id: 'call-123',
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect((result as any)?.toolCallId).toBe('call-123');
+    });
+
+    it('should normalize tool_args from various field names', () => {
+      const event1: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Write',
+        tool_input: { file_path: '/a.ts' },
+      };
+      const event2: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Write',
+        args: { file_path: '/b.ts' },
+      };
+
+      const result1 = parseConversationEvent(event1, 0);
+      const result2 = parseConversationEvent(event2, 0);
+
+      expect((result1 as any)?.args).toEqual({ file_path: '/a.ts' });
+      expect((result2 as any)?.args).toEqual({ file_path: '/b.ts' });
+    });
+  });
+
+  describe('tool result events', () => {
+    it('should parse a successful tool result', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Read',
+        result: 'File contents here',
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect(result).not.toBeNull();
+      expect(result?.type).toBe('tool_result');
+      expect(result?.role).toBe('tool');
+      expect((result as any)?.tool).toBe('Read');
+      expect((result as any)?.content).toBe('File contents here');
+      expect((result as any)?.success).toBe(true);
+    });
+
+    it('should parse a failed tool result', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Read',
+        result: 'Error reading file',
+        error: 'File not found',
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect((result as any)?.success).toBe(false);
+      expect((result as any)?.error).toBe('File not found');
+    });
+
+    it('should include duration in tool result', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        tool: 'Bash',
+        result: 'Command output',
+        duration_ms: 1500,
+      };
+
+      const result = parseConversationEvent(event, 0);
+
+      expect((result as any)?.durationMs).toBe(1500);
+    });
+  });
+
+  describe('explicit conversation_type', () => {
+    it('should parse by conversation_type=prompt', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        conversation_type: 'prompt',
+        content: 'User prompt',
+      };
+
+      const result = parseConversationEvent(event, 0);
+      expect(result?.type).toBe('prompt');
+    });
+
+    it('should parse by conversation_type=response', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        conversation_type: 'response',
+        content: 'Assistant response',
+      };
+
+      const result = parseConversationEvent(event, 0);
+      expect(result?.type).toBe('response');
+    });
+
+    it('should parse by conversation_type=thinking', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        conversation_type: 'thinking',
+        content: 'Thinking...',
+      };
+
+      const result = parseConversationEvent(event, 0);
+      expect(result?.type).toBe('thinking');
+    });
+
+    it('should parse by conversation_type=tool_call', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        conversation_type: 'tool_call',
+        tool: 'Read',
+        tool_args: {},
+      };
+
+      const result = parseConversationEvent(event, 0);
+      expect(result?.type).toBe('tool_call');
+    });
+
+    it('should parse by conversation_type=tool_result', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        conversation_type: 'tool_result',
+        tool: 'Read',
+        result: 'content',
+      };
+
+      const result = parseConversationEvent(event, 0);
+      expect(result?.type).toBe('tool_result');
+    });
+  });
+
+  describe('return null cases', () => {
+    it('should return null for non-conversation events', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        msg: 'Starting task',
+      };
+
+      const result = parseConversationEvent(event, 0);
+      expect(result).toBeNull();
+    });
+
+    it('should return null for tool call without tool name', () => {
+      const event: LogEvent = {
+        ...baseLogEvent,
+        tool_args: { file_path: '/test.ts' },
+      };
+
+      const result = parseConversationEvent(event, 0);
+      expect(result).toBeNull();
+    });
+  });
+});
+
+describe('parseConversationEvents', () => {
+  it('should parse multiple conversation events', () => {
+    const events: LogEvent[] = [
+      { ts: 1, worker: 'w1', level: 'info', msg: 'Test', prompt: 'Hello' },
+      { ts: 2, worker: 'w1', level: 'info', msg: 'Test', response: 'Hi there' },
+      { ts: 3, worker: 'w1', level: 'info', msg: 'Test', tool: 'Read', tool_args: { file_path: '/a.ts' } },
+    ];
+
+    const results = parseConversationEvents(events);
+
+    expect(results).toHaveLength(3);
+    expect(results[0].type).toBe('prompt');
+    expect(results[1].type).toBe('response');
+    expect(results[2].type).toBe('tool_call');
+  });
+
+  it('should filter out thinking events when disabled', () => {
+    const events: LogEvent[] = [
+      { ts: 1, worker: 'w1', level: 'info', msg: 'Test', prompt: 'Hello' },
+      { ts: 2, worker: 'w1', level: 'info', msg: 'Test', thinking: 'Let me think...' },
+      { ts: 3, worker: 'w1', level: 'info', msg: 'Test', response: 'Response' },
+    ];
+
+    const results = parseConversationEvents(events, { includeThinking: false });
+
+    expect(results).toHaveLength(2);
+    expect(results[0].type).toBe('prompt');
+    expect(results[1].type).toBe('response');
+  });
+
+  it('should filter out tool results when disabled', () => {
+    const events: LogEvent[] = [
+      { ts: 1, worker: 'w1', level: 'info', msg: 'Test', tool: 'Read', tool_args: {} },
+      { ts: 2, worker: 'w1', level: 'info', msg: 'Test', tool: 'Read', result: 'content' },
+    ];
+
+    const results = parseConversationEvents(events, { includeToolResults: false });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].type).toBe('tool_call');
+  });
+
+  it('should assign sequential sequence numbers', () => {
+    const events: LogEvent[] = [
+      { ts: 1, worker: 'w1', level: 'info', msg: 'Test', prompt: 'A' },
+      { ts: 2, worker: 'w1', level: 'info', msg: 'Test', prompt: 'B' },
+      { ts: 3, worker: 'w1', level: 'info', msg: 'Test', prompt: 'C' },
+    ];
+
+    const results = parseConversationEvents(events);
+
+    expect(results[0].sequence).toBe(0);
+    expect(results[1].sequence).toBe(1);
+    expect(results[2].sequence).toBe(2);
+  });
+});
+
+describe('parseConversationLine', () => {
+  it('should parse a conversation event from a log line', () => {
+    const line = JSON.stringify({
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Test',
+      prompt: 'What is this?',
+    });
+
+    const result = parseConversationLine(line);
+
+    expect(result).not.toBeNull();
+    expect(result?.type).toBe('prompt');
+  });
+
+  it('should return null for invalid JSON', () => {
+    const result = parseConversationLine('not json');
+    expect(result).toBeNull();
+  });
+
+  it('should return null for non-conversation log line', () => {
+    const line = JSON.stringify({
+      ts: 1709337600000,
+      worker: 'w-test',
+      level: 'info',
+      msg: 'Starting task',
+    });
+
+    const result = parseConversationLine(line);
+    expect(result).toBeNull();
+  });
+});
+
+describe('parseConversationContent', () => {
+  it('should parse conversation events from multi-line content', () => {
+    const content = [
+      JSON.stringify({ ts: 1, worker: 'w1', level: 'info', msg: 'Test', prompt: 'Q1' }),
+      JSON.stringify({ ts: 2, worker: 'w1', level: 'info', msg: 'Test', response: 'A1' }),
+      JSON.stringify({ ts: 3, worker: 'w1', level: 'info', msg: 'Test', prompt: 'Q2' }),
+    ].join('\n');
+
+    const results = parseConversationContent(content);
+
+    expect(results).toHaveLength(3);
+  });
+
+  it('should handle empty content', () => {
+    const results = parseConversationContent('');
+    expect(results).toEqual([]);
+  });
+});
+
+describe('formatConversationEvent', () => {
+  const baseTime = 1709337600000;
+
+  it('should format a prompt event', () => {
+    const event: ConversationEvent = {
+      id: 'ce-1',
+      type: 'prompt',
+      role: 'user',
+      ts: baseTime,
+      worker: 'w-test',
+      sequence: 0,
+      content: 'Hello world',
+    };
+
+    const formatted = formatConversationEvent(event);
+
+    expect(formatted).toContain('[user]');
+    expect(formatted).toContain('Hello world');
+  });
+
+  it('should format a response event', () => {
+    const event: ConversationEvent = {
+      id: 'ce-2',
+      type: 'response',
+      role: 'assistant',
+      ts: baseTime,
+      worker: 'w-test',
+      sequence: 1,
+      content: 'Response text',
+    };
+
+    const formatted = formatConversationEvent(event);
+
+    expect(formatted).toContain('[assistant]');
+    expect(formatted).toContain('Response text');
+  });
+
+  it('should format a thinking event', () => {
+    const event: ConversationEvent = {
+      id: 'ce-3',
+      type: 'thinking',
+      role: 'assistant',
+      ts: baseTime,
+      worker: 'w-test',
+      sequence: 2,
+      content: 'My thoughts...',
+    };
+
+    const formatted = formatConversationEvent(event);
+
+    expect(formatted).toContain('[assistant]');
+    expect(formatted).toContain('<thinking>');
+    expect(formatted).toContain('My thoughts...');
+  });
+
+  it('should format a tool call event', () => {
+    const event: ConversationEvent = {
+      id: 'ce-4',
+      type: 'tool_call',
+      role: 'assistant',
+      ts: baseTime,
+      worker: 'w-test',
+      sequence: 3,
+      tool: 'Read',
+      args: { file_path: '/test.ts' },
+      summary: 'Read /test.ts',
+    };
+
+    const formatted = formatConversationEvent(event);
+
+    expect(formatted).toContain('Tool:');
+    expect(formatted).toContain('Read /test.ts');
+  });
+
+  it('should format a successful tool result', () => {
+    const event: ConversationEvent = {
+      id: 'ce-5',
+      type: 'tool_result',
+      role: 'tool',
+      ts: baseTime,
+      worker: 'w-test',
+      sequence: 4,
+      tool: 'Read',
+      content: 'file contents',
+      success: true,
+      durationMs: 500,
+    };
+
+    const formatted = formatConversationEvent(event);
+
+    expect(formatted).toContain('Tool result:');
+    expect(formatted).toContain('Read');
+    expect(formatted).toContain('✓');
+    expect(formatted).toContain('500ms');
+  });
+
+  it('should format a failed tool result', () => {
+    const event: ConversationEvent = {
+      id: 'ce-6',
+      type: 'tool_result',
+      role: 'tool',
+      ts: baseTime,
+      worker: 'w-test',
+      sequence: 5,
+      tool: 'Read',
+      content: '',
+      success: false,
+      error: 'File not found',
+    };
+
+    const formatted = formatConversationEvent(event);
+
+    expect(formatted).toContain('✗');
+  });
+
+  it('should indicate truncated content', () => {
+    const event: ConversationEvent = {
+      id: 'ce-7',
+      type: 'response',
+      role: 'assistant',
+      ts: baseTime,
+      worker: 'w-test',
+      sequence: 6,
+      content: 'Long text...',
+      isTruncated: true,
+    };
+
+    const formatted = formatConversationEvent(event);
+
+    expect(formatted).toContain('[truncated]');
+  });
+});
