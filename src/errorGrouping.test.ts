@@ -62,6 +62,18 @@ describe('categorizeError', () => {
     expect(categorizeError('invalid format: malformed input')).toBe('syntax');
   });
 
+  it('should prioritize syntax over validation for SyntaxError', () => {
+    // SyntaxError contains "unexpected token" which matches validation pattern
+    // but should be categorized as syntax because it's checked first
+    expect(categorizeError('SyntaxError: unexpected token')).toBe('syntax');
+  });
+
+  it('should be case insensitive', () => {
+    expect(categorizeError('econnrefused')).toBe('network');
+    expect(categorizeError('PERMISSION DENIED')).toBe('permission');
+    expect(categorizeError('Timeout Expired')).toBe('timeout');
+  });
+
   it('should categorize tool errors', () => {
     expect(categorizeError('Tool execution failed')).toBe('tool');
     expect(categorizeError('Command failed with exit code 1')).toBe('tool');
@@ -160,6 +172,132 @@ describe('fingerprintError', () => {
 
     expect(fp.signature).not.toContain('at Object.foo');
     expect(fp.signature).toContain('TypeError');
+  });
+
+  it('should normalize year in timestamps', () => {
+    const event1 = createErrorEvent('Error', 'Error at 2024-01-15T10:30:00 occurred');
+    const event2 = createErrorEvent('Error', 'Error at 2024-01-15T10:30:00 occurred');
+
+    const fp1 = fingerprintError(event1);
+    const fp2 = fingerprintError(event2);
+
+    // Years (4+ digit numbers) get normalized to *
+    expect(fp1.signature).not.toContain('2024');
+    expect(fp1.hash).toBe(fp2.hash); // Identical errors should have same hash
+  });
+
+  it('should normalize hex strings', () => {
+    const event1 = createErrorEvent('Error', 'Memory address 0x7fff5fbff8a0 invalid');
+    const event2 = createErrorEvent('Error', 'Memory address 0x7fff5fbff123 invalid');
+
+    const fp1 = fingerprintError(event1);
+    const fp2 = fingerprintError(event2);
+
+    expect(fp1.signature).toContain('*HEX*');
+    expect(fp1.hash).toBe(fp2.hash);
+  });
+
+  it('should normalize large numbers', () => {
+    const event1 = createErrorEvent('Error', 'Request ID 123456789 failed');
+    const event2 = createErrorEvent('Error', 'Request ID 987654321 failed');
+
+    const fp1 = fingerprintError(event1);
+    const fp2 = fingerprintError(event2);
+
+    expect(fp1.hash).toBe(fp2.hash); // Large numbers should be normalized
+  });
+
+  it('should apply category-specific normalizers for network errors', () => {
+    const event1 = createErrorEvent('Error', 'ECONNREFUSED example.com:443');
+    const event2 = createErrorEvent('Error', 'ECONNREFUSED other.com:8080');
+
+    const fp1 = fingerprintError(event1);
+    const fp2 = fingerprintError(event2);
+
+    // Hostnames should be normalized to *:*
+    expect(fp1.category).toBe('network');
+    expect(fp2.category).toBe('network');
+    expect(fp1.signature).toContain('*:*');
+    expect(fp2.signature).toContain('*:*');
+    expect(fp1.hash).toBe(fp2.hash);
+  });
+
+  it('should apply category-specific normalizers for timeout errors', () => {
+    const event1 = createErrorEvent('Error', 'Request timed out after 5000ms');
+    const event2 = createErrorEvent('Error', 'Request timed out after 10000ms');
+
+    const fp1 = fingerprintError(event1);
+    const fp2 = fingerprintError(event2);
+
+    // Should be categorized as timeout
+    expect(fp1.category).toBe('timeout');
+    expect(fp2.category).toBe('timeout');
+
+    // Durations should be normalized
+    expect(fp1.signature).toMatch(/\*ms/);
+    expect(fp1.hash).toBe(fp2.hash);
+  });
+
+  it('should apply category-specific normalizers for resource errors', () => {
+    const event1 = createErrorEvent('Error', 'Out of memory: 512MB allocated');
+    const event2 = createErrorEvent('Error', 'Out of memory: 1024MB allocated');
+
+    const fp1 = fingerprintError(event1);
+    const fp2 = fingerprintError(event2);
+
+    // Memory amounts should be normalized
+    expect(fp1.signature).toMatch(/\*B/);
+    expect(fp1.hash).toBe(fp2.hash);
+  });
+
+  it('should apply category-specific normalizers for validation errors', () => {
+    const event1 = createErrorEvent('Error', 'Cannot read property "user.name"');
+    const event2 = createErrorEvent('Error', 'Cannot read property "order.id"');
+
+    const fp1 = fingerprintError(event1);
+    const fp2 = fingerprintError(event2);
+
+    // Property names should be normalized
+    expect(fp1.hash).toBe(fp2.hash);
+  });
+
+  it('should create different fingerprints for errors with same text but different categories', () => {
+    // "ETIMEDOUT connecting" matches network (higher priority)
+    // "ETIMEDOUT" alone matches timeout
+    const event1 = createErrorEvent('Error', 'ETIMEDOUT connecting to server');
+    const event2 = createErrorEvent('Error', 'ETIMEDOUT request');
+
+    const fp1 = fingerprintError(event1);
+    const fp2 = fingerprintError(event2);
+
+    // Both should be categorized as either network or timeout
+    // The key is that category is part of the hash
+    expect(fp1.category).toBe('network');
+    expect(fp2.category).toBe('timeout');
+    expect(fp1.hash).not.toBe(fp2.hash); // Different category = different hash
+  });
+
+  it('should handle empty error messages', () => {
+    const event = createErrorEvent('', '');
+
+    const fp = fingerprintError(event);
+
+    expect(fp.category).toBe('unknown');
+    expect(fp.signature).toBe('');
+  });
+
+  it('should handle multiline errors with complex stack traces', () => {
+    const complexError = `Error: Cannot connect to database
+    at DatabaseManager.connect (/app/db.js:42:15)
+    at async Server.initialize (/app/server.js:18:5)
+    at async main (/app/index.js:10:3)`;
+
+    const event = createErrorEvent('Error', complexError);
+    const fp = fingerprintError(event);
+
+    // Should only include first line
+    expect(fp.signature).toBe('Error: Cannot connect to database');
+    expect(fp.signature).not.toContain('DatabaseManager');
   });
 });
 
@@ -398,6 +536,347 @@ describe('ErrorGroupManager', () => {
 
       const groups = manager.getGroups();
       expect(groups[0].severity).toBe('critical');
+    });
+
+    it('should handle boundary conditions for severity thresholds', () => {
+      const manager = new ErrorGroupManager({
+        highSeverityThreshold: 5,
+        criticalSeverityThreshold: 10,
+      });
+
+      // 1 error = low
+      manager.addError(createErrorEvent('ECONNREFUSED'));
+      expect(manager.getGroups()[0].severity).toBe('low');
+
+      // 2 errors = medium
+      manager.addError(createErrorEvent('ECONNREFUSED'));
+      expect(manager.getGroups()[0].severity).toBe('medium');
+
+      // 5 errors = high (exactly at threshold)
+      for (let i = 0; i < 3; i++) {
+        manager.addError(createErrorEvent('ECONNREFUSED'));
+      }
+      expect(manager.getGroups()[0].severity).toBe('high');
+
+      // 10 errors = critical (exactly at threshold)
+      for (let i = 0; i < 5; i++) {
+        manager.addError(createErrorEvent('ECONNREFUSED'));
+      }
+      expect(manager.getGroups()[0].severity).toBe('critical');
+    });
+
+    it('should downgrade severity for inactive errors', () => {
+      const manager = new ErrorGroupManager({
+        activeWindowMs: 100, // 100ms window
+        highSeverityThreshold: 3,
+      });
+
+      // Add high-severity errors
+      for (let i = 0; i < 5; i++) {
+        manager.addError(createErrorEvent('ECONNREFUSED'));
+      }
+
+      expect(manager.getGroups()[0].severity).toBe('high');
+
+      // Wait for errors to become inactive
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          const groups = manager.getGroups();
+          expect(groups[0].isActive).toBe(false);
+          expect(groups[0].severity).toBe('low'); // Should downgrade to low
+          resolve();
+        }, 150);
+      });
+    });
+
+    it('should update severity on each new error', () => {
+      const manager = new ErrorGroupManager({
+        highSeverityThreshold: 3,
+        criticalSeverityThreshold: 5,
+      });
+
+      manager.addError(createErrorEvent('ECONNREFUSED'));
+      expect(manager.getGroups()[0].severity).toBe('low');
+
+      manager.addError(createErrorEvent('ECONNREFUSED'));
+      expect(manager.getGroups()[0].severity).toBe('medium');
+
+      manager.addError(createErrorEvent('ECONNREFUSED'));
+      expect(manager.getGroups()[0].severity).toBe('high');
+    });
+  });
+
+  describe('group trimming', () => {
+    it('should handle exactly maxGroups limit', () => {
+      const manager = new ErrorGroupManager({ maxGroups: 5 });
+
+      // Add exactly maxGroups
+      for (let i = 0; i < 5; i++) {
+        manager.addError(createErrorEvent(`Error ${i}`));
+      }
+
+      expect(manager.size).toBe(5);
+
+      // Add one more to trigger trimming
+      manager.addError(createErrorEvent('Error 6'));
+
+      expect(manager.size).toBeLessThanOrEqual(5);
+    });
+
+    it('should prioritize removing inactive groups', () => {
+      const manager = new ErrorGroupManager({
+        maxGroups: 3,
+        activeWindowMs: 100,
+      });
+
+      // Add old inactive errors
+      const oldEvent: LogEvent = {
+        ts: Date.now() - 10000, // 10 seconds ago
+        worker: 'w-test',
+        level: 'error',
+        msg: 'Old error 1',
+      };
+      manager.addError(oldEvent);
+
+      const oldEvent2: LogEvent = {
+        ts: Date.now() - 10000,
+        worker: 'w-test',
+        level: 'error',
+        msg: 'Old error 2',
+      };
+      manager.addError(oldEvent2);
+
+      // Add recent active errors
+      manager.addError(createErrorEvent('Recent error 1'));
+      manager.addError(createErrorEvent('Recent error 2'));
+
+      // Adding another should trim old ones first
+      const groups = manager.getGroups();
+      const activeCount = groups.filter(g => g.isActive).length;
+
+      // Should have more active than inactive groups
+      expect(activeCount).toBeGreaterThan(manager.size - activeCount);
+    });
+
+    it('should remove oldest when all groups are active', () => {
+      const manager = new ErrorGroupManager({ maxGroups: 3 });
+
+      manager.addError(createErrorEvent('Error 1'));
+
+      // Wait 10ms before adding next
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          manager.addError(createErrorEvent('Error 2'));
+
+          setTimeout(() => {
+            manager.addError(createErrorEvent('Error 3'));
+
+            setTimeout(() => {
+              // All should be active and present
+              expect(manager.size).toBe(3);
+
+              // Add 4th error - should remove oldest (Error 1)
+              manager.addError(createErrorEvent('Error 4'));
+
+              expect(manager.size).toBeLessThanOrEqual(3);
+
+              // Error 1 should be gone, Error 4 should be present
+              const groups = manager.getGroups();
+              const messages = groups.map(g => g.fingerprint.sampleMessage);
+              expect(messages).not.toContain('Error 1');
+
+              resolve();
+            }, 10);
+          }, 10);
+        }, 10);
+      });
+    });
+  });
+
+  describe('group merging', () => {
+    it('should merge errors with similar patterns but different values', () => {
+      manager.addError(createErrorEvent('ECONNREFUSED 192.168.1.1:8080'));
+      manager.addError(createErrorEvent('ECONNREFUSED 10.0.0.1:3000'));
+      manager.addError(createErrorEvent('ECONNREFUSED example.com:443'));
+
+      expect(manager.size).toBe(1); // All should merge into one group
+      expect(manager.getGroups()[0].count).toBe(3);
+    });
+
+    it('should update lastSeen timestamp when merging', () => {
+      const event1: LogEvent = {
+        ts: 1000,
+        worker: 'w-test',
+        level: 'error',
+        msg: 'ECONNREFUSED 192.168.1.1:8080',
+      };
+
+      const event2: LogEvent = {
+        ts: 2000,
+        worker: 'w-test',
+        level: 'error',
+        msg: 'ECONNREFUSED 10.0.0.1:3000',
+      };
+
+      manager.addError(event1);
+      const group1 = manager.getGroups()[0];
+      expect(group1.lastSeen).toBe(1000);
+
+      manager.addError(event2);
+      const group2 = manager.getGroups()[0];
+      expect(group2.lastSeen).toBe(2000);
+    });
+
+    it('should not duplicate workers in affectedWorkers', () => {
+      manager.addError(createErrorEvent('ECONNREFUSED', 'w-worker1'));
+      manager.addError(createErrorEvent('ECONNREFUSED', 'w-worker1'));
+      manager.addError(createErrorEvent('ECONNREFUSED', 'w-worker2'));
+
+      const group = manager.getGroups()[0];
+      expect(group.affectedWorkers).toHaveLength(2);
+      expect(group.affectedWorkers.filter(w => w === 'w-worker1')).toHaveLength(1);
+    });
+
+    it('should preserve all events when merging', () => {
+      const event1 = createErrorEvent('ECONNREFUSED 192.168.1.1:8080');
+      const event2 = createErrorEvent('ECONNREFUSED 10.0.0.1:3000');
+      const event3 = createErrorEvent('ECONNREFUSED example.com:443');
+
+      manager.addError(event1);
+      manager.addError(event2);
+      manager.addError(event3);
+
+      const group = manager.getGroups()[0];
+      expect(group.events).toHaveLength(3);
+      expect(group.events[0]).toBe(event1);
+      expect(group.events[1]).toBe(event2);
+      expect(group.events[2]).toBe(event3);
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should handle rapid concurrent errors from same worker', () => {
+      for (let i = 0; i < 100; i++) {
+        manager.addError(createErrorEvent('ECONNREFUSED', 'w-worker1'));
+      }
+
+      expect(manager.size).toBe(1);
+      expect(manager.getGroups()[0].count).toBe(100);
+      expect(manager.getGroups()[0].affectedWorkers).toHaveLength(1);
+    });
+
+    it('should handle mixed error types from multiple workers', () => {
+      const errorTypes = [
+        'ECONNREFUSED',
+        'Permission denied',
+        'File not found',
+        'Timeout',
+        'Out of memory',
+      ];
+      const workers = ['w-1', 'w-2', 'w-3'];
+
+      // Create a mix of errors
+      for (let i = 0; i < 50; i++) {
+        const errorType = errorTypes[i % errorTypes.length];
+        const worker = workers[i % workers.length];
+        manager.addError(createErrorEvent(errorType, worker));
+      }
+
+      expect(manager.size).toBe(5); // One group per error type
+
+      // Each group should have all 3 workers
+      manager.getGroups().forEach(group => {
+        expect(group.affectedWorkers).toHaveLength(3);
+        expect(group.count).toBe(10); // 50 total / 5 types
+      });
+    });
+
+    it('should generate unique group IDs', () => {
+      const ids = new Set<string>();
+
+      for (let i = 0; i < 100; i++) {
+        const group = manager.addError(createErrorEvent(`Unique error ${i}`));
+        ids.add(group.id);
+      }
+
+      // All IDs should be unique
+      expect(ids.size).toBeGreaterThanOrEqual(manager.size);
+    });
+
+    it('should handle errors with no message', () => {
+      const event: LogEvent = {
+        ts: Date.now(),
+        worker: 'w-test',
+        level: 'error',
+        msg: '',
+      };
+
+      const group = manager.addError(event);
+
+      expect(group).toBeDefined();
+      expect(group.count).toBe(1);
+    });
+
+    it('should handle getGroup with non-existent ID', () => {
+      const group = manager.getGroup('non-existent-id');
+      expect(group).toBeUndefined();
+    });
+
+    it('should handle getWorkerGroups with no matches', () => {
+      manager.addError(createErrorEvent('ECONNREFUSED', 'w-worker1'));
+
+      const groups = manager.getWorkerGroups('w-nonexistent');
+      expect(groups).toHaveLength(0);
+    });
+
+    it('should handle getGroupsByCategory with no matches', () => {
+      manager.addError(createErrorEvent('ECONNREFUSED')); // network
+
+      const groups = manager.getGroupsByCategory('permission');
+      expect(groups).toHaveLength(0);
+    });
+  });
+
+  describe('statistics edge cases', () => {
+    it('should return zero stats for empty manager', () => {
+      const stats = manager.getStats();
+
+      expect(stats.totalGroups).toBe(0);
+      expect(stats.activeGroups).toBe(0);
+      expect(stats.totalErrors).toBe(0);
+
+      Object.values(stats.byCategory).forEach(count => {
+        expect(count).toBe(0);
+      });
+
+      Object.values(stats.bySeverity).forEach(count => {
+        expect(count).toBe(0);
+      });
+    });
+
+    it('should count all categories correctly', () => {
+      manager.addError(createErrorEvent('ECONNREFUSED')); // network
+      manager.addError(createErrorEvent('Permission denied')); // permission
+      manager.addError(createErrorEvent('File not found')); // not_found
+      manager.addError(createErrorEvent('Request timed out')); // timeout
+      manager.addError(createErrorEvent('Out of memory')); // resource
+      manager.addError(createErrorEvent('Invalid input')); // validation
+      manager.addError(createErrorEvent('SyntaxError')); // syntax
+      manager.addError(createErrorEvent('Tool failed')); // tool
+      manager.addError(createErrorEvent('Something unknown happened')); // unknown
+
+      const stats = manager.getStats();
+
+      expect(stats.totalGroups).toBe(9);
+      expect(stats.byCategory.network).toBe(1);
+      expect(stats.byCategory.permission).toBe(1);
+      expect(stats.byCategory.not_found).toBe(1);
+      expect(stats.byCategory.timeout).toBe(1);
+      expect(stats.byCategory.resource).toBe(1);
+      expect(stats.byCategory.validation).toBe(1);
+      expect(stats.byCategory.syntax).toBe(1);
+      expect(stats.byCategory.tool).toBe(1);
+      expect(stats.byCategory.unknown).toBe(1);
     });
   });
 });
