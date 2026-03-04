@@ -107,12 +107,14 @@ function isNeedleFormat(parsed: unknown): parsed is NeedleLogEntry {
   if (typeof parsed !== 'object' || parsed === null) return false;
   const obj = parsed as Record<string, unknown>;
 
-  // NEEDLE format has: ts (string), event (string), worker (object)
+  // NEEDLE format has: ts (string), event (string), worker (object or string)
+  // Worker can be either:
+  //   - Object: {runner, provider, model, identifier} (legacy)
+  //   - String: "runner-provider-model-identifier" (aligned format)
   return (
     typeof obj.ts === 'string' &&
     typeof obj.event === 'string' &&
-    typeof obj.worker === 'object' &&
-    obj.worker !== null
+    (typeof obj.worker === 'object' || typeof obj.worker === 'string')
   );
 }
 
@@ -123,8 +125,10 @@ function parseNeedleFormat(entry: NeedleLogEntry): LogEvent {
   // Convert ISO timestamp to Unix milliseconds
   const ts = new Date(entry.ts).getTime();
 
-  // Flatten worker object: ${runner}-${identifier}
-  const worker = `${entry.worker.runner}-${entry.worker.identifier}`;
+  // Handle worker as string (aligned format) or object (legacy)
+  const worker = typeof entry.worker === 'string'
+    ? entry.worker
+    : `${entry.worker.runner}-${entry.worker.identifier}`;
 
   // Use event as message
   const msg = entry.event;
