@@ -2228,8 +2228,8 @@ describe('parseLogLine - NEEDLE format', () => {
 
       const result = parseLogLine(line);
 
-      // Verify the timestamp is correctly converted
-      expect(result?.ts).toBe(1709569054008);
+      // Verify the timestamp is correctly converted (2026-03-04T16:17:34.008Z)
+      expect(result?.ts).toBe(1772641054008);
     });
 
     it('should handle timestamps with different timezone offsets', () => {
