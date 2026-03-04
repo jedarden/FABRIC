@@ -659,18 +659,11 @@ describe('SemanticNarrativeGenerator', () => {
   });
 
   describe('narrative updates', () => {
-    it('should emit updates when events are processed', (done) => {
+    it('should emit updates when events are processed', async () => {
       const updates: NarrativeUpdate[] = [];
 
       const unsubscribe = generator.onUpdate((update) => {
         updates.push(update);
-
-        if (updates.length === 2) {
-          expect(updates[0].type).toBe('segment_updated');
-          expect(updates[1].type).toBe('segment_updated');
-          unsubscribe();
-          done();
-        }
       });
 
       const baseTime = Date.now();
@@ -690,6 +683,21 @@ describe('SemanticNarrativeGenerator', () => {
         msg: 'Editing more',
         tool: 'Edit',
         path: '/src/file.ts',
+      });
+
+      // Wait for updates to be emitted
+      await new Promise<void>((resolve) => {
+        const checkUpdates = () => {
+          if (updates.length >= 2) {
+            expect(updates[0].type).toBe('segment_updated');
+            expect(updates[1].type).toBe('segment_updated');
+            unsubscribe();
+            resolve();
+          } else {
+            setTimeout(checkUpdates, 10);
+          }
+        };
+        checkUpdates();
       });
     });
 

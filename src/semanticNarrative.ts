@@ -814,6 +814,12 @@ export class SemanticNarrativeGenerator implements SemanticNarrativeManager {
       investigation: 'investigating',
       collision_detected: 'resolving conflicts',
       error_recovery: 'recovering from errors',
+      tool_usage: 'using tools',
+      error_handling: 'handling errors',
+      task_completion: 'completing tasks',
+      exploration: 'exploring',
+      planning: 'planning',
+      research: 'researching',
     };
 
     return verbs[pattern] || 'working';

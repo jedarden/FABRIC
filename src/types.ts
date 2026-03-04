@@ -295,6 +295,9 @@ export interface WorkerInfo {
 
   /** All collision types this worker is involved in */
   collisionTypes: ('file' | 'bead' | 'task')[];
+
+  /** Total number of events received for this worker */
+  eventCount: number;
 }
 
 export interface EventFilter {
@@ -1607,6 +1610,16 @@ export interface WorkerMetrics {
 
   /** Tokens per bead */
   tokensPerBead: number;
+
+  /** Efficiency score (0-1, calculated from active time vs idle time) */
+  efficiencyScore: number;
+
+  /** Performance trend data */
+  trend?: {
+    direction: 'improving' | 'declining' | 'stable';
+    confidence: number;
+    factors: string[];
+  };
 }
 
 /**
@@ -1692,6 +1705,18 @@ export interface AggregatedAnalytics {
 
   /** Most cost-efficient workers (lowest cost per bead) */
   costEfficientWorkers: WorkerMetrics[];
+
+  /** Number of currently active workers */
+  activeWorkerCount: number;
+
+  /** Total tokens used across all workers */
+  totalTokens: number;
+
+  /** Average efficiency across all workers */
+  avgEfficiency: number;
+
+  /** Underperforming workers (high error rate or low efficiency) */
+  underperformers: WorkerMetrics[];
 }
 
 /**
@@ -1776,7 +1801,13 @@ export type EventPattern =
   | 'collision_detected'  // Workers colliding
   | 'error_recovery'      // Recovering from errors
   | 'iteration'           // Iterative refinement
-  | 'investigation';      // Investigating/researching
+  | 'investigation'       // Investigating/researching
+  | 'tool_usage'          // Tool usage patterns
+  | 'error_handling'      // Error handling patterns
+  | 'task_completion'     // Task completion patterns
+  | 'exploration'         // Exploration patterns
+  | 'planning'            // Planning patterns
+  | 'research';           // Research patterns
 
 /**
  * A single narrative segment describing a sequence of events

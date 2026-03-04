@@ -286,8 +286,12 @@ export class InMemoryEventStore implements EventStore {
         activeBead: event.bead,
         activeDirectories: [],
         collisionTypes: [],
+        eventCount: 1,
       };
       this.workers.set(event.worker, worker);
+    } else {
+      // Increment event count
+      worker.eventCount++;
     }
 
     // Update last activity

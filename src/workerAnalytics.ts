@@ -200,6 +200,16 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
       .sort((a, b) => a.costPerBead - b.costPerBead)
       .slice(0, opts.maxWorkers);
 
+    // Calculate aggregated additional metrics
+    const activeWorkerCount = allMetrics.filter(m => m.beadsCompleted > 0).length;
+    const totalTokens = allMetrics.reduce((sum, m) => sum + m.totalTokens, 0);
+    const avgEfficiency = allMetrics.length > 0
+      ? allMetrics.reduce((sum, m) => sum + m.efficiencyScore, 0) / allMetrics.length
+      : 0;
+    const underperformers = allMetrics
+      .filter(m => m.errorRate > 0.2 || m.efficiencyScore < 0.5)
+      .slice(0, opts.maxWorkers);
+
     return {
       periodStart: startTime,
       periodEnd: endTime,
@@ -214,6 +224,10 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
       topPerformers,
       highErrorRateWorkers,
       costEfficientWorkers,
+      activeWorkerCount,
+      totalTokens,
+      avgEfficiency,
+      underperformers,
     };
   }
 
@@ -473,6 +487,10 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     const totalTokens = worker.totalTokens;
     const tokensPerBead = beadsCompleted > 0 ? totalTokens / beadsCompleted : 0;
 
+    // Efficiency score: ratio of active time to total time (0-1)
+    const totalTimeMs = activeTimeMs + idleTimeMs;
+    const efficiencyScore = totalTimeMs > 0 ? activeTimeMs / totalTimeMs : 0;
+
     return {
       workerId: worker.workerId,
       periodStart: startTime,
@@ -490,6 +508,7 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
       totalEvents: eventsInRange.length,
       totalTokens,
       tokensPerBead,
+      efficiencyScore,
     };
   }
 
@@ -602,6 +621,10 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
       topPerformers: [],
       highErrorRateWorkers: [],
       costEfficientWorkers: [],
+      activeWorkerCount: 0,
+      totalTokens: 0,
+      avgEfficiency: 0,
+      underperformers: [],
     };
   }
 }
