@@ -5,7 +5,7 @@
  * Shows natural language descriptions of what workers are doing.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { SemanticNarrative, NarrativeSegment, EventPattern } from '../../types.js';
 import { colors } from '../utils/colors.js';
 import { getSemanticNarrativeManager } from '../../semanticNarrative.js';
@@ -24,7 +24,10 @@ export interface SemanticNarrativePanelOptions {
   width: number | string;
 
   /** Height of the panel */
-  height: number | string;
+  height?: number | string;
+
+  /** Position from bottom (alternative to height) */
+  bottom?: number | string;
 
   /** Callback when a segment is selected */
   onSelect?: (segmentId: string) => void;

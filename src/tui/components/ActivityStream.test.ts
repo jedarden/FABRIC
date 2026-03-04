@@ -4,8 +4,8 @@
  * Tests the activity stream display with mocked blessed elements.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as blessed from 'blessed';
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import blessed from 'blessed';
 
 // Mock the blessed module before importing ActivityStream
 vi.mock('blessed', () => {
@@ -67,7 +67,7 @@ describe('ActivityStream', () => {
     mockScreen = createMockScreen();
 
     // Get the mock log instance from the mock
-    const blessedMock = blessed as unknown as { log: vi.Mock };
+    const blessedMock = blessed as unknown as { log: Mock };
     mockLogInstance = blessedMock.log();
 
     activityStream = new ActivityStream({
@@ -85,7 +85,7 @@ describe('ActivityStream', () => {
 
   describe('constructor', () => {
     it('should create a blessed log with correct options', () => {
-      const blessedMock = blessed as unknown as { log: vi.Mock };
+      const blessedMock = blessed as unknown as { log: Mock };
       expect(blessedMock.log).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: mockScreen,
@@ -701,7 +701,7 @@ describe('ActivityStream', () => {
         bottom: '20%',
       });
 
-      const blessedMock = blessed as unknown as { log: vi.Mock };
+      const blessedMock = blessed as unknown as { log: Mock };
       expect(blessedMock.log).toHaveBeenCalledWith(
         expect.objectContaining({
           top: '10%',
@@ -721,7 +721,7 @@ describe('ActivityStream', () => {
         bottom: 10,
       });
 
-      const blessedMock = blessed as unknown as { log: vi.Mock };
+      const blessedMock = blessed as unknown as { log: Mock };
       expect(blessedMock.log).toHaveBeenCalledWith(
         expect.objectContaining({
           top: 5,

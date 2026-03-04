@@ -5,8 +5,8 @@
  * Tests heatmap calculation, color gradient rendering, and file path truncation.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as blessed from 'blessed';
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import blessed from 'blessed';
 
 // Mock the blessed module before importing FileHeatmap
 vi.mock('blessed', () => {
@@ -98,7 +98,7 @@ describe('FileHeatmap', () => {
     mockScreen = createMockScreen();
 
     // Get the mock box instance from the mock
-    const blessedMock = blessed as unknown as { box: vi.Mock };
+    const blessedMock = blessed as unknown as { box: Mock };
     mockBoxInstance = blessedMock.box();
 
     fileHeatmap = new FileHeatmap({
@@ -116,7 +116,7 @@ describe('FileHeatmap', () => {
 
   describe('constructor', () => {
     it('should create a blessed box with correct options', () => {
-      const blessedMock = blessed as unknown as { box: vi.Mock };
+      const blessedMock = blessed as unknown as { box: Mock };
       expect(blessedMock.box).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: mockScreen,

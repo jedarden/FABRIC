@@ -10,7 +10,7 @@
  */
 
 import { Command } from 'commander';
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { VERSION } from './index.js';
 import { LogTailer, tailLogFile } from './tailer.js';
 import { formatEvent } from './parser.js';

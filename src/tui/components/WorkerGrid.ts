@@ -4,7 +4,7 @@
  * Displays all active workers with status indicators in a scrollable list.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { WorkerInfo } from '../../types.js';
 import { colors, getStatusColor } from '../utils/colors.js';
 

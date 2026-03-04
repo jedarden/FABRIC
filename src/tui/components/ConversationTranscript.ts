@@ -11,7 +11,7 @@
  * - Scrolling support
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import {
   ConversationEvent,
   ConversationSession,

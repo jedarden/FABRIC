@@ -5,7 +5,7 @@
  * Allows navigation between related entities.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import {
   CrossReferenceLink,
   CrossReferenceEntity,

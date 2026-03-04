@@ -4,7 +4,7 @@
  * Displays scrolling log output with filtering capabilities.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { LogEvent } from '../../types.js';
 import { colors, getLevelColor } from '../utils/colors.js';
 

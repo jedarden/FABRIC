@@ -5,7 +5,7 @@
  * Shows additions in green, deletions in red, with line numbers.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { colors } from '../utils/colors.js';
 
 export interface DiffViewOptions {

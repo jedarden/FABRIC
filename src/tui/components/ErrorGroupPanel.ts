@@ -5,7 +5,7 @@
  * and expandable stack traces.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { ErrorGroup, ErrorCategory } from '../../types.js';
 import { colors } from '../utils/colors.js';
 

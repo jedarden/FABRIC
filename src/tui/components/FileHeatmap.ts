@@ -5,7 +5,7 @@
  * Helps identify hotspots and potential collision areas between workers.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { FileHeatmapEntry, FileHeatmapStats, HeatmapOptions, HeatLevel } from '../../types.js';
 import { colors, getHeatColor, getHeatIcon } from '../utils/colors.js';
 

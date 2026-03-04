@@ -4,7 +4,7 @@
  * Universal search/command interface triggered by Ctrl+K.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { colors } from '../utils/colors.js';
 
 export interface CommandPaletteOptions {

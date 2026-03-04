@@ -5,7 +5,7 @@
  * Shows which tasks block others and highlights the critical path.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import {
   DependencyGraph,
   DagComponent,

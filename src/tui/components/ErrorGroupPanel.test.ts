@@ -4,8 +4,8 @@
  * Tests error group rendering, navigation, expansion, and severity display.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as blessed from 'blessed';
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import blessed from 'blessed';
 
 // Mock the blessed module before importing ErrorGroupPanel
 vi.mock('blessed', () => {
@@ -32,15 +32,15 @@ vi.mock('blessed', () => {
     focus: vi.fn(),
   };
 
-  const mockBox = vi.fn((options) => {
+  const mockBox = vi.fn((options: { label?: string }) => {
     // Return detail box instance for detail view
     if (options.label === ' Details ') {
       return mockDetailBoxInstance;
     }
     return mockBoxInstance;
-  });
+  }) as Mock & { _mockBoxInstance: typeof mockBoxInstance; _mockDetailBoxInstance: typeof mockDetailBoxInstance };
 
-  const mockList = vi.fn(() => mockListInstance);
+  const mockList = vi.fn(() => mockListInstance) as Mock & { _mockListInstance: typeof mockListInstance };
 
   // Store instances for test access
   mockBox._mockBoxInstance = mockBoxInstance;
@@ -124,8 +124,8 @@ describe('ErrorGroupPanel', () => {
 
     // Get the mock instances from the mocks
     const blessedMock = blessed as unknown as {
-      box: vi.Mock & { _mockBoxInstance: any; _mockDetailBoxInstance: any };
-      list: vi.Mock & { _mockListInstance: any };
+      box: Mock & { _mockBoxInstance: any; _mockDetailBoxInstance: any };
+      list: Mock & { _mockListInstance: any };
     };
 
     mockBoxInstance = blessedMock.box._mockBoxInstance;
@@ -147,7 +147,7 @@ describe('ErrorGroupPanel', () => {
 
   describe('constructor', () => {
     it('should create a blessed box with correct options', () => {
-      const blessedMock = blessed as unknown as { box: vi.Mock };
+      const blessedMock = blessed as unknown as { box: Mock };
       expect(blessedMock.box).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: mockScreen,
@@ -166,7 +166,7 @@ describe('ErrorGroupPanel', () => {
     });
 
     it('should create a list inside the box', () => {
-      const blessedMock = blessed as unknown as { list: vi.Mock };
+      const blessedMock = blessed as unknown as { list: Mock };
       expect(blessedMock.list).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: mockBoxInstance,
@@ -182,7 +182,7 @@ describe('ErrorGroupPanel', () => {
     });
 
     it('should create a detail box for expanded view', () => {
-      const blessedMock = blessed as unknown as { box: vi.Mock };
+      const blessedMock = blessed as unknown as { box: Mock };
       expect(blessedMock.box).toHaveBeenCalledWith(
         expect.objectContaining({
           label: ' Details ',

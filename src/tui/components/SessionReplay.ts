@@ -5,7 +5,7 @@
  * history chronologically with playback controls.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
 import { LogEvent, ReplaySpeed, ReplayState, EventFilter } from '../../types.js';

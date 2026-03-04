@@ -4,7 +4,7 @@
  * Provides interactive UI controls for filtering ActivityStream.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { colors } from '../utils/colors.js';
 import { ActivityFilter } from './ActivityStream.js';
 import * as fs from 'fs';

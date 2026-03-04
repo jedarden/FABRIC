@@ -4,7 +4,7 @@
  * Tests initialization, key handling, and component coordination.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 
 // Mock process.exit before importing app
 const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
@@ -165,7 +165,7 @@ vi.mock('./components/DependencyDag.js', () => {
 import { FabricTuiApp, createTuiApp, TuiOptions } from './app.js';
 import { InMemoryEventStore } from '../store.js';
 import { LogEvent, WorkerInfo } from '../types.js';
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 
 // Helper to create mock store
 function createMockStore(): InMemoryEventStore {
@@ -196,13 +196,14 @@ function createMockWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     hasCollision: false,
     activeDirectories: [],
     collisionTypes: [],
+    eventCount: 10,
     ...overrides,
   };
 }
 
 // Get the mocked screen instance
 function getMockScreen() {
-  return (blessed.screen as vi.Mock)();
+  return (blessed.screen as Mock)();
 }
 
 describe('FabricTuiApp', () => {

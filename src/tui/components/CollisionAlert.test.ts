@@ -4,8 +4,8 @@
  * Tests collision alert rendering, acknowledgement, navigation, and severity display.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as blessed from 'blessed';
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import blessed from 'blessed';
 
 // Mock the blessed module before importing CollisionAlert
 vi.mock('blessed', () => {
@@ -88,7 +88,7 @@ describe('CollisionAlert', () => {
     mockScreen = createMockScreen();
 
     // Get the mock instances from the mocks
-    const blessedMock = blessed as unknown as { box: vi.Mock; list: vi.Mock };
+    const blessedMock = blessed as unknown as { box: Mock; list: Mock };
     mockBoxInstance = blessedMock.box();
     mockListInstance = blessedMock.list();
 
@@ -107,7 +107,7 @@ describe('CollisionAlert', () => {
 
   describe('constructor', () => {
     it('should create a blessed box with correct options', () => {
-      const blessedMock = blessed as unknown as { box: vi.Mock };
+      const blessedMock = blessed as unknown as { box: Mock };
       expect(blessedMock.box).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: mockScreen,
@@ -126,7 +126,7 @@ describe('CollisionAlert', () => {
     });
 
     it('should create a list inside the box', () => {
-      const blessedMock = blessed as unknown as { list: vi.Mock };
+      const blessedMock = blessed as unknown as { list: Mock };
       expect(blessedMock.list).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: mockBoxInstance,

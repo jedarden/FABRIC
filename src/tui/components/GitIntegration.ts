@@ -5,7 +5,7 @@
  * staged/unstaged files, recent commits, and conflict detection.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { GitEvent, GitStatusEvent, GitCommitEvent, GitFileChange } from '../../types.js';
 import { colors } from '../utils/colors.js';
 

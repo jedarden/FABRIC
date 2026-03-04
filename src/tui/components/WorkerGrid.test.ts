@@ -4,8 +4,8 @@
  * Tests the worker grid display with mocked blessed elements.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as blessed from 'blessed';
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import blessed from 'blessed';
 
 // Mock the blessed module before importing WorkerGrid
 vi.mock('blessed', () => {
@@ -45,6 +45,7 @@ function createMockWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     hasCollision: false,
     activeDirectories: [],
     collisionTypes: [],
+    eventCount: 10,
     ...overrides,
   };
 }
@@ -70,7 +71,7 @@ describe('WorkerGrid', () => {
     mockScreen = createMockScreen();
 
     // Get the mock box instance from the mock
-    const blessedMock = blessed as unknown as { box: vi.Mock };
+    const blessedMock = blessed as unknown as { box: Mock };
     mockBoxInstance = blessedMock.box();
 
     workerGrid = new WorkerGrid({
@@ -88,7 +89,7 @@ describe('WorkerGrid', () => {
 
   describe('constructor', () => {
     it('should create a blessed box with correct options', () => {
-      const blessedMock = blessed as unknown as { box: vi.Mock };
+      const blessedMock = blessed as unknown as { box: Mock };
       expect(blessedMock.box).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: mockScreen,

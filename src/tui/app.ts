@@ -4,7 +4,7 @@
  * Main TUI application class using blessed for terminal rendering.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { LogEvent, WorkerInfo } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { colors } from './utils/colors.js';
@@ -766,7 +766,10 @@ export class FabricTuiApp {
         totalCostUsd: 0,
         totalTokens: 0,
         activeTimeMs: w.lastActivity - w.firstSeen,
+        idleTimeMs: 0,
         idlePercentage: 0,
+        totalEvents: w.eventCount || 0,
+        tokensPerBead: 0,
         efficiencyScore: Math.min(1, w.beadsCompleted / 10),
       }));
       this.workerAnalyticsPanel.setMetrics(metrics);

@@ -4,8 +4,8 @@
  * Tests the DAG visualization component with mocked blessed elements.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as blessed from 'blessed';
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import blessed from 'blessed';
 
 // Mock the dagUtils module
 vi.mock('../dagUtils.js', () => ({
@@ -153,7 +153,7 @@ describe('DependencyDag', () => {
 
     mockScreen = createMockScreen();
 
-    const blessedMock = blessed as unknown as { box: vi.Mock };
+    const blessedMock = blessed as unknown as { box: Mock };
     mockBoxInstance = blessedMock.box();
 
     dagComponent = new DependencyDag({
@@ -171,7 +171,7 @@ describe('DependencyDag', () => {
 
   describe('constructor', () => {
     it('should create a blessed box with correct options', () => {
-      const blessedMock = blessed as unknown as { box: vi.Mock };
+      const blessedMock = blessed as unknown as { box: Mock };
       expect(blessedMock.box).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: mockScreen,
@@ -669,7 +669,7 @@ describe('DependencyDag', () => {
 
   describe('options handling', () => {
     it('should accept height option', () => {
-      const blessedMock = blessed as unknown as { box: vi.Mock };
+      const blessedMock = blessed as unknown as { box: Mock };
       vi.clearAllMocks();
 
       new DependencyDag({
@@ -688,7 +688,7 @@ describe('DependencyDag', () => {
     });
 
     it('should accept bottom option', () => {
-      const blessedMock = blessed as unknown as { box: vi.Mock };
+      const blessedMock = blessed as unknown as { box: Mock };
       vi.clearAllMocks();
 
       new DependencyDag({

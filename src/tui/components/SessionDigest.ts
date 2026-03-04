@@ -8,7 +8,7 @@
  * - Export functionality
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import * as fs from 'fs';
 import * as path from 'path';
 import {

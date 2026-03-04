@@ -4,7 +4,7 @@
  * Displays detailed information about a selected worker.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { WorkerInfo, LogEvent } from '../../types.js';
 import { colors, getStatusColor, getLevelColor } from '../utils/colors.js';
 

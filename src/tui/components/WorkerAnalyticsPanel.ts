@@ -5,8 +5,15 @@
  * Shows metrics like beads/hour, error rate, cost per bead, and trends.
  */
 
-import * as blessed from 'blessed';
-import { WorkerMetrics, AggregatedAnalytics, PerformanceTrend, MetricsDataPoint } from '../../types.js';
+import blessed from 'blessed';
+import { WorkerMetrics, AggregatedAnalytics, MetricsDataPoint } from '../../types.js';
+
+/** Inline trend type from WorkerMetrics */
+type InlineTrend = {
+  direction: 'improving' | 'declining' | 'stable';
+  confidence: number;
+  factors: string[];
+};
 import { colors } from '../utils/colors.js';
 import { WorkerAnalytics } from '../../workerAnalytics.js';
 
@@ -24,7 +31,10 @@ export interface WorkerAnalyticsPanelOptions {
   width: number | string;
 
   /** Height of the panel */
-  height: number | string;
+  height?: number | string;
+
+  /** Position from bottom (alternative to height) */
+  bottom?: number | string;
 
   /** Callback when a worker is selected */
   onSelect?: (workerId: string) => void;
@@ -33,7 +43,7 @@ export interface WorkerAnalyticsPanelOptions {
 /**
  * Get trend icon
  */
-function getTrendIcon(trend: PerformanceTrend | undefined): string {
+function getTrendIcon(trend: InlineTrend | undefined): string {
   if (!trend) return '→';
   switch (trend.direction) {
     case 'improving':
@@ -49,7 +59,7 @@ function getTrendIcon(trend: PerformanceTrend | undefined): string {
 /**
  * Get trend color
  */
-function getTrendColor(trend: PerformanceTrend | undefined): string {
+function getTrendColor(trend: InlineTrend | undefined): string {
   if (!trend) return 'white';
   switch (trend.direction) {
     case 'improving':
@@ -442,25 +452,25 @@ export class WorkerAnalyticsPanel {
     lines.push('{bold}Team Performance:{/}');
     lines.push(`  Total Beads:      ${a.totalBeadsCompleted}`);
     lines.push(`  Active Workers:   ${a.activeWorkerCount}`);
-    lines.push(`  Team Beads/Hour:  ${a.teamBeadsPerHour.toFixed(2)}`);
+    lines.push(`  Team Beads/Hour:  ${a.avgBeadsPerHour.toFixed(2)}`);
     lines.push(`  Avg Efficiency:   ${formatPercent(a.avgEfficiency)}`);
     lines.push('');
 
     lines.push('{bold}Cost Summary:{/}');
-    lines.push(`  Total Cost:       ${formatCost(a.totalCost)}`);
+    lines.push(`  Total Cost:       ${formatCost(a.totalCostUsd)}`);
     lines.push(`  Avg Cost/Bead:    ${formatCost(a.avgCostPerBead)}`);
     lines.push(`  Total Tokens:     ${a.totalTokens.toLocaleString()}`);
     lines.push('');
 
     lines.push('{bold}Error Overview:{/}');
-    lines.push(`  Team Error Rate:  {${getStatusColor(a.teamErrorRate)}-fg}${formatPercent(a.teamErrorRate)}{/}`);
+    lines.push(`  Team Error Rate:  {${getStatusColor(a.overallErrorRate)}-fg}${formatPercent(a.overallErrorRate)}{/}`);
     lines.push(`  Total Errors:     ${a.totalErrors}`);
     lines.push('');
 
     lines.push('{bold}Top Performers:{/}');
     for (let i = 0; i < Math.min(3, a.topPerformers.length); i++) {
       const p = a.topPerformers[i];
-      lines.push(`  ${i + 1}. ${p.workerId.slice(0, 15)} - ${p.beadsCompleted} beads (${formatPercent(p.efficiency)} eff)`);
+      lines.push(`  ${i + 1}. ${p.workerId.slice(0, 15)} - ${p.beadsCompleted} beads (${formatPercent(p.efficiencyScore)} eff)`);
     }
 
     if (a.underperformers.length > 0) {

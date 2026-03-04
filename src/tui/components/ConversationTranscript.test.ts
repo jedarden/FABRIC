@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { ConversationTranscript, createConversationTranscript } from './ConversationTranscript.js';
 import {
   ConversationSession,

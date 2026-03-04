@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { SessionReplay } from './SessionReplay.js';
 import type { LogEvent, EventFilter, ReplaySpeed } from '../../types.js';
 import * as fs from 'fs';

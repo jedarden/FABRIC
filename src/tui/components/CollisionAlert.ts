@@ -5,7 +5,7 @@
  * or conflicting operations between workers.
  */
 
-import * as blessed from 'blessed';
+import blessed from 'blessed';
 import { CollisionAlert as CollisionAlertData, FileCollision, BeadCollision, TaskCollision } from '../../types.js';
 import { colors } from '../utils/colors.js';
 
