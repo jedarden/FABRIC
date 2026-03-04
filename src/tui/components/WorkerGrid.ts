@@ -32,6 +32,8 @@ export class WorkerGrid {
   private box: blessed.Widgets.BoxElement;
   private workers: WorkerInfo[] = [];
   private selectedIndex = 0;
+  private focusModeEnabled = false;
+  private pinnedWorkerId?: string;
 
   constructor(options: WorkerGridOptions) {
     this.box = blessed.box({
@@ -114,7 +116,15 @@ export class WorkerGrid {
     const collisionIndicator = this.getCollisionIndicator(worker);
 
     const selectedMarker = isSelected ? '>' : ' ';
-    return `${selectedMarker} {${color}-fg}${icon}{/} {bold}${workerId}{/} {gray-fg}${currentTask}{/} ${taskDesc} {blue-fg}${duration}{/} ${collisionIndicator}`;
+    const isPinned = this.pinnedWorkerId === worker.id;
+    const pinIndicator = isPinned ? '{yellow-fg}📌{/}' : '';
+
+    // Dim non-pinned workers when in focus mode
+    const shouldDim = this.focusModeEnabled && this.pinnedWorkerId && !isPinned;
+    const dimPrefix = shouldDim ? '{gray-fg}' : '';
+    const dimSuffix = shouldDim ? '{/}' : '';
+
+    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/} {bold}${workerId}{/} ${pinIndicator} {gray-fg}${currentTask}{/} ${taskDesc} {blue-fg}${duration}{/} ${collisionIndicator}${dimSuffix}`;
   }
 
   /**
@@ -198,6 +208,15 @@ export class WorkerGrid {
    */
   getElement(): blessed.Widgets.BoxElement {
     return this.box;
+  }
+
+  /**
+   * Set focus mode state
+   */
+  setFocusMode(enabled: boolean, pinnedWorkerId?: string): void {
+    this.focusModeEnabled = enabled;
+    this.pinnedWorkerId = pinnedWorkerId;
+    this.render();
   }
 }
 

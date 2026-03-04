@@ -38,6 +38,11 @@ export class FabricTuiApp {
   // View mode
   private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' = 'default';
 
+  // Focus mode state
+  private focusModeEnabled = false;
+  private pinnedWorkerId?: string;
+  private pinnedBeadId?: string;
+
   // UI Components
   private headerBox!: blessed.Widgets.BoxElement;
   private workerGrid!: WorkerGrid;
@@ -185,11 +190,39 @@ export class FabricTuiApp {
       left: 0,
       right: 0,
       height: 1,
-      content: ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [?] Help  [q] Quit',
+      content: this.getFooterContent(),
       style: {
         fg: colors.muted,
       },
     });
+  }
+
+  /**
+   * Get footer content based on current state
+   */
+  private getFooterContent(): string {
+    if (this.viewMode === 'default') {
+      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors';
+
+      // Show focus mode status
+      if (this.focusModeEnabled) {
+        content += '  {green-fg}[FOCUS MODE]{/}';
+        if (this.pinnedWorkerId) {
+          content += ` Worker:${this.pinnedWorkerId.slice(0, 8)}`;
+        }
+        if (this.pinnedBeadId) {
+          content += ` Bead:${this.pinnedBeadId}`;
+        }
+      }
+
+      content += '  [p]Pin Worker  [P]Pin Bead  [F]Focus';
+      content += '  [?] Help  [q] Quit';
+
+      return content;
+    }
+
+    // Return default content for other views
+    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [?] Help  [q] Quit';
   }
 
   /**
@@ -258,6 +291,19 @@ export class FabricTuiApp {
       if (this.viewMode !== 'default') {
         this.setViewMode('default');
       }
+    });
+
+    // Focus mode keybindings
+    this.screen.key(['p'], () => {
+      this.toggleWorkerPin();
+    });
+
+    this.screen.key(['P'], () => {
+      this.toggleBeadPin();
+    });
+
+    this.screen.key(['F'], () => {
+      this.toggleFocusMode();
     });
   }
 
@@ -431,7 +477,7 @@ export class FabricTuiApp {
 
       // Update header
       this.headerBox.setContent(' FABRIC - Worker Activity Monitor');
-      this.footerBox.setContent(' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [?] Help  [q] Quit');
+      this.footerBox.setContent(this.getFooterContent());
     }
 
     this.screen.render();
@@ -447,6 +493,9 @@ export class FabricTuiApp {
       const stateText = state === 'playing' ? 'PLAYING' : state === 'paused' ? 'PAUSED' : state === 'ended' ? 'ENDED' : 'READY';
       this.footerBox.setContent(` [${stateText}] [Space] Play/Pause  [←/→] Step  [↑/↓] Speed(${speed}x)  [Home/End] Jump  [r] Reset  [Esc] Back  [q] Quit`);
       this.screen.render();
+    } else {
+      this.footerBox.setContent(this.getFooterContent());
+      this.screen.render();
     }
   }
 
@@ -458,6 +507,67 @@ export class FabricTuiApp {
     this.workerDetail.setWorker(worker);
     this.workerDetail.setRecentEvents(events);
     this.workerDetail.show();
+  }
+
+  /**
+   * Toggle worker pin
+   */
+  private toggleWorkerPin(): void {
+    if (this.viewMode !== 'default') return;
+
+    const selected = this.workerGrid.getSelected();
+    if (!selected) return;
+
+    if (this.pinnedWorkerId === selected.id) {
+      // Unpin worker
+      this.pinnedWorkerId = undefined;
+    } else {
+      // Pin worker
+      this.pinnedWorkerId = selected.id;
+    }
+
+    this.updateFooter();
+    this.render();
+  }
+
+  /**
+   * Toggle bead pin
+   */
+  private toggleBeadPin(): void {
+    if (this.viewMode !== 'default') return;
+
+    const selected = this.workerGrid.getSelected();
+    if (!selected || !selected.lastEvent?.bead) return;
+
+    const beadId = selected.lastEvent.bead;
+    if (this.pinnedBeadId === beadId) {
+      // Unpin bead
+      this.pinnedBeadId = undefined;
+    } else {
+      // Pin bead
+      this.pinnedBeadId = beadId;
+    }
+
+    this.updateFooter();
+    this.render();
+  }
+
+  /**
+   * Toggle focus mode
+   */
+  private toggleFocusMode(): void {
+    if (this.viewMode !== 'default') return;
+
+    this.focusModeEnabled = !this.focusModeEnabled;
+
+    // If disabling focus mode, clear pins
+    if (!this.focusModeEnabled) {
+      this.pinnedWorkerId = undefined;
+      this.pinnedBeadId = undefined;
+    }
+
+    this.updateFooter();
+    this.render();
   }
 
   /**
@@ -489,10 +599,14 @@ Actions:
   /       - Search
   f       - Filter
   r       - Refresh
-  p       - Pause scroll
   H       - Toggle file heatmap
   D       - Toggle dependency DAG
   R       - Toggle session replay
+
+Focus Mode:
+  F       - Toggle focus mode
+  p       - Pin/unpin selected worker
+  P       - Pin/unpin bead (from selected worker)
 
 Heatmap View:
   s       - Cycle sort mode
@@ -541,6 +655,8 @@ General:
   private renderWorkers(): void {
     const workers = this.store.getWorkers();
     this.workerGrid.updateWorkers(workers);
+    this.workerGrid.setFocusMode(this.focusModeEnabled, this.pinnedWorkerId);
+    this.activityStream.setFocusMode(this.focusModeEnabled, this.pinnedBeadId, this.pinnedWorkerId);
   }
 
   /**
@@ -549,6 +665,10 @@ General:
   addEvent(event: LogEvent): void {
     this.activityStream.addEvent(event);
     this.renderWorkers();
+
+    // Update focus mode state after rendering
+    this.workerGrid.setFocusMode(this.focusModeEnabled, this.pinnedWorkerId);
+    this.activityStream.setFocusMode(this.focusModeEnabled, this.pinnedBeadId, this.pinnedWorkerId);
 
     // Update heatmap if visible
     if (this.viewMode === 'heatmap') {

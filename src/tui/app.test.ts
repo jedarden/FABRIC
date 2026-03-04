@@ -82,6 +82,7 @@ vi.mock('./components/WorkerGrid.js', () => {
       getSelected = vi.fn(() => null);
       focus = vi.fn();
       getElement = vi.fn(() => ({ hide: vi.fn(), show: vi.fn(), screen: { render: vi.fn() } }));
+      setFocusMode = vi.fn();
     },
   };
 });
@@ -96,6 +97,7 @@ vi.mock('./components/ActivityStream.js', () => {
       focus = vi.fn();
       getElement = vi.fn(() => ({ hide: vi.fn(), show: vi.fn(), screen: { render: vi.fn() } }));
       getIsPaused = vi.fn(() => false);
+      setFocusMode = vi.fn();
     },
   };
 });

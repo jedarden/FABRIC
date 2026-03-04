@@ -54,6 +54,9 @@ export class ActivityStream {
   private filter: ActivityFilter = {};
   private maxLines: number;
   private isPaused = false;
+  private focusModeEnabled = false;
+  private pinnedBeadId?: string;
+  private pinnedWorkerId?: string;
 
   constructor(options: ActivityStreamOptions) {
     this.maxLines = options.maxLines || 500;
@@ -105,11 +108,23 @@ export class ActivityStream {
     if (event.tool) {
       msg = `[${event.tool}] ${msg}`;
     }
+
+    // Check if this event is pinned
+    const isBeadPinned = this.pinnedBeadId && event.bead === this.pinnedBeadId;
+    const isWorkerPinned = this.pinnedWorkerId && event.worker === this.pinnedWorkerId;
+    const isPinned = isBeadPinned || isWorkerPinned;
+    const pinIndicator = isPinned ? '{yellow-fg}📌{/}' : '';
+
     if (event.bead) {
-      msg = `{blue-fg}${event.bead}{/} ${msg}`;
+      msg = `{blue-fg}${event.bead}{/} ${pinIndicator}${msg}`;
     }
 
-    return `{gray-fg}${time}{/} {bold}${workerShort}{/} {${levelColor}-fg}${event.level.toUpperCase()}{/} ${msg}`;
+    // Dim non-pinned events when in focus mode
+    const shouldDim = this.focusModeEnabled && (this.pinnedBeadId || this.pinnedWorkerId) && !isPinned;
+    const dimPrefix = shouldDim ? '{gray-fg}' : '';
+    const dimSuffix = shouldDim ? '{/}' : '';
+
+    return `${dimPrefix}{gray-fg}${time}{/} {bold}${workerShort}{/} {${levelColor}-fg}${event.level.toUpperCase()}{/} ${msg}${dimSuffix}`;
   }
 
   /**
@@ -261,6 +276,16 @@ export class ActivityStream {
    */
   getFilteredEventsCount(): number {
     return this.events.filter(e => this.passesFilter(e)).length;
+  }
+
+  /**
+   * Set focus mode state
+   */
+  setFocusMode(enabled: boolean, pinnedBeadId?: string, pinnedWorkerId?: string): void {
+    this.focusModeEnabled = enabled;
+    this.pinnedBeadId = pinnedBeadId;
+    this.pinnedWorkerId = pinnedWorkerId;
+    this.reRender();
   }
 }
 
