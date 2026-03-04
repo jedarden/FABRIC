@@ -19,6 +19,7 @@ import { ErrorGroupPanel } from './components/ErrorGroupPanel.js';
 import { SessionDigest, generateSessionDigest } from './components/SessionDigest.js';
 import { CollisionAlert } from './components/CollisionAlert.js';
 import { GitIntegration } from './components/GitIntegration.js';
+import { SemanticNarrativePanel } from './components/SemanticNarrativePanel.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
 import { parseGitEvents } from '../gitParser.js';
@@ -41,7 +42,7 @@ export class FabricTuiApp {
   private isRunning = false;
 
   // View mode
-  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' = 'default';
+  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' = 'default';
 
   // Focus mode state
   private focusModeEnabled = false;
@@ -61,6 +62,7 @@ export class FabricTuiApp {
   private sessionDigest!: SessionDigest;
   private collisionAlert!: CollisionAlert;
   private gitIntegration!: GitIntegration;
+  private semanticNarrativePanel!: SemanticNarrativePanel;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -230,6 +232,19 @@ export class FabricTuiApp {
     });
     this.gitIntegration.hide();
 
+    // Semantic Narrative panel (hidden by default, 'N' key)
+    this.semanticNarrativePanel = new SemanticNarrativePanel({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      bottom: 1,
+      onSelect: (segmentId) => {
+        // Could highlight segment in activity stream
+      },
+    });
+    this.semanticNarrativePanel.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -249,7 +264,7 @@ export class FabricTuiApp {
    */
   private getFooterContent(): string {
     if (this.viewMode === 'default') {
-      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions';
+      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions  [N] Narrative';
 
       // Show focus mode status
       if (this.focusModeEnabled) {
@@ -269,7 +284,7 @@ export class FabricTuiApp {
     }
 
     // Return default content for other views
-    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [?] Help  [q] Quit';
+    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [N] Narrative  [?] Help  [q] Quit';
   }
 
   /**
@@ -348,6 +363,11 @@ export class FabricTuiApp {
       this.toggleGitView();
     });
 
+    // Toggle semantic narrative view
+    this.screen.key(['N'], () => {
+      this.toggleNarrativeView();
+    });
+
     // Escape to return to default view
     this.screen.key(['escape'], () => {
       if (this.viewMode !== 'default') {
@@ -397,6 +417,8 @@ export class FabricTuiApp {
       this.toggleCollisionsView();
     } else if (cmd === 'git') {
       this.toggleGitView();
+    } else if (cmd === 'narrative') {
+      this.toggleNarrativeView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
@@ -484,6 +506,17 @@ export class FabricTuiApp {
   }
 
   /**
+   * Toggle semantic narrative view
+   */
+  private toggleNarrativeView(): void {
+    if (this.viewMode === 'narrative') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('narrative');
+    }
+  }
+
+  /**
    * Update collision alerts from store
    */
   private updateCollisionAlerts(): void {
@@ -494,7 +527,7 @@ export class FabricTuiApp {
   /**
    * Set view mode
    */
-  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git'): void {
+  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative'): void {
     this.viewMode = mode;
 
     if (mode === 'heatmap') {
@@ -648,6 +681,26 @@ export class FabricTuiApp {
       // Update header
       this.headerBox.setContent(' FABRIC - Git Integration');
       this.footerBox.setContent(' [r] Refresh  [c] Clear  [Esc] Back  [?] Help  [q] Quit');
+    } else if (mode === 'narrative') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+      this.collisionAlert.hide();
+      this.gitIntegration.hide();
+
+      // Show semantic narrative panel
+      this.semanticNarrativePanel.show();
+      this.semanticNarrativePanel.updateAggregated();
+      this.semanticNarrativePanel.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Semantic Narrative');
+      this.footerBox.setContent(' [↑/↓] or [j/k] Navigate  [Enter] Detail  [f] Full View  [r] Refresh  [Esc] Back  [?] Help  [q] Quit');
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
@@ -657,6 +710,7 @@ export class FabricTuiApp {
       this.sessionDigest.hide();
       this.collisionAlert.hide();
       this.gitIntegration.hide();
+      this.semanticNarrativePanel.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
@@ -792,6 +846,8 @@ Actions:
   E       - Toggle error groups
   C       - Toggle collision alerts
   G       - Toggle session digest
+  I       - Toggle git integration
+  N       - Toggle semantic narrative
 
 Focus Mode:
   F       - Toggle focus mode
@@ -833,6 +889,14 @@ Collision Alerts:
   ↑/↓ or j/k - Navigate alerts
   Enter   - Acknowledge selected alert
   a       - Acknowledge all alerts
+  Esc     - Return to default view
+
+Semantic Narrative:
+  N       - Toggle semantic narrative view
+  ↑/↓ or j/k - Navigate segments
+  Enter   - Toggle detail view
+  f       - Toggle full narrative
+  r       - Refresh narrative
   Esc     - Return to default view
 
 General:

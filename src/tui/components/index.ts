@@ -45,3 +45,6 @@ export type { GitIntegrationOptions } from './GitIntegration.js';
 
 export { ConversationTranscript, createConversationTranscript } from './ConversationTranscript.js';
 export type { ConversationTranscriptOptions } from './ConversationTranscript.js';
+
+export { SemanticNarrativePanel } from './SemanticNarrativePanel.js';
+export type { SemanticNarrativePanelOptions } from './SemanticNarrativePanel.js';
