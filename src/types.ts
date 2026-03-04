@@ -1133,3 +1133,208 @@ export interface SessionDigestOptions {
   /** Maximum errors to list */
   maxErrors?: number;
 }
+
+// ============================================
+// Worker Analytics Types
+// ============================================
+
+/**
+ * Time window for aggregation
+ */
+export type TimeWindow = 'hour' | 'day' | 'week' | 'all';
+
+/**
+ * Worker analytics metrics for a specific time period
+ */
+export interface WorkerMetrics {
+  /** Worker ID */
+  workerId: string;
+
+  /** Time period start (Unix timestamp) */
+  periodStart: number;
+
+  /** Time period end (Unix timestamp) */
+  periodEnd: number;
+
+  /** Total beads completed in this period */
+  beadsCompleted: number;
+
+  /** Beads per hour (rate) */
+  beadsPerHour: number;
+
+  /** Average completion time per bead (milliseconds) */
+  avgCompletionTimeMs: number;
+
+  /** Total errors encountered */
+  errorCount: number;
+
+  /** Error rate (errors per bead) */
+  errorRate: number;
+
+  /** Total cost incurred (USD) */
+  totalCostUsd: number;
+
+  /** Cost per bead (USD) */
+  costPerBead: number;
+
+  /** Total active time (milliseconds) */
+  activeTimeMs: number;
+
+  /** Total idle time (milliseconds) */
+  idleTimeMs: number;
+
+  /** Idle percentage (0-100) */
+  idlePercentage: number;
+
+  /** Total events processed */
+  totalEvents: number;
+
+  /** Total tokens used */
+  totalTokens: number;
+
+  /** Tokens per bead */
+  tokensPerBead: number;
+}
+
+/**
+ * Time-series data point for worker metrics
+ */
+export interface MetricsDataPoint {
+  /** Timestamp of this data point */
+  timestamp: number;
+
+  /** Worker ID */
+  workerId: string;
+
+  /** Metrics snapshot at this time */
+  metrics: Partial<WorkerMetrics>;
+}
+
+/**
+ * Worker performance trend
+ */
+export interface PerformanceTrend {
+  /** Worker ID */
+  workerId: string;
+
+  /** Metric being tracked */
+  metric: keyof WorkerMetrics;
+
+  /** Time-series data points */
+  dataPoints: MetricsDataPoint[];
+
+  /** Trend direction: 'improving' | 'declining' | 'stable' */
+  trend: 'improving' | 'declining' | 'stable';
+
+  /** Percentage change from first to last data point */
+  changePercent: number;
+
+  /** Average value across all data points */
+  average: number;
+
+  /** Minimum value */
+  min: number;
+
+  /** Maximum value */
+  max: number;
+}
+
+/**
+ * Aggregated analytics across all workers
+ */
+export interface AggregatedAnalytics {
+  /** Time period covered */
+  periodStart: number;
+  periodEnd: number;
+
+  /** Total workers tracked */
+  totalWorkers: number;
+
+  /** Total beads completed */
+  totalBeadsCompleted: number;
+
+  /** Average beads per hour across all workers */
+  avgBeadsPerHour: number;
+
+  /** Average completion time across all workers */
+  avgCompletionTimeMs: number;
+
+  /** Total errors across all workers */
+  totalErrors: number;
+
+  /** Overall error rate */
+  overallErrorRate: number;
+
+  /** Total cost across all workers */
+  totalCostUsd: number;
+
+  /** Average cost per bead */
+  avgCostPerBead: number;
+
+  /** Top performers (sorted by beads completed) */
+  topPerformers: WorkerMetrics[];
+
+  /** Workers with highest error rates */
+  highErrorRateWorkers: WorkerMetrics[];
+
+  /** Most cost-efficient workers (lowest cost per bead) */
+  costEfficientWorkers: WorkerMetrics[];
+}
+
+/**
+ * Options for worker analytics
+ */
+export interface WorkerAnalyticsOptions {
+  /** Time window for aggregation */
+  timeWindow?: TimeWindow;
+
+  /** Custom start time (overrides timeWindow) */
+  startTime?: number;
+
+  /** Custom end time (overrides timeWindow) */
+  endTime?: number;
+
+  /** Filter by specific worker IDs */
+  workerIds?: string[];
+
+  /** Minimum beads completed to be included */
+  minBeadsCompleted?: number;
+
+  /** Maximum workers to return in rankings */
+  maxWorkers?: number;
+
+  /** Include time-series data */
+  includeTimeSeries?: boolean;
+
+  /** Time-series data point interval (milliseconds) */
+  timeSeriesInterval?: number;
+}
+
+/**
+ * Worker analytics store interface
+ */
+export interface WorkerAnalyticsStore {
+  /** Process an event and update analytics */
+  processEvent(event: LogEvent): void;
+
+  /** Get metrics for a specific worker */
+  getWorkerMetrics(workerId: string, options?: WorkerAnalyticsOptions): WorkerMetrics | undefined;
+
+  /** Get metrics for all workers */
+  getAllWorkerMetrics(options?: WorkerAnalyticsOptions): WorkerMetrics[];
+
+  /** Get aggregated analytics */
+  getAggregatedAnalytics(options?: WorkerAnalyticsOptions): AggregatedAnalytics;
+
+  /** Get performance trends */
+  getPerformanceTrends(workerId: string, metric: keyof WorkerMetrics, options?: WorkerAnalyticsOptions): PerformanceTrend;
+
+  /** Get time-series data */
+  getTimeSeriesData(workerId: string, options?: WorkerAnalyticsOptions): MetricsDataPoint[];
+
+  /** Clear all analytics data */
+  clear(): void;
+
+  /** Get analytics summary as formatted string */
+  getSummary(options?: WorkerAnalyticsOptions): string;
+}

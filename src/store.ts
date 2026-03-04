@@ -36,6 +36,7 @@ import {
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
 import { CrossReferenceManager, getCrossReferenceManager } from './crossReferenceManager.js';
+import { WorkerAnalytics, getWorkerAnalytics } from './workerAnalytics.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -79,6 +80,7 @@ export class InMemoryEventStore implements EventStore {
   private errorGroupManager: ErrorGroupManager;
   private recoveryManager: RecoveryManager;
   private crossReferenceManager: CrossReferenceManager;
+  private workerAnalytics: WorkerAnalytics;
   private maxEvents: number;
   private alertCounter = 0;
   private batchBuffer: LogEvent[] = [];
@@ -89,6 +91,7 @@ export class InMemoryEventStore implements EventStore {
     this.errorGroupManager = new ErrorGroupManager();
     this.recoveryManager = getRecoveryManager();
     this.crossReferenceManager = getCrossReferenceManager();
+    this.workerAnalytics = getWorkerAnalytics();
   }
 
   /**
@@ -109,6 +112,9 @@ export class InMemoryEventStore implements EventStore {
 
     // Process event for cross-references (immediate)
     this.crossReferenceManager.processEvent(event);
+
+    // Process event for worker analytics
+    this.workerAnalytics.processEvent(event);
 
     // Add to batch buffer for relationship detection
     this.batchBuffer.push(event);
@@ -1075,6 +1081,52 @@ export class InMemoryEventStore implements EventStore {
    */
   getRecoveryStats(): RecoveryStats {
     return this.recoveryManager.getStats();
+  }
+
+  // ============================================
+  // Worker Analytics Methods
+  // ============================================
+
+  /**
+   * Get worker analytics instance
+   */
+  getWorkerAnalytics(): WorkerAnalytics {
+    return this.workerAnalytics;
+  }
+
+  /**
+   * Get analytics metrics for a specific worker
+   */
+  getWorkerMetrics(workerId: string, options?: any) {
+    return this.workerAnalytics.getWorkerMetrics(workerId, options);
+  }
+
+  /**
+   * Get analytics metrics for all workers
+   */
+  getAllWorkerMetrics(options?: any) {
+    return this.workerAnalytics.getAllWorkerMetrics(options);
+  }
+
+  /**
+   * Get aggregated analytics across all workers
+   */
+  getAggregatedAnalytics(options?: any) {
+    return this.workerAnalytics.getAggregatedAnalytics(options);
+  }
+
+  /**
+   * Get performance trends for a worker
+   */
+  getPerformanceTrends(workerId: string, metric: any, options?: any) {
+    return this.workerAnalytics.getPerformanceTrends(workerId, metric, options);
+  }
+
+  /**
+   * Get worker analytics summary
+   */
+  getAnalyticsSummary(options?: any): string {
+    return this.workerAnalytics.getSummary(options);
   }
 
   /**
