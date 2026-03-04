@@ -36,3 +36,6 @@ export { formatRecoveryForConsole, getRecoverySummary } from './RecoveryPanel.js
 
 export { ErrorGroupPanel } from './ErrorGroupPanel.js';
 export type { ErrorGroupPanelOptions } from './ErrorGroupPanel.js';
+
+export { SessionDigest, createSessionDigest, generateSessionDigest } from './SessionDigest.js';
+export type { SessionDigestOptions, DigestViewTab } from './SessionDigest.js';

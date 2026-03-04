@@ -25,3 +25,4 @@ export interface WorkerState {
 export * from './types.js';
 export { SessionDigestGenerator, formatDigestAsMarkdown } from './sessionDigest.js';
 export { WorkerAnalytics, getWorkerAnalytics, resetWorkerAnalytics } from './workerAnalytics.js';
+export { SemanticNarrativeGenerator, getSemanticNarrativeManager } from './semanticNarrative.js';

@@ -16,7 +16,9 @@ import { FileHeatmap } from './components/FileHeatmap.js';
 import { DependencyDag } from './components/DependencyDag.js';
 import { SessionReplay } from './components/SessionReplay.js';
 import { ErrorGroupPanel } from './components/ErrorGroupPanel.js';
+import { SessionDigest, generateSessionDigest } from './components/SessionDigest.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
+import { WorkerSessionSummary } from '../types.js';
 
 export interface TuiOptions {
   /** Log file path to tail */
@@ -36,7 +38,7 @@ export class FabricTuiApp {
   private isRunning = false;
 
   // View mode
-  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' = 'default';
+  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' = 'default';
 
   // Focus mode state
   private focusModeEnabled = false;
@@ -53,6 +55,7 @@ export class FabricTuiApp {
   private dependencyDag!: DependencyDag;
   private sessionReplay!: SessionReplay;
   private errorGroupPanel!: ErrorGroupPanel;
+  private sessionDigest!: SessionDigest;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -182,6 +185,19 @@ export class FabricTuiApp {
       },
     });
     this.errorGroupPanel.hide();
+
+    // Session Digest panel (hidden by default, 'G' key)
+    this.sessionDigest = new SessionDigest({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      height: '100%-2',
+      onExport: (format, path) => {
+        // Log export
+      },
+    });
+    this.sessionDigest.hide();
 
     // Footer with key hints
     this.footerBox = blessed.box({

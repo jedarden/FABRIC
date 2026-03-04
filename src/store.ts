@@ -32,11 +32,15 @@ import {
   CrossReferenceQueryOptions,
   CrossReferenceStats,
   CrossReferencePath,
+  SemanticNarrative,
+  NarrativeOptions,
+  NarrativeUpdate,
 } from './types.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
 import { CrossReferenceManager, getCrossReferenceManager } from './crossReferenceManager.js';
 import { WorkerAnalytics, getWorkerAnalytics } from './workerAnalytics.js';
+import { SemanticNarrativeGenerator, getSemanticNarrativeManager } from './semanticNarrative.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -81,6 +85,7 @@ export class InMemoryEventStore implements EventStore {
   private recoveryManager: RecoveryManager;
   private crossReferenceManager: CrossReferenceManager;
   private workerAnalytics: WorkerAnalytics;
+  private semanticNarrativeManager: SemanticNarrativeGenerator;
   private maxEvents: number;
   private alertCounter = 0;
   private batchBuffer: LogEvent[] = [];
@@ -92,6 +97,7 @@ export class InMemoryEventStore implements EventStore {
     this.recoveryManager = getRecoveryManager();
     this.crossReferenceManager = getCrossReferenceManager();
     this.workerAnalytics = getWorkerAnalytics();
+    this.semanticNarrativeManager = getSemanticNarrativeManager();
   }
 
   /**
@@ -115,6 +121,9 @@ export class InMemoryEventStore implements EventStore {
 
     // Process event for worker analytics
     this.workerAnalytics.processEvent(event);
+
+    // Process event for semantic narrative (real-time)
+    this.semanticNarrativeManager.processEvent(event);
 
     // Add to batch buffer for relationship detection
     this.batchBuffer.push(event);
@@ -1229,6 +1238,59 @@ export class InMemoryEventStore implements EventStore {
    */
   clearCrossReferences(): void {
     this.crossReferenceManager.clear();
+  }
+
+  // ============================================
+  // Semantic Narrative Methods
+  // ============================================
+
+  /**
+   * Generate semantic narrative for a specific worker
+   */
+  generateNarrative(workerId: string, options?: NarrativeOptions): SemanticNarrative {
+    return this.semanticNarrativeManager.generateNarrative(workerId, options);
+  }
+
+  /**
+   * Generate aggregated narrative for all workers
+   */
+  generateAggregatedNarrative(options?: NarrativeOptions): SemanticNarrative {
+    return this.semanticNarrativeManager.generateAggregatedNarrative(options);
+  }
+
+  /**
+   * Get all active narratives
+   */
+  getActiveNarratives(): SemanticNarrative[] {
+    return this.semanticNarrativeManager.getActiveNarratives();
+  }
+
+  /**
+   * Get narrative by ID
+   */
+  getNarrative(narrativeId: string): SemanticNarrative | undefined {
+    return this.semanticNarrativeManager.getNarrative(narrativeId);
+  }
+
+  /**
+   * Subscribe to narrative updates
+   */
+  onNarrativeUpdate(callback: (update: NarrativeUpdate) => void): () => void {
+    return this.semanticNarrativeManager.onUpdate(callback);
+  }
+
+  /**
+   * Format narrative as markdown
+   */
+  formatNarrative(narrative: SemanticNarrative, style?: 'brief' | 'detailed' | 'timeline' | 'technical'): string {
+    return this.semanticNarrativeManager.formatNarrative(narrative, style);
+  }
+
+  /**
+   * Get semantic narrative manager instance
+   */
+  getSemanticNarrativeManager(): SemanticNarrativeGenerator {
+    return this.semanticNarrativeManager;
   }
 }
 

@@ -1751,3 +1751,225 @@ export interface WorkerAnalyticsStore {
   /** Get analytics summary as formatted string */
   getSummary(options?: WorkerAnalyticsOptions): string;
 }
+
+// ============================================
+// Semantic Narrative Types
+// ============================================
+
+/**
+ * Narrative style for summarization
+ */
+export type NarrativeStyle = 'brief' | 'detailed' | 'timeline' | 'technical';
+
+/**
+ * Event pattern types that drive narrative generation
+ */
+export type EventPattern =
+  | 'bead_started'        // Worker started working on a bead
+  | 'bead_completed'      // Worker completed a bead
+  | 'file_editing'        // Editing files
+  | 'file_created'        // Creating new files
+  | 'testing'             // Running tests
+  | 'debugging'           // Debugging errors
+  | 'git_operations'      // Git commits, pushes, etc.
+  | 'dependency_install'  // Installing dependencies
+  | 'collision_detected'  // Workers colliding
+  | 'error_recovery'      // Recovering from errors
+  | 'iteration'           // Iterative refinement
+  | 'investigation';      // Investigating/researching
+
+/**
+ * A single narrative segment describing a sequence of events
+ */
+export interface NarrativeSegment {
+  /** Unique segment ID */
+  id: string;
+
+  /** Event pattern this segment describes */
+  pattern: EventPattern;
+
+  /** Natural language summary */
+  summary: string;
+
+  /** Detailed narrative (if available) */
+  details?: string;
+
+  /** Start timestamp */
+  startTime: number;
+
+  /** End timestamp */
+  endTime: number;
+
+  /** Duration in milliseconds */
+  durationMs: number;
+
+  /** Worker ID */
+  workerId: string;
+
+  /** Associated bead (if any) */
+  beadId?: string;
+
+  /** Events that comprise this segment */
+  events: LogEvent[];
+
+  /** Key entities mentioned (files, tools, etc.) */
+  entities: {
+    files?: string[];
+    tools?: string[];
+    beads?: string[];
+    errors?: string[];
+  };
+
+  /** Confidence in pattern detection (0-1) */
+  confidence: number;
+
+  /** Whether this segment is still active/ongoing */
+  isActive: boolean;
+}
+
+/**
+ * A complete narrative for a worker session or time period
+ */
+export interface SemanticNarrative {
+  /** Narrative ID */
+  id: string;
+
+  /** Worker ID (or 'all' for multi-worker narratives) */
+  workerId: string;
+
+  /** Narrative title */
+  title: string;
+
+  /** High-level summary (1-2 sentences) */
+  summary: string;
+
+  /** All narrative segments in chronological order */
+  segments: NarrativeSegment[];
+
+  /** Full narrative text */
+  fullNarrative: string;
+
+  /** Timeline of key events */
+  timeline: string[];
+
+  /** Start timestamp */
+  startTime: number;
+
+  /** End timestamp */
+  endTime: number;
+
+  /** Total duration */
+  durationMs: number;
+
+  /** Key accomplishments */
+  accomplishments: string[];
+
+  /** Challenges encountered */
+  challenges: string[];
+
+  /** Overall sentiment: 'productive' | 'struggling' | 'mixed' | 'idle' */
+  sentiment: 'productive' | 'struggling' | 'mixed' | 'idle';
+
+  /** Statistics */
+  stats: {
+    totalEvents: number;
+    segmentCount: number;
+    beadsWorked: number;
+    filesModified: number;
+    errorsEncountered: number;
+    toolsUsed: number;
+  };
+
+  /** When this narrative was generated */
+  generatedAt: number;
+
+  /** Whether this narrative is still being updated */
+  isLive: boolean;
+}
+
+/**
+ * Options for narrative generation
+ */
+export interface NarrativeOptions {
+  /** Narrative style */
+  style?: NarrativeStyle;
+
+  /** Filter by worker ID */
+  workerId?: string;
+
+  /** Filter by bead ID */
+  beadId?: string;
+
+  /** Time range start */
+  startTime?: number;
+
+  /** Time range end */
+  endTime?: number;
+
+  /** Minimum confidence for pattern detection */
+  minConfidence?: number;
+
+  /** Maximum segments to generate */
+  maxSegments?: number;
+
+  /** Include technical details */
+  includeTechnicalDetails?: boolean;
+
+  /** Include timeline */
+  includeTimeline?: boolean;
+
+  /** Group events by time window (ms) */
+  segmentWindowMs?: number;
+
+  /** Minimum events per segment */
+  minEventsPerSegment?: number;
+}
+
+/**
+ * Narrative update event - emitted when narrative changes
+ */
+export interface NarrativeUpdate {
+  /** Narrative ID */
+  narrativeId: string;
+
+  /** Update type */
+  type: 'segment_added' | 'segment_updated' | 'segment_completed' | 'narrative_completed';
+
+  /** Updated segment (if applicable) */
+  segment?: NarrativeSegment;
+
+  /** Timestamp of update */
+  timestamp: number;
+
+  /** New summary text */
+  summary?: string;
+}
+
+/**
+ * Semantic narrative manager interface
+ */
+export interface SemanticNarrativeManager {
+  /** Process an event and update narratives */
+  processEvent(event: LogEvent): void;
+
+  /** Generate narrative for a worker */
+  generateNarrative(workerId: string, options?: NarrativeOptions): SemanticNarrative;
+
+  /** Generate narrative for all workers */
+  generateAggregatedNarrative(options?: NarrativeOptions): SemanticNarrative;
+
+  /** Get current active narratives */
+  getActiveNarratives(): SemanticNarrative[];
+
+  /** Get narrative by ID */
+  getNarrative(narrativeId: string): SemanticNarrative | undefined;
+
+  /** Subscribe to narrative updates */
+  onUpdate(callback: (update: NarrativeUpdate) => void): () => void;
+
+  /** Clear all narratives */
+  clear(): void;
+
+  /** Get narrative as formatted string */
+  formatNarrative(narrative: SemanticNarrative, style?: NarrativeStyle): string;
+}
