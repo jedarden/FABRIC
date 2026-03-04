@@ -42,3 +42,6 @@ export type { SessionDigestOptions, DigestViewTab } from './SessionDigest.js';
 
 export { GitIntegration } from './GitIntegration.js';
 export type { GitIntegrationOptions } from './GitIntegration.js';
+
+export { ConversationTranscript, createConversationTranscript } from './ConversationTranscript.js';
+export type { ConversationTranscriptOptions } from './ConversationTranscript.js';
