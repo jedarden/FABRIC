@@ -20,6 +20,10 @@ import {
 /**
  * Parse a single log line
  *
+ * Supports two formats:
+ * 1. NEEDLE format: {ts: ISO string, event: string, worker: {...}, session: string, data: {...}}
+ * 2. Legacy format: {ts: Unix ms, worker: string, level: string, msg: string}
+ *
  * @param line - Raw log line (JSON string)
  * @returns Parsed LogEvent or null if invalid
  */
@@ -32,7 +36,12 @@ export function parseLogLine(line: string): LogEvent | null {
   try {
     const parsed = JSON.parse(line);
 
-    // Validate required fields
+    // Detect format and route to appropriate parser
+    if (isNeedleFormat(parsed)) {
+      return parseNeedleFormat(parsed);
+    }
+
+    // Legacy format validation
     if (typeof parsed.ts !== 'number') {
       return null;
     }
@@ -73,6 +82,137 @@ export function parseLogLine(line: string): LogEvent | null {
     // Not valid JSON
     return null;
   }
+}
+
+/**
+ * NEEDLE log format interface
+ */
+interface NeedleLogEntry {
+  ts: string;                    // ISO 8601 timestamp
+  event: string;                 // Event type (e.g., "worker.started", "bead.claimed")
+  session: string;               // Session identifier
+  worker: {
+    runner: string;              // e.g., "claude"
+    provider: string;            // e.g., "code", "anthropic"
+    model: string;               // e.g., "glm-4.7", "sonnet"
+    identifier: string;          // e.g., "test", "align"
+  };
+  data: Record<string, unknown>; // Event-specific payload
+}
+
+/**
+ * Check if parsed object matches NEEDLE format
+ */
+function isNeedleFormat(parsed: unknown): parsed is NeedleLogEntry {
+  if (typeof parsed !== 'object' || parsed === null) return false;
+  const obj = parsed as Record<string, unknown>;
+
+  // NEEDLE format has: ts (string), event (string), worker (object)
+  return (
+    typeof obj.ts === 'string' &&
+    typeof obj.event === 'string' &&
+    typeof obj.worker === 'object' &&
+    obj.worker !== null
+  );
+}
+
+/**
+ * Parse NEEDLE format log entry
+ */
+function parseNeedleFormat(entry: NeedleLogEntry): LogEvent {
+  // Convert ISO timestamp to Unix milliseconds
+  const ts = new Date(entry.ts).getTime();
+
+  // Flatten worker object: ${runner}-${identifier}
+  const worker = `${entry.worker.runner}-${entry.worker.identifier}`;
+
+  // Use event as message
+  const msg = entry.event;
+
+  // Infer log level from event name
+  const level = inferLogLevel(entry.event);
+
+  // Build LogEvent
+  const event: LogEvent = {
+    ts,
+    worker,
+    level,
+    msg,
+  };
+
+  // Extract optional fields from data payload
+  const data = entry.data || {};
+
+  // Extract bead_id (map to 'bead' field)
+  if (typeof data.bead_id === 'string') {
+    event.bead = data.bead_id;
+  }
+
+  // Extract duration_ms
+  if (typeof data.duration_ms === 'number') {
+    event.duration_ms = data.duration_ms;
+  }
+
+  // Extract error if present
+  if (typeof data.error === 'string') {
+    event.error = data.error;
+  }
+
+  // Extract tool if present
+  if (typeof data.tool === 'string') {
+    event.tool = data.tool;
+  }
+
+  // Extract path if present
+  if (typeof data.path === 'string') {
+    event.path = data.path;
+  }
+
+  // Copy session and other NEEDLE-specific fields
+  event.session = entry.session;
+  event.provider = entry.worker.provider;
+  event.model = entry.worker.model;
+
+  // Copy remaining data fields (excluding already extracted ones)
+  const extractedFields = ['bead_id', 'duration_ms', 'error', 'tool', 'path'];
+  for (const key of Object.keys(data)) {
+    if (!extractedFields.includes(key) && !(key in event)) {
+      event[key] = data[key];
+    }
+  }
+
+  return event;
+}
+
+/**
+ * Infer log level from event name
+ *
+ * Maps NEEDLE event types to log levels:
+ * - error: events containing "error", "fail", "exhausted"
+ * - warn: events containing "retry", "warn"
+ * - debug: events containing "debug"
+ * - info: everything else
+ */
+function inferLogLevel(eventName: string): LogLevel {
+  const lower = eventName.toLowerCase();
+
+  // Error-level events
+  if (lower.includes('error') || lower.includes('fail') || lower.includes('exhausted')) {
+    return 'error';
+  }
+
+  // Warn-level events
+  if (lower.includes('retry') || lower.includes('warn')) {
+    return 'warn';
+  }
+
+  // Debug-level events
+  if (lower.includes('debug')) {
+    return 'debug';
+  }
+
+  // Default to info
+  return 'info';
 }
 
 /**
@@ -150,7 +290,11 @@ function isValidLogLevel(level: unknown): level is LogLevel {
  * Check if field is a standard LogEvent field
  */
 function isStandardField(key: string): boolean {
-  return ['ts', 'worker', 'level', 'msg', 'tool', 'path', 'bead', 'duration_ms', 'error'].includes(key);
+  return [
+    'ts', 'worker', 'level', 'msg', 'tool', 'path', 'bead', 'duration_ms', 'error',
+    // NEEDLE-specific fields
+    'session', 'provider', 'model'
+  ].includes(key);
 }
 
 /**

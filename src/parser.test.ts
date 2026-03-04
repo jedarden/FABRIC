@@ -103,6 +103,227 @@ describe('parseLogLine', () => {
     });
   });
 
+  describe('NEEDLE format', () => {
+    it('should parse NEEDLE format with ISO timestamp', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.started',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test',
+        },
+        data: {
+          pid: 2789549,
+          workspace: '/home/coder/forge',
+          agent: 'claude-code-glm-4.7',
+        },
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.ts).toBe(1772641054008); // Unix ms from '2026-03-04T16:17:34.008Z'
+      expect(result?.worker).toBe('claude-test');
+      expect(result?.msg).toBe('worker.started');
+      expect(result?.level).toBe('info');
+      expect(result?.session).toBe('forge-glm-test');
+      expect(result?.provider).toBe('code');
+      expect(result?.model).toBe('glm-4.7');
+    });
+
+    it('should extract bead_id from data payload', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'bead.claimed',
+        session: 'test-session',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'sonnet',
+          identifier: 'worker1',
+        },
+        data: {
+          bead_id: 'bd-2ok0',
+          title: 'Test task',
+          workspace: '/home/coder/forge',
+        },
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.bead).toBe('bd-2ok0');
+    });
+
+    it('should extract duration_ms from data payload', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'bead.completed',
+        session: 'test-session',
+        worker: {
+          runner: 'claude',
+          provider: 'anthropic',
+          model: 'sonnet',
+          identifier: 'test',
+        },
+        data: {
+          bead_id: 'bd-xyz',
+          duration_ms: 10076,
+          output_file: '/tmp/output.log',
+        },
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.duration_ms).toBe(10076);
+      expect(result?.bead).toBe('bd-xyz');
+    });
+
+    it('should infer error level from event name', () => {
+      const errorEvents = [
+        'bead.error',
+        'worker.failed',
+        'bead.claim_exhausted',
+      ];
+
+      for (const eventName of errorEvents) {
+        const line = JSON.stringify({
+          ts: '2026-03-04T16:17:34.008Z',
+          event: eventName,
+          session: 'test',
+          worker: {
+            runner: 'claude',
+            provider: 'code',
+            model: 'test',
+            identifier: 'test',
+          },
+          data: {},
+        });
+
+        const result = parseLogLine(line);
+        expect(result?.level).toBe('error');
+      }
+    });
+
+    it('should infer warn level from event name', () => {
+      const warnEvents = ['bead.claim_retry', 'worker.warning'];
+
+      for (const eventName of warnEvents) {
+        const line = JSON.stringify({
+          ts: '2026-03-04T16:17:34.008Z',
+          event: eventName,
+          session: 'test',
+          worker: {
+            runner: 'claude',
+            provider: 'code',
+            model: 'test',
+            identifier: 'test',
+          },
+          data: {},
+        });
+
+        const result = parseLogLine(line);
+        expect(result?.level).toBe('warn');
+      }
+    });
+
+    it('should infer debug level from event name', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.debug',
+        session: 'test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'test',
+          identifier: 'test',
+        },
+        data: {},
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.level).toBe('debug');
+    });
+
+    it('should default to info level for normal events', () => {
+      const infoEvents = [
+        'worker.started',
+        'worker.idle',
+        'bead.claimed',
+        'bead.completed',
+        'effort.recorded',
+      ];
+
+      for (const eventName of infoEvents) {
+        const line = JSON.stringify({
+          ts: '2026-03-04T16:17:34.008Z',
+          event: eventName,
+          session: 'test',
+          worker: {
+            runner: 'claude',
+            provider: 'code',
+            model: 'test',
+            identifier: 'test',
+          },
+          data: {},
+        });
+
+        const result = parseLogLine(line);
+        expect(result?.level).toBe('info');
+      }
+    });
+
+    it('should preserve additional data fields', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'bead.claimed',
+        session: 'test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'test',
+          identifier: 'test',
+        },
+        data: {
+          bead_id: 'bd-123',
+          title: 'Custom title',
+          attempt: 3,
+          workspace: '/home/coder/test',
+        },
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.title).toBe('Custom title');
+      expect(result?.attempt).toBe(3);
+      expect(result?.workspace).toBe('/home/coder/test');
+    });
+
+    it('should flatten worker to runner-identifier format', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.started',
+        session: 'test',
+        worker: {
+          runner: 'needle',
+          provider: 'anthropic',
+          model: 'opus',
+          identifier: 'prod-worker-1',
+        },
+        data: {},
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result?.worker).toBe('needle-prod-worker-1');
+    });
+  });
+
   describe('invalid inputs', () => {
     it('should return null for empty string', () => {
       expect(parseLogLine('')).toBeNull();
@@ -1551,5 +1772,535 @@ describe('formatConversationEvent', () => {
     const formatted = formatConversationEvent(event);
 
     expect(formatted).toContain('[truncated]');
+  });
+});
+
+// ============================================
+// NEEDLE Log Format Tests
+// ============================================
+
+/**
+ * Tests for NEEDLE structured log format parsing.
+ *
+ * NEEDLE format structure:
+ * {
+ *   ts: ISO 8601 string,
+ *   event: string (e.g., "worker.started", "bead.claimed"),
+ *   session: string,
+ *   worker: { runner, provider, model, identifier },
+ *   data: { ...event-specific payload }
+ * }
+ *
+ * Sample log lines from ~/.needle/logs/
+ */
+describe('parseLogLine - NEEDLE format', () => {
+  describe('worker.started event', () => {
+    it('should parse worker.started event with minimal fields', () => {
+      // Sample from ~/.needle/logs/needle-claude-anthropic-sonnet-test12.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.started',
+        session: 'needle-claude-anthropic-sonnet-test12',
+        worker: {
+          runner: 'claude',
+          provider: 'anthropic',
+          model: 'sonnet',
+          identifier: 'test12'
+        },
+        data: {
+          pid: 1929276,
+          workspace: '/home/coder/NEEDLE',
+          agent: 'claude-anthropic-sonnet'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.ts).toBe(new Date('2026-03-04T16:17:34.008Z').getTime());
+      expect(result?.worker).toBe('claude-test12');
+      expect(result?.level).toBe('info');
+      expect(result?.msg).toBe('worker.started');
+      expect(result?.session).toBe('needle-claude-anthropic-sonnet-test12');
+      expect(result?.provider).toBe('anthropic');
+      expect(result?.model).toBe('sonnet');
+    });
+
+    it('should parse worker.started event with full data', () => {
+      // Sample from ~/.needle/logs/forge-glm-test.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T19:31:30.245Z',
+        event: 'worker.started',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test'
+        },
+        data: {
+          workspace: '/home/coder/forge',
+          agent: 'claude-code-glm-4.7',
+          session: 'forge-glm-test',
+          timestamp: '2026-03-04T19:31:30Z'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.worker).toBe('claude-test');
+      expect(result?.provider).toBe('code');
+      expect(result?.model).toBe('glm-4.7');
+      expect(result?.session).toBe('forge-glm-test');
+      // Additional data fields should be preserved
+      expect(result?.workspace).toBe('/home/coder/forge');
+      expect(result?.agent).toBe('claude-code-glm-4.7');
+    });
+  });
+
+  describe('bead.claimed event', () => {
+    it('should parse bead.claimed event with bead_id', () => {
+      // Sample from ~/.needle/logs/forge-glm-test.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T19:31:34.851Z',
+        event: 'bead.claimed',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test'
+        },
+        data: {
+          bead_id: 'bd-2ok0',
+          actor: 'forge-glm-test',
+          attempt: 1,
+          workspace: '/home/coder/forge'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.msg).toBe('bead.claimed');
+      expect(result?.level).toBe('info');
+      expect(result?.bead).toBe('bd-2ok0');
+      expect(result?.worker).toBe('claude-test');
+      expect(result?.attempt).toBe(1);
+      expect(result?.actor).toBe('forge-glm-test');
+    });
+
+    it('should parse bead.claimed event with title', () => {
+      // Sample from ~/.needle/logs/forge-glm-test.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T19:31:34.978Z',
+        event: 'bead.claimed',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test'
+        },
+        data: {
+          bead_id: 'bd-2ok0',
+          workspace: '/home/coder/forge',
+          agent: 'claude-code-glm-4.7',
+          title: 'Add model alias mapping for opencode'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.bead).toBe('bd-2ok0');
+      expect(result?.title).toBe('Add model alias mapping for opencode');
+    });
+  });
+
+  describe('bead.completed event', () => {
+    it('should parse bead.completed event with duration', () => {
+      // Sample from ~/.needle/logs/forge-glm-test.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T19:37:19.590Z',
+        event: 'bead.completed',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test'
+        },
+        data: {
+          bead_id: 'bd-2ok0',
+          duration_ms: 28854,
+          output_file: '/tmp/needle-dispatch-bd-2ok0-FHwgcG7A.log'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.msg).toBe('bead.completed');
+      expect(result?.level).toBe('info');
+      expect(result?.bead).toBe('bd-2ok0');
+      expect(result?.duration_ms).toBe(28854);
+      expect(result?.output_file).toBe('/tmp/needle-dispatch-bd-2ok0-FHwgcG7A.log');
+    });
+  });
+
+  describe('bead.claim_retry event', () => {
+    it('should parse bead.claim_retry event with warn level', () => {
+      // Sample from ~/.needle/logs/forge-glm-test.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T19:37:22.192Z',
+        event: 'bead.claim_retry',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test'
+        },
+        data: {
+          bead_id: 'bd-e6jq',
+          attempt: 1,
+          max_retries: 5,
+          actor: 'forge-glm-test'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.msg).toBe('bead.claim_retry');
+      expect(result?.level).toBe('warn'); // 'retry' in event name triggers warn level
+      expect(result?.bead).toBe('bd-e6jq');
+      expect(result?.attempt).toBe(1);
+      expect(result?.max_retries).toBe(5);
+    });
+
+    it('should parse multiple claim_retry attempts', () => {
+      const attempts = [
+        { attempt: 2, bead_id: 'bd-2ee5' },
+        { attempt: 3, bead_id: 'bd-e6jq' },
+        { attempt: 4, bead_id: 'bd-e6jq' },
+        { attempt: 5, bead_id: 'bd-e6jq' }
+      ];
+
+      for (const { attempt, bead_id } of attempts) {
+        const line = JSON.stringify({
+          ts: '2026-03-04T19:37:22.536Z',
+          event: 'bead.claim_retry',
+          session: 'forge-glm-test',
+          worker: {
+            runner: 'claude',
+            provider: 'code',
+            model: 'glm-4.7',
+            identifier: 'test'
+          },
+          data: {
+            bead_id,
+            attempt,
+            max_retries: 5,
+            actor: 'forge-glm-test'
+          }
+        });
+
+        const result = parseLogLine(line);
+        expect(result).not.toBeNull();
+        expect(result?.level).toBe('warn');
+        expect(result?.attempt).toBe(attempt);
+      }
+    });
+  });
+
+  describe('bead.claim_exhausted event', () => {
+    it('should parse bead.claim_exhausted event with error level', () => {
+      // Sample from ~/.needle/logs/forge-glm-test.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T19:37:23.647Z',
+        event: 'bead.claim_exhausted',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test'
+        },
+        data: {
+          max_retries: 5,
+          actor: 'forge-glm-test',
+          workspace: '/home/coder/forge'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.msg).toBe('bead.claim_exhausted');
+      expect(result?.level).toBe('error'); // 'exhausted' in event name triggers error level
+      expect(result?.max_retries).toBe(5);
+    });
+  });
+
+  describe('heartbeat.emitted event', () => {
+    it('should parse heartbeat.emitted event', () => {
+      // Constructed based on NEEDLE format pattern
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'heartbeat.emitted',
+        session: 'needle-claude-anthropic-sonnet-test12',
+        worker: {
+          runner: 'claude',
+          provider: 'anthropic',
+          model: 'sonnet',
+          identifier: 'test12'
+        },
+        data: {
+          uptime_seconds: 3600,
+          beads_completed: 5,
+          last_bead_id: 'bd-abc123'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.msg).toBe('heartbeat.emitted');
+      expect(result?.level).toBe('info');
+      expect(result?.worker).toBe('claude-test12');
+      expect(result?.session).toBe('needle-claude-anthropic-sonnet-test12');
+      expect(result?.uptime_seconds).toBe(3600);
+      expect(result?.beads_completed).toBe(5);
+    });
+  });
+
+  describe('worker.idle event', () => {
+    it('should parse worker.idle event', () => {
+      // Sample from ~/.needle/logs/needle-claude-anthropic-sonnet-test12.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:36.243Z',
+        event: 'worker.idle',
+        session: 'needle-claude-anthropic-sonnet-test12',
+        worker: {
+          runner: 'claude',
+          provider: 'anthropic',
+          model: 'sonnet',
+          identifier: 'test12'
+        },
+        data: {
+          consecutive_empty: 1,
+          idle_seconds: 0,
+          workspace: '/home/coder/NEEDLE',
+          agent: 'claude-anthropic-sonnet'
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.msg).toBe('worker.idle');
+      expect(result?.level).toBe('info');
+      expect(result?.consecutive_empty).toBe(1);
+      expect(result?.idle_seconds).toBe(0);
+    });
+  });
+
+  describe('effort.recorded event', () => {
+    it('should parse effort.recorded event with duration', () => {
+      // Sample from ~/.needle/logs/forge-glm-test.log
+      const line = JSON.stringify({
+        ts: '2026-03-04T19:37:19.616Z',
+        event: 'effort.recorded',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test'
+        },
+        data: {
+          bead_id: 'bd-2ok0',
+          duration_ms: 28854
+        }
+      });
+
+      const result = parseLogLine(line);
+
+      expect(result).not.toBeNull();
+      expect(result?.msg).toBe('effort.recorded');
+      expect(result?.bead).toBe('bd-2ok0');
+      expect(result?.duration_ms).toBe(28854);
+    });
+  });
+
+  describe('level inference from event names', () => {
+    it('should infer error level for events with "error"', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.error',
+        session: 'test-session',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.level).toBe('error');
+    });
+
+    it('should infer error level for events with "fail"', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'bead.failed',
+        session: 'test-session',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.level).toBe('error');
+    });
+
+    it('should infer warn level for events with "retry"', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'bead.claim_retry',
+        session: 'test-session',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.level).toBe('warn');
+    });
+
+    it('should infer warn level for events with "warn"', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.warning',
+        session: 'test-session',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.level).toBe('warn');
+    });
+
+    it('should infer debug level for events with "debug"', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.debug',
+        session: 'test-session',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.level).toBe('debug');
+    });
+
+    it('should default to info level for unknown events', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'custom.event',
+        session: 'test-session',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.level).toBe('info');
+    });
+  });
+
+  describe('timestamp conversion', () => {
+    it('should convert ISO 8601 timestamp to Unix milliseconds', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.started',
+        session: 'test',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+
+      // Verify the timestamp is correctly converted
+      expect(result?.ts).toBe(1709569054008);
+    });
+
+    it('should handle timestamps with different timezone offsets', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34+00:00',
+        event: 'worker.started',
+        session: 'test',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result).not.toBeNull();
+      expect(typeof result?.ts).toBe('number');
+    });
+  });
+
+  describe('worker identifier flattening', () => {
+    it('should flatten worker object to runner-identifier format', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.started',
+        session: 'test',
+        worker: { runner: 'claude', provider: 'anthropic', model: 'opus', identifier: 'prod' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.worker).toBe('claude-prod');
+    });
+
+    it('should preserve provider and model as separate fields', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.started',
+        session: 'test',
+        worker: { runner: 'claude', provider: 'anthropic', model: 'opus-4', identifier: 'prod' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.provider).toBe('anthropic');
+      expect(result?.model).toBe('opus-4');
+    });
+  });
+
+  describe('mixed NEEDLE and legacy format', () => {
+    it('should parse NEEDLE format when mixed with legacy format', () => {
+      const needleLine = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.started',
+        session: 'test',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const legacyLine = JSON.stringify({
+        ts: 1709569054008,
+        worker: 'w-legacy',
+        level: 'info',
+        msg: 'Legacy message'
+      });
+
+      const needleResult = parseLogLine(needleLine);
+      const legacyResult = parseLogLine(legacyLine);
+
+      expect(needleResult?.worker).toBe('claude-test');
+      expect(needleResult?.msg).toBe('worker.started');
+
+      expect(legacyResult?.worker).toBe('w-legacy');
+      expect(legacyResult?.msg).toBe('Legacy message');
+    });
   });
 });
