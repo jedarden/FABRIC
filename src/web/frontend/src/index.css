@@ -2472,3 +2472,191 @@ body {
     flex-direction: column;
   }
 }
+
+/* ============================================
+   Focus Mode Styles
+   ============================================ */
+
+/* Focus Mode Toggle Button */
+.focus-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: rgba(147, 51, 234, 0.2);
+  border: 1px solid #9333ea;
+  color: #9333ea;
+  padding: 0.375rem 0.625rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.focus-mode-toggle:hover {
+  background: rgba(147, 51, 234, 0.3);
+}
+
+.focus-mode-toggle.active {
+  background: rgba(147, 51, 234, 0.4);
+  border-color: #a855f7;
+  color: #a855f7;
+}
+
+.focus-mode-icon {
+  font-size: 0.875rem;
+}
+
+.focus-mode-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.focus-mode-count {
+  background: #9333ea;
+  color: white;
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 10px;
+  font-weight: 600;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* Pin Button in Worker Cards */
+.pin-button {
+  background: transparent;
+  border: 1px solid rgba(147, 51, 234, 0.3);
+  color: #9333ea;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s;
+}
+
+.pin-button:hover {
+  background: rgba(147, 51, 234, 0.2);
+  border-color: #9333ea;
+}
+
+.pin-button.pinned {
+  background: rgba(147, 51, 234, 0.3);
+  border-color: #a855f7;
+  color: #a855f7;
+}
+
+.worker-card.pinned {
+  border-left: 3px solid #9333ea;
+}
+
+.worker-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Bead Pin Controls in Activity Stream */
+.activity-stream-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.bead-pins {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  border: 1px solid var(--bg-tertiary);
+}
+
+.bead-pins-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.bead-pin-button {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: rgba(147, 51, 234, 0.1);
+  border: 1px solid rgba(147, 51, 234, 0.3);
+  color: #9333ea;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: 'SF Mono', Monaco, monospace;
+  transition: all 0.2s;
+}
+
+.bead-pin-button:hover {
+  background: rgba(147, 51, 234, 0.2);
+  border-color: #9333ea;
+}
+
+.bead-pin-button.pinned {
+  background: rgba(147, 51, 234, 0.3);
+  border-color: #a855f7;
+  color: #a855f7;
+  font-weight: 600;
+}
+
+.bead-more-indicator {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Event Item with Bead */
+.event-bead {
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.75rem;
+  color: #9333ea;
+  background: rgba(147, 51, 234, 0.1);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  margin-right: 0.5rem;
+}
+
+.event-item.bead-pinned {
+  background: rgba(147, 51, 234, 0.05);
+  border-left: 2px solid #9333ea;
+}
+
+/* Empty State for Focus Mode */
+.worker-grid .empty-state {
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.worker-grid .empty-state p:first-child {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+/* Responsive adjustments for Focus Mode */
+@media (max-width: 768px) {
+  .focus-mode-toggle {
+    padding: 0.25rem 0.5rem;
+  }
+
+  .focus-mode-label {
+    display: none;
+  }
+
+  .bead-pins {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .bead-pin-button {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+  }
+}

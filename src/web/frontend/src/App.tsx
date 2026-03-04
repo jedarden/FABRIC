@@ -8,6 +8,14 @@ import FileHeatmap from './components/FileHeatmap';
 import DependencyDag from './components/DependencyDag';
 import RecoveryPanel from './components/RecoveryPanel';
 
+const FOCUS_MODE_STORAGE_KEY = 'fabric-focus-mode';
+
+interface FocusModeState {
+  enabled: boolean;
+  pinnedWorkers: string[];
+  pinnedBeads: string[];
+}
+
 const App: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
@@ -19,6 +27,36 @@ const App: React.FC = () => {
   const [showDependencyDag, setShowDependencyDag] = useState(false);
   const [showRecoveryPanel, setShowRecoveryPanel] = useState(false);
   const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
+
+  // Focus Mode state
+  const [focusModeEnabled, setFocusModeEnabled] = useState(false);
+  const [pinnedWorkers, setPinnedWorkers] = useState<Set<string>>(new Set());
+  const [pinnedBeads, setPinnedBeads] = useState<Set<string>>(new Set());
+
+  // Load Focus Mode state from localStorage on mount
+  useEffect(() => {
+    const savedState = localStorage.getItem(FOCUS_MODE_STORAGE_KEY);
+    if (savedState) {
+      try {
+        const parsed: FocusModeState = JSON.parse(savedState);
+        setFocusModeEnabled(parsed.enabled);
+        setPinnedWorkers(new Set(parsed.pinnedWorkers));
+        setPinnedBeads(new Set(parsed.pinnedBeads));
+      } catch (error) {
+        console.error('Failed to parse Focus Mode state:', error);
+      }
+    }
+  }, []);
+
+  // Save Focus Mode state to localStorage whenever it changes
+  useEffect(() => {
+    const state: FocusModeState = {
+      enabled: focusModeEnabled,
+      pinnedWorkers: Array.from(pinnedWorkers),
+      pinnedBeads: Array.from(pinnedBeads),
+    };
+    localStorage.setItem(FOCUS_MODE_STORAGE_KEY, JSON.stringify(state));
+  }, [focusModeEnabled, pinnedWorkers, pinnedBeads]);
 
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
     if (message.type === 'init') {
@@ -97,11 +135,11 @@ const App: React.FC = () => {
   }, [handleWebSocketMessage]);
 
   const filteredEvents = selectedWorker
-    ? events.filter(e => e.worker === selectedWorker)
-    : events;
+    ? filteredEventsByFocusMode.filter(e => e.worker === selectedWorker)
+    : filteredEventsByFocusMode;
 
   const selectedWorkerInfo = selectedWorker
-    ? workers.find(w => w.id === selectedWorker)
+    ? filteredWorkers.find(w => w.id === selectedWorker)
     : null;
 
   const handleAcknowledgeAlert = useCallback((alertId: string) => {
@@ -118,11 +156,66 @@ const App: React.FC = () => {
 
   const unacknowledgedAlertCount = collisionAlerts.filter(a => !a.acknowledged).length;
 
+  // Focus Mode callbacks
+  const toggleFocusMode = useCallback(() => {
+    setFocusModeEnabled(prev => !prev);
+  }, []);
+
+  const togglePinWorker = useCallback((workerId: string) => {
+    setPinnedWorkers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(workerId)) {
+        newSet.delete(workerId);
+      } else {
+        newSet.add(workerId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const togglePinBead = useCallback((beadId: string) => {
+    setPinnedBeads(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(beadId)) {
+        newSet.delete(beadId);
+      } else {
+        newSet.add(beadId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  // Filter workers and events based on Focus Mode
+  const filteredWorkers = focusModeEnabled && pinnedWorkers.size > 0
+    ? workers.filter(w => pinnedWorkers.has(w.id))
+    : workers;
+
+  const filteredEventsByFocusMode = focusModeEnabled && (pinnedWorkers.size > 0 || pinnedBeads.size > 0)
+    ? events.filter(e => {
+        const matchesPinnedWorker = pinnedWorkers.size === 0 || pinnedWorkers.has(e.worker);
+        const matchesPinnedBead = pinnedBeads.size === 0 || (e.bead && pinnedBeads.has(e.bead));
+        return matchesPinnedWorker || matchesPinnedBead;
+      })
+    : events;
+
   return (
     <div className="app">
       <header className="header">
         <h1>FABRIC</h1>
         <div className="header-actions">
+          <button
+            className={`focus-mode-toggle ${focusModeEnabled ? 'active' : ''}`}
+            onClick={toggleFocusMode}
+            title={focusModeEnabled ? 'Focus Mode: ON (showing pinned only)' : 'Focus Mode: OFF (showing all)'}
+          >
+            <span className="focus-mode-icon">{focusModeEnabled ? '📌' : '📍'}</span>
+            <span className="focus-mode-label">Focus</span>
+            {focusModeEnabled && (pinnedWorkers.size > 0 || pinnedBeads.size > 0) && (
+              <span className="focus-mode-count">
+                {pinnedWorkers.size + pinnedBeads.size}
+              </span>
+            )}
+          </button>
           <button
             className="dag-toggle"
             onClick={() => setShowDependencyDag(!showDependencyDag)}
@@ -166,14 +259,20 @@ const App: React.FC = () => {
 
       <main className="main-content">
         <WorkerGrid
-          workers={workers}
+          workers={filteredWorkers}
           selectedWorker={selectedWorker}
           onSelectWorker={setSelectedWorker}
+          pinnedWorkers={pinnedWorkers}
+          onTogglePin={togglePinWorker}
+          focusModeEnabled={focusModeEnabled}
         />
 
         <ActivityStream
           events={filteredEvents}
           selectedWorker={selectedWorker}
+          pinnedBeads={pinnedBeads}
+          onTogglePinBead={togglePinBead}
+          focusModeEnabled={focusModeEnabled}
         />
 
         {selectedWorkerInfo && (

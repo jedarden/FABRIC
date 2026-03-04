@@ -7,6 +7,7 @@ export interface LogEvent {
   tool?: string;
   message: string;
   raw: string;
+  bead?: string; // Bead/task identifier for Focus Mode
 }
 
 export interface WorkerInfo {
