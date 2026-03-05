@@ -312,9 +312,9 @@ describe('WorkerGrid', () => {
       const content = mockBoxInstance.setContent.mock.calls[0][0];
 
       // Check for status color tags
-      expect(content).toContain('{green-fg}'); // active
-      expect(content).toContain('{yellow-fg}'); // idle
-      expect(content).toContain('{red-fg}'); // error
+      expect(content).toContain('{light-green-fg}'); // active
+      expect(content).toContain('{light-yellow-fg}'); // idle
+      expect(content).toContain('{light-red-fg}'); // error
     });
 
     it('should show collision indicator when worker has collision', () => {
