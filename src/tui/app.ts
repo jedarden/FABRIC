@@ -5,9 +5,9 @@
  */
 
 import blessed from 'blessed';
-import { LogEvent, WorkerInfo } from '../types.js';
+import { LogEvent, WorkerInfo, WorkerStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
-import { colors } from './utils/colors.js';
+import { colors, getStatusColor } from './utils/colors.js';
 import { WorkerGrid } from './components/WorkerGrid.js';
 import { ActivityStream } from './components/ActivityStream.js';
 import { WorkerDetail } from './components/WorkerDetail.js';
@@ -82,6 +82,64 @@ export class FabricTuiApp {
   }
 
   /**
+   * Get worker statistics for header badge
+   */
+  private getWorkerStats(): { total: number; active: number; idle: number; error: number } {
+    const workers = this.store.getWorkers();
+    const stats = { total: workers.length, active: 0, idle: 0, error: 0 };
+
+    for (const worker of workers) {
+      if (worker.status === 'active') stats.active++;
+      else if (worker.status === 'idle') stats.idle++;
+      else if (worker.status === 'error') stats.error++;
+    }
+
+    return stats;
+  }
+
+  /**
+   * Get header content with worker count badge
+   */
+  private getHeaderContent(): string {
+    const stats = this.getWorkerStats();
+
+    // Build worker count badge with colored status indicators
+    let badge = ' FABRIC - Worker Activity Monitor';
+
+    if (stats.total > 0) {
+      badge += '  {bold}[';
+
+      const parts: string[] = [];
+      if (stats.active > 0) {
+        parts.push(`{${getStatusColor('active')}-fg}${stats.active} active{/${getStatusColor('active')}-fg}`);
+      }
+      if (stats.idle > 0) {
+        parts.push(`{${getStatusColor('idle')}-fg}${stats.idle} idle{/${getStatusColor('idle')}-fg}`);
+      }
+      if (stats.error > 0) {
+        parts.push(`{${getStatusColor('error')}-fg}${stats.error} error{/${getStatusColor('error')}-fg}`);
+      }
+
+      if (parts.length > 0) {
+        badge += parts.join('{/} | {bold}') + '{/}';
+      }
+
+      badge += `{bold}]{/}`;
+    }
+
+    return badge;
+  }
+
+  /**
+   * Update header with current worker stats
+   */
+  private updateHeader(): void {
+    if (this.viewMode === 'default') {
+      this.headerBox.setContent(this.getHeaderContent());
+    }
+  }
+
+  /**
    * Create the blessed screen
    */
   private createScreen(): blessed.Widgets.Screen {
@@ -104,7 +162,7 @@ export class FabricTuiApp {
       left: 0,
       right: 0,
       height: 1,
-      content: ' FABRIC - Worker Activity Monitor',
+      content: this.getHeaderContent(),
       style: {
         fg: colors.header,
         bold: true,
