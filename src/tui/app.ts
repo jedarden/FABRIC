@@ -404,32 +404,32 @@ export class FabricTuiApp {
     });
 
     // Toggle file heatmap view
-    this.screen.key(['H'], () => {
+    this.screen.key(['H', 'h'], () => {
       this.toggleHeatmapView();
     });
 
     // Toggle dependency DAG view
-    this.screen.key(['D'], () => {
+    this.screen.key(['D', 'd'], () => {
       this.toggleDagView();
     });
 
     // Toggle session replay view
-    this.screen.key(['R'], () => {
+    this.screen.key(['R', 'r'], () => {
       this.toggleReplayView();
     });
 
     // Toggle error group view
-    this.screen.key(['E'], () => {
+    this.screen.key(['E', 'e'], () => {
       this.toggleErrorsView();
     });
 
     // Toggle session digest view
-    this.screen.key(['G'], () => {
+    this.screen.key(['G', 'g'], () => {
       this.toggleDigestView();
     });
 
     // Toggle collision alert view
-    this.screen.key(['C'], () => {
+    this.screen.key(['C', 'c'], () => {
       this.toggleCollisionsView();
     });
 
