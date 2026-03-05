@@ -300,6 +300,23 @@ describe('WorkerGrid', () => {
       expect(content).toContain('✗'); // error
     });
 
+    it('should render workers with correct status colors', () => {
+      const workers = [
+        createMockWorker({ id: 'w-1', status: 'active' }),
+        createMockWorker({ id: 'w-2', status: 'idle' }),
+        createMockWorker({ id: 'w-3', status: 'error' }),
+      ];
+
+      workerGrid.updateWorkers(workers);
+
+      const content = mockBoxInstance.setContent.mock.calls[0][0];
+
+      // Check for status color tags
+      expect(content).toContain('{green-fg}'); // active
+      expect(content).toContain('{yellow-fg}'); // idle
+      expect(content).toContain('{red-fg}'); // error
+    });
+
     it('should show collision indicator when worker has collision', () => {
       const workers = [
         createMockWorker({ id: 'w-1', hasCollision: true }),
