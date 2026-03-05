@@ -966,9 +966,9 @@ describe('TUI Regression Tests', () => {
       app = new FabricTuiApp(store);
       app.start();
 
-      // Add events
+      // Add events to store
       for (let i = 0; i < 10; i++) {
-        app.addEvent(createMockEvent({ msg: `Event ${i}` }));
+        store.add(createMockEvent({ msg: `Event ${i}` }));
       }
 
       // Switch views
