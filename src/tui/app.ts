@@ -99,6 +99,7 @@ export class FabricTuiApp {
     // Header
     this.headerBox = blessed.box({
       parent: this.screen,
+      tags: true,
       top: 0,
       left: 0,
       right: 0,
@@ -263,6 +264,7 @@ export class FabricTuiApp {
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
+      tags: true,
       bottom: 0,
       left: 0,
       right: 0,
@@ -899,6 +901,7 @@ export class FabricTuiApp {
     } else {
       this.helpOverlay = blessed.box({
         parent: this.screen,
+      tags: true,
         top: 'center',
         left: 'center',
         width: '50%',

@@ -128,6 +128,7 @@ export class WorkerAnalyticsPanel {
     // Main container
     this.box = blessed.box({
       parent: options.parent,
+      tags: true,
       top: options.top,
       left: options.left,
       width: options.width,
@@ -164,6 +165,7 @@ export class WorkerAnalyticsPanel {
     // Detail box for selected worker
     this.detailBox = blessed.box({
       parent: this.box,
+      tags: true,
       bottom: 0,
       left: 0,
       width: '100%-2',

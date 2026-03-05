@@ -38,6 +38,7 @@ export class WorkerGrid {
   constructor(options: WorkerGridOptions) {
     this.box = blessed.box({
       parent: options.parent,
+      tags: true,
       top: options.top,
       left: options.left,
       width: options.width,

@@ -74,6 +74,7 @@ export class SessionReplay extends EventEmitter {
     // Main container
     this.container = blessed.box({
       parent: options.parent,
+      tags: true,
       top: options.top,
       left: options.left,
       width: options.width,
@@ -89,6 +90,7 @@ export class SessionReplay extends EventEmitter {
     // Timeline bar at top
     this.timelineBox = blessed.box({
       parent: this.container,
+      tags: true,
       top: 0,
       left: 0,
       right: 0,
@@ -120,6 +122,7 @@ export class SessionReplay extends EventEmitter {
     // Controls bar at bottom
     this.controlsBox = blessed.box({
       parent: this.container,
+      tags: true,
       bottom: 0,
       left: 0,
       right: 0,

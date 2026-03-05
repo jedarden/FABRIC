@@ -68,6 +68,7 @@ export class ActivityStream {
       width: options.width,
       bottom: options.bottom,
       label: ' Activity Stream ',
+      tags: true,
       border: { type: 'line' },
       style: {
         border: { fg: colors.border },

@@ -57,6 +57,7 @@ export class DependencyDag {
       left: options.left,
       width: options.width,
       label: ' Task Dependency DAG ',
+      tags: true,
       border: { type: 'line' },
       style: {
         border: { fg: colors.border },

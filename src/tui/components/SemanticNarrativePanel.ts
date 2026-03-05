@@ -123,6 +123,7 @@ export class SemanticNarrativePanel {
     // Main container
     this.box = blessed.box({
       parent: options.parent,
+      tags: true,
       top: options.top,
       left: options.left,
       width: options.width,
@@ -159,6 +160,7 @@ export class SemanticNarrativePanel {
     // Detail box for selected segment
     this.detailBox = blessed.box({
       parent: this.box,
+      tags: true,
       bottom: 0,
       left: 0,
       width: '100%-2',

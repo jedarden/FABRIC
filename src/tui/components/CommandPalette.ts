@@ -65,6 +65,7 @@ export class CommandPalette {
     // Container box
     this.box = blessed.box({
       parent: options.parent,
+      tags: true,
       top: 'center',
       left: 'center',
       width: '60%',
