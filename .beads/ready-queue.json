@@ -1,1 +1,72 @@
-{"total_available": 0, "beads": [], "last_updated": "2026-03-04T14:03:40+00:00"}
+{
+  "total_available": 11,
+  "beads": [
+    {
+      "id": "bd-2b3",
+      "title": "Verify TUI renders colors correctly in tmux session",
+      "priority": 0,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-1h9",
+      "title": "Define FABRIC data types in Rust (LogEvent, WorkerInfo, BeadState)",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-1q7",
+      "title": "Implement keyboard navigation (Tab, j/k, vim bindings)",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-21r",
+      "title": "Implement log parser in Rust (NEEDLE JSON format)",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-2dr",
+      "title": "Create WorkerGrid widget using frankentui",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-2kq",
+      "title": "Create ActivityStream widget using frankentui",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-2xf",
+      "title": "Add file tailing with async log ingestion",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-2zy",
+      "title": "Build and package fabric-tui binary",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-3a1",
+      "title": "Set up Rust workspace for fabric-tui crate",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-3p3",
+      "title": "Create WorkerDetail panel using frankentui",
+      "priority": 1,
+      "issue_type": "task"
+    },
+    {
+      "id": "bd-2gy",
+      "title": "Migrate FABRIC TUI from blessed.js to frankentui (Rust)",
+      "priority": 2,
+      "issue_type": "epic"
+    }
+  ],
+  "last_updated": "2026-03-05T00:54:19Z"
+}

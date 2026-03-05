@@ -4,18 +4,20 @@
 
 This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead Reporting Interface Console). Features are organized into phases with clear priorities.
 
-## Current Status (Updated: 2026-03-04)
+## Current Status (Updated: 2026-03-05)
 
 | Metric | Count |
 |--------|-------|
-| **Open beads** | 0 |
-| **Closed beads** | 164 |
-| **Completion** | 100% ✅ |
+| **Open beads** | 17 |
+| **Closed beads** | 165 |
+| **Completion** | ~91% (Phase 5 in progress) |
 
 ### Completion by Priority
 | Priority | Open | Description |
 |----------|------|-------------|
-| P0 | 0 | All epics and features complete |
+| P0 | 1 | TUI color verification |
+| P1 | 15 | Frankentui migration tasks |
+| P2 | 1 | Epic tracking |
 
 **Completed:**
 - Phase 1: Core Infrastructure ✅ COMPLETE
@@ -47,7 +49,7 @@ This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead R
   - P1: Web command added to CLI
   - Dark theme styling
 
-- Phase 3.5: Intelligence Features (Partial)
+- Phase 3.5: Intelligence Features ✅ COMPLETE
   - ✅ DependencyDag TUI component
   - ✅ GitIntegration TUI panel
   - ✅ SessionDigest TUI component
@@ -56,9 +58,23 @@ This roadmap outlines the implementation plan for FABRIC (Flow Analysis & Bead R
   - ✅ Conversation parsing
   - ✅ Git status and diff parsing
 
+**In Progress:**
+- Phase 5: Frankentui Migration (Rust Rewrite) 🔄 IN PROGRESS
+  - Epic: bd-2gy - Migrate FABRIC TUI from blessed.js to frankentui
+  - P0: bd-2b3 - Verify TUI renders colors correctly in tmux session
+  - P1: bd-3a1 - Set up Rust workspace for fabric-tui crate
+  - P1: bd-1h9 - Define FABRIC data types in Rust
+  - P1: bd-21r - Implement log parser in Rust (NEEDLE JSON format)
+  - P1: bd-2dr - Create WorkerGrid widget using frankentui
+  - P1: bd-2kq - Create ActivityStream widget using frankentui
+  - P1: bd-3p3 - Create WorkerDetail panel using frankentui
+  - P1: bd-1q7 - Implement keyboard navigation
+  - P1: bd-2xf - Add file tailing with async log ingestion
+  - P1: bd-2zy - Build and package fabric-tui binary
+  - E2E Tests: bd-129, bd-1j9, bd-29t, bd-2wk, bd-2x9, bd-v4r, bd-3rf
+
 **Remaining (Untracked):**
 - Phase 4+ Intelligence Features are nice-to-have and not tracked as beads
-- Project is considered complete for core functionality
 
 ## Phase 2: TUI Implementation
 
