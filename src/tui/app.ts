@@ -448,8 +448,14 @@ export class FabricTuiApp {
       this.toggleAnalyticsView();
     });
 
-    // Escape to return to default view
+    // Escape to close modals or return to default view
     this.screen.key(['escape'], () => {
+      // First, hide worker detail if visible
+      if (this.workerDetail.isVisible()) {
+        this.workerDetail.hide();
+        return;
+      }
+      // Then, return to default view if in another view
       if (this.viewMode !== 'default') {
         this.setViewMode('default');
       }
