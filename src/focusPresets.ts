@@ -5,6 +5,10 @@
  * Used by both TUI and Web interfaces.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
 /**
  * A saved focus mode configuration
  */
@@ -77,26 +81,17 @@ export class LocalStoragePresetStorage implements PresetStorage {
  */
 export class FilePresetStorage implements PresetStorage {
   private readonly filePath: string;
-  private fs: typeof import('fs') | null = null;
 
   constructor(filePath: string) {
     this.filePath = filePath;
-    // Dynamically import fs for Node.js environments
-    try {
-      this.fs = require('fs');
-    } catch {
-      // Not in Node.js environment
-    }
   }
 
   load(): FocusPreset[] {
-    if (!this.fs) return [];
-
     try {
-      if (!this.fs.existsSync(this.filePath)) {
+      if (!fs.existsSync(this.filePath)) {
         return [];
       }
-      const data = this.fs.readFileSync(this.filePath, 'utf-8');
+      const data = fs.readFileSync(this.filePath, 'utf-8');
       return JSON.parse(data) as FocusPreset[];
     } catch (err) {
       console.error('Failed to load presets from file:', err);
@@ -105,10 +100,8 @@ export class FilePresetStorage implements PresetStorage {
   }
 
   save(presets: FocusPreset[]): void {
-    if (!this.fs) return;
-
     try {
-      this.fs.writeFileSync(this.filePath, JSON.stringify(presets, null, 2));
+      fs.writeFileSync(this.filePath, JSON.stringify(presets, null, 2));
     } catch (err) {
       console.error('Failed to save presets to file:', err);
     }
@@ -260,8 +253,6 @@ export function createWebPresetManager(): FocusPresetManager {
  * Create a preset manager for TUI (file storage)
  */
 export function createTuiPresetManager(configDir?: string): FocusPresetManager {
-  const path = require('path');
-  const os = require('os');
   const dir = configDir || path.join(os.homedir(), '.fabric');
   const filePath = path.join(dir, 'focus-presets.json');
   return new FocusPresetManager(new FilePresetStorage(filePath));
