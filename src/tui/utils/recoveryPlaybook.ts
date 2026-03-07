@@ -3,6 +3,7 @@
  *
  * Maps error patterns to actionable recovery steps.
  * Provides suggestions when workers encounter errors.
+ * Learns from historical error resolutions.
  */
 
 import {
@@ -16,6 +17,7 @@ import {
   RecoveryStats,
   RecoveryPriority,
 } from '../../types.js';
+import { getHistoricalStore, HistoricalStore, LearnedRecoveryEntry } from '../../historicalStore.js';
 
 // ============================================
 // Predefined Recovery Actions
@@ -886,6 +888,134 @@ export class RecoveryManager {
       manualActions,
       avgConfidence: suggestions.length > 0 ? totalConfidence / suggestions.length : 0,
       topActionTypes,
+    };
+  }
+
+  // ============================================
+  // Historical Error Methods
+  // ============================================
+
+  /**
+   * Search for similar historical errors and their resolutions
+   */
+  searchHistoricalErrors(errorMessage: string, limit: number = 5): Array<{
+    error: {
+      id: number;
+      workerId: string;
+      errorType: string;
+      errorMessage: string;
+      filePath: string | null;
+      timestamp: number;
+      resolution: string | null;
+      resolutionSuccessful: boolean | null;
+    };
+    similarity: number;
+  }> {
+    const store = getHistoricalStore();
+    const similar = store.findSimilarErrors(errorMessage, limit);
+
+    return similar.map(e => ({
+      error: {
+        id: e.id,
+        workerId: e.worker_id,
+        errorType: e.error_type,
+        errorMessage: e.error_message,
+        filePath: e.file_path,
+        timestamp: e.timestamp,
+        resolution: e.resolution,
+        resolutionSuccessful: e.resolution_successful !== null
+          ? Boolean(e.resolution_successful)
+          : null,
+      },
+      similarity: e.similarity,
+    }));
+  }
+
+  /**
+   * Get learned recovery patterns from historical data
+   */
+  getLearnedRecoveries(): LearnedRecoveryEntry[] {
+    const store = getHistoricalStore();
+    return store.getLearnedRecoveries();
+  }
+
+  /**
+   * Generate recovery suggestion enhanced with historical data
+   */
+  generateEnhancedSuggestion(
+    errorGroup: ErrorGroup,
+    options: RecoveryOptions = {}
+  ): RecoverySuggestion | null {
+    // First get the standard suggestion
+    const standardSuggestion = this.generateSuggestion(errorGroup, options);
+    if (!standardSuggestion) return null;
+
+    // Search for similar historical errors
+    const historicalMatches = this.searchHistoricalErrors(
+      errorGroup.fingerprint.sampleMessage,
+      3
+    );
+
+    // Get learned recoveries for this error type
+    const learnedRecoveries = this.getLearnedRecoveries()
+      .filter(lr => lr.errorType === errorGroup.fingerprint.category)
+      .slice(0, 3);
+
+    // Add historical context to actions
+    if (historicalMatches.length > 0 || learnedRecoveries.length > 0) {
+      // Add learned actions from history
+      const historicalActions: RecoveryAction[] = learnedRecoveries
+        .filter(lr => lr.successRate > 0.5)
+        .map(lr => ({
+          id: `action-learned-${Date.now().toString(36)}`,
+          type: 'fix_config' as RecoveryActionType,
+          title: `Learned: ${lr.resolution.slice(0, 50)}...`,
+          description: `Previously resolved ${lr.occurrenceCount} times with ${(lr.successRate * 100).toFixed(0)}% success rate`,
+          priority: 'high' as RecoveryPriority,
+          automated: false,
+          expectedOutcome: lr.resolution,
+          riskLevel: 'safe' as const,
+          estimatedTime: 5,
+        }));
+
+      // Combine standard actions with learned actions
+      standardSuggestion.actions = [
+        ...standardSuggestion.actions.slice(0, 2),
+        ...historicalActions,
+        ...standardSuggestion.actions.slice(2),
+      ].slice(0, 6);
+
+      // Boost confidence based on historical data
+      if (historicalMatches.some(m => m.error.resolutionSuccessful)) {
+        standardSuggestion.confidence = Math.min(standardSuggestion.confidence + 0.2, 1.0);
+      }
+    }
+
+    return standardSuggestion;
+  }
+
+  /**
+   * Get recovery statistics including historical data
+   */
+  getEnhancedStats(): RecoveryStats & {
+    historicalErrorsCount: number;
+    learnedRecoveriesCount: number;
+    avgHistoricalSuccessRate: number;
+  } {
+    const baseStats = this.getStats();
+    const store = getHistoricalStore();
+    const dbStats = store.getStats();
+    const learned = store.getLearnedRecoveries();
+
+    const avgSuccessRate = learned.length > 0
+      ? learned.reduce((sum, lr) => sum + lr.successRate, 0) / learned.length
+      : 0;
+
+    return {
+      ...baseStats,
+      historicalErrorsCount: dbStats.errorsCount,
+      learnedRecoveriesCount: learned.length,
+      avgHistoricalSuccessRate: avgSuccessRate,
     };
   }
 

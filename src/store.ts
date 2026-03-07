@@ -41,6 +41,7 @@ import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlayboo
 import { CrossReferenceManager, getCrossReferenceManager } from './crossReferenceManager.js';
 import { WorkerAnalytics, getWorkerAnalytics } from './workerAnalytics.js';
 import { SemanticNarrativeGenerator, getSemanticNarrativeManager } from './semanticNarrative.js';
+import { HistoricalStore, getHistoricalStore } from './historicalStore.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -86,10 +87,13 @@ export class InMemoryEventStore implements EventStore {
   private crossReferenceManager: CrossReferenceManager;
   private workerAnalytics: WorkerAnalytics;
   private semanticNarrativeManager: SemanticNarrativeGenerator;
+  private historicalStore: HistoricalStore;
   private maxEvents: number;
   private alertCounter = 0;
   private batchBuffer: LogEvent[] = [];
   private batchTimeout: NodeJS.Timeout | null = null;
+  private sessionStartTime: number = 0;
+  private taskStartTimes: Map<string, number> = new Map(); // beadId -> startTime
 
   constructor(maxEvents: number = 10000) {
     this.maxEvents = maxEvents;
@@ -98,6 +102,9 @@ export class InMemoryEventStore implements EventStore {
     this.crossReferenceManager = getCrossReferenceManager();
     this.workerAnalytics = getWorkerAnalytics();
     this.semanticNarrativeManager = getSemanticNarrativeManager();
+    this.historicalStore = getHistoricalStore();
+    this.sessionStartTime = Date.now();
+    this.historicalStore.startSession();
   }
 
   /**
@@ -110,6 +117,11 @@ export class InMemoryEventStore implements EventStore {
     this.detectBeadCollision(event);
     this.detectTaskCollision(event);
     this.trackFileModification(event);
+
+    // Track task starts and completions for historical storage
+    if (event.bead) {
+      this.trackTaskForHistory(event);
+    }
 
     // Track errors in error groups
     if (event.level === 'error') {
@@ -205,6 +217,9 @@ export class InMemoryEventStore implements EventStore {
    * Clear all events
    */
   clear(): void {
+    // Persist session data before clearing
+    this.persistSession();
+
     this.events = [];
     this.workers.clear();
     this.collisions.clear();
@@ -214,10 +229,88 @@ export class InMemoryEventStore implements EventStore {
     this.errorGroupManager.clear();
     this.crossReferenceManager.clear();
     this.batchBuffer = [];
+    this.taskStartTimes.clear();
     if (this.batchTimeout) {
       clearTimeout(this.batchTimeout);
       this.batchTimeout = null;
     }
+  }
+
+  /**
+   * Persist current session to historical store
+   */
+  private persistSession(): void {
+    if (this.events.length === 0) return;
+
+    // Calculate session metrics
+    const analytics = this.workerAnalytics.getAggregatedAnalytics({ timeWindow: 'all' });
+
+    // End the historical session
+    this.historicalStore.endSession({
+      workerCount: this.workers.size,
+      taskCount: analytics.totalBeadsCompleted,
+      totalCost: analytics.totalCostUsd,
+      totalTokens: analytics.totalTokens,
+    });
+
+    // Record any completed tasks that haven't been recorded yet
+    for (const [beadId, startTime] of this.taskStartTimes) {
+      // Find the completion event for this bead
+      const completionEvent = this.events.find(e =>
+        e.bead === beadId &&
+        (e.msg.toLowerCase().includes('completed') ||
+         e.msg.toLowerCase().includes('finished') ||
+         e.msg.toLowerCase().includes('closed'))
+      );
+
+      if (completionEvent) {
+        // Find which worker worked on this bead
+        const workerEvents = this.events.filter(e => e.bead === beadId);
+        const workerId = workerEvents[0]?.worker || 'unknown';
+
+        // Get cost info for this task
+        const costSummary = this.workerAnalytics.getAllWorkerMetrics({ workerIds: [workerId] });
+        const workerCost = costSummary[0]?.totalCostUsd || 0;
+        const workerTokens = costSummary[0]?.totalTokens || 0;
+
+        this.historicalStore.recordTask({
+          workerId,
+          taskType: 'bead',
+          startedAt: startTime,
+          endedAt: completionEvent.ts,
+          cost: workerCost,
+          tokensIn: Math.floor(workerTokens * 0.7), // Estimate
+          tokensOut: Math.floor(workerTokens * 0.3), // Estimate
+          success: completionEvent.level !== 'error',
+          retryCount: 0,
+        });
+      }
+    }
+
+    // Record errors from error groups
+    const errorGroups = this.errorGroupManager.getGroups();
+    for (const group of errorGroups) {
+      for (const event of group.events) {
+        this.historicalStore.recordError({
+          workerId: event.worker,
+          errorType: group.fingerprint.category,
+          errorMessage: group.fingerprint.sampleMessage,
+          filePath: event.path,
+          timestamp: event.ts,
+        });
+      }
+    }
+
+    // Start a new session
+    this.sessionStartTime = Date.now();
+    this.historicalStore.startSession();
+  }
+
+  /**
+   * Get historical store for queries
+   */
+  getHistoricalStore(): HistoricalStore {
+    return this.historicalStore;
   }
 
   /**
@@ -345,6 +438,54 @@ export class InMemoryEventStore implements EventStore {
   private isFileModification(event: LogEvent): boolean {
     if (!event.tool) return false;
     return FILE_MODIFICATION_TOOLS.includes(event.tool);
+  }
+
+  /**
+   * Track task events for historical storage
+   */
+  private trackTaskForHistory(event: LogEvent): void {
+    const beadId = event.bead!;
+
+    // Track task start
+    if (!this.taskStartTimes.has(beadId)) {
+      this.taskStartTimes.set(beadId, event.ts);
+    }
+
+    // Check for task completion
+    const msg = event.msg?.toLowerCase() || '';
+    if (
+      msg.includes('completed') ||
+      msg.includes('finished') ||
+      msg.includes('done') ||
+      msg.includes('success') ||
+      msg.includes('closed')
+    ) {
+      const startTime = this.taskStartTimes.get(beadId);
+      if (startTime) {
+        const durationMs = event.ts - startTime;
+
+        // Get cost info for this worker
+        const workerMetrics = this.workerAnalytics.getWorkerMetrics(event.worker);
+        const cost = workerMetrics?.costPerBead || 0;
+        const tokensIn = Math.floor((workerMetrics?.totalTokens || 0) * 0.7);
+        const tokensOut = Math.floor((workerMetrics?.totalTokens || 0) * 0.3);
+
+        this.historicalStore.recordTask({
+          workerId: event.worker,
+          taskType: 'bead',
+          startedAt: startTime,
+          endedAt: event.ts,
+          cost,
+          tokensIn,
+          tokensOut,
+          success: event.level !== 'error',
+          retryCount: 0,
+        });
+
+        // Clean up
+        this.taskStartTimes.delete(beadId);
+      }
+    }
   }
 
   /**

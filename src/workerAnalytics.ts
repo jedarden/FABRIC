@@ -21,6 +21,7 @@ import {
   TimeWindow,
 } from './types.js';
 import { CostTracker } from './tui/utils/costTracking.js';
+import { getHistoricalStore, HistoricalStore, WorkerComparisonMetrics } from './historicalStore.js';
 
 const DEFAULT_OPTIONS: Required<WorkerAnalyticsOptions> = {
   timeWindow: 'all',
@@ -626,6 +627,78 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
       avgEfficiency: 0,
       underperformers: [],
     };
+  }
+
+  // ============================================
+  // Historical Data Methods
+  // ============================================
+
+  /**
+   * Get historical store instance
+   */
+  getHistoricalStore(): HistoricalStore {
+    return getHistoricalStore();
+  }
+
+  /**
+   * Get worker comparison metrics across sessions
+   */
+  getHistoricalWorkerMetrics(workerId: string): WorkerComparisonMetrics | null {
+    return getHistoricalStore().getWorkerComparisonMetrics(workerId);
+  }
+
+  /**
+   * Get historical aggregated analytics
+   */
+  getHistoricalAnalytics(options: { startTime?: number; endTime?: number } = {}): AggregatedAnalytics {
+    return getHistoricalStore().getAggregatedAnalytics(options);
+  }
+
+  /**
+   * Compare current worker performance with historical averages
+   */
+  compareWithHistory(workerId: string): {
+    current: WorkerMetrics | null;
+    historical: WorkerComparisonMetrics | null;
+    comparison: {
+      beadsPerHourChange: number;
+      errorRateChange: number;
+      costPerBeadChange: number;
+      efficiencyChange: number;
+    } | null;
+  } {
+    const current = this.getWorkerMetrics(workerId) || null;
+    const historical = getHistoricalStore().getWorkerComparisonMetrics(workerId);
+
+    let comparison = null;
+    if (current && historical) {
+      comparison = {
+        beadsPerHourChange: historical.avgBeadsPerHour > 0
+          ? ((current.beadsPerHour - historical.avgBeadsPerHour) / historical.avgBeadsPerHour) * 100
+          : 0,
+        errorRateChange: ((current.errorRate - historical.avgErrorRate) / (historical.avgErrorRate || 0.01)) * 100,
+        costPerBeadChange: historical.avgCostPerBead > 0
+          ? ((current.costPerBead - historical.avgCostPerBead) / historical.avgCostPerBead) * 100
+          : 0,
+        efficiencyChange: ((current.efficiencyScore - (historical.totalBeadsCompleted > 0 ? 1 : 0)) * 100),
+      };
+    }
+
+    return { current, historical, comparison };
+  }
+
+  /**
+   * Get historical database statistics
+   */
+  getHistoricalStats(): {
+    sessionsCount: number;
+    tasksCount: number;
+    errorsCount: number;
+    dbSizeBytes: number;
+    oldestSession: number | null;
+    newestSession: number | null;
+  } {
+    return getHistoricalStore().getStats();
   }
 }
 
