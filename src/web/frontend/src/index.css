@@ -2828,6 +2828,218 @@ body {
   text-align: center;
 }
 
+/* ============================================
+   Focus Presets Styles
+   ============================================ */
+
+.preset-dropdown-container {
+  position: relative;
+}
+
+.preset-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: rgba(34, 197, 94, 0.2);
+  border: 1px solid #22c55e;
+  color: #22c55e;
+  padding: 0.375rem 0.625rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.preset-toggle:hover {
+  background: rgba(34, 197, 94, 0.3);
+}
+
+.preset-icon {
+  font-size: 0.875rem;
+}
+
+.preset-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.preset-count {
+  background: #22c55e;
+  color: white;
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 10px;
+  font-weight: 600;
+  min-width: 18px;
+  text-align: center;
+}
+
+.preset-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  min-width: 200px;
+  box-shadow: 0 4px 12px var(--shadow-color);
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.preset-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.preset-item:hover {
+  background: var(--hover-bg);
+}
+
+.preset-item.preset-save {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  font-weight: 500;
+}
+
+.preset-item.preset-save:hover {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.preset-item-icon {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.preset-item-name {
+  flex: 1;
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-delete {
+  background: transparent;
+  border: none;
+  color: var(--error);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+
+.preset-delete:hover {
+  opacity: 1;
+}
+
+.preset-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 0.25rem 0;
+}
+
+.preset-empty {
+  padding: 0.75rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-style: italic;
+}
+
+/* Preset Save Dialog */
+.preset-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.preset-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  min-width: 320px;
+  box-shadow: 0 8px 32px var(--shadow-color);
+}
+
+.preset-dialog h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.preset-dialog input {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.preset-dialog input:focus {
+  border-color: var(--accent);
+}
+
+.preset-dialog input::placeholder {
+  color: var(--text-secondary);
+}
+
+.preset-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.preset-dialog-buttons button {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.preset-dialog-buttons button:hover {
+  background: var(--hover-bg);
+}
+
+.preset-dialog-buttons button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.preset-dialog-buttons button.primary:hover {
+  filter: brightness(1.1);
+}
+
+.preset-dialog-buttons button.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Pin Button in Worker Cards */
 .pin-button {
   background: transparent;

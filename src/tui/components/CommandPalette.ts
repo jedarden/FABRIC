@@ -42,6 +42,8 @@ const DEFAULT_SUGGESTIONS: CommandSuggestion[] = [
   { label: 'Toggle theme', category: 'Theme', action: 'theme:toggle' },
   { label: 'Dark theme', category: 'Theme', action: 'theme:dark' },
   { label: 'Light theme', category: 'Theme', action: 'theme:light' },
+  { label: 'Save focus preset', category: 'Focus Preset', action: 'preset:save' },
+  { label: 'List focus presets', category: 'Focus Preset', action: 'preset:list' },
   { label: 'Help', category: 'Navigation', action: 'help' },
   { label: 'Quit', category: 'Navigation', action: 'quit' },
 ];
@@ -255,10 +257,24 @@ export class CommandPalette {
   }
 
   /**
-   * Clear custom suggestions
+   * Add multiple suggestions at once
+   */
+  addSuggestions(suggestions: CommandSuggestion[]): void {
+    this.suggestions.push(...suggestions);
+  }
+
+  /**
+   * Clear custom suggestions (keep defaults)
    */
   clearSuggestions(): void {
     this.suggestions = [...DEFAULT_SUGGESTIONS];
+  }
+
+  /**
+   * Set suggestions to defaults plus additional ones
+   */
+  setSuggestions(suggestions: CommandSuggestion[]): void {
+    this.suggestions = [...DEFAULT_SUGGESTIONS, ...suggestions];
   }
 }
 

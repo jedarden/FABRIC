@@ -12,6 +12,7 @@ import FileContextPanel from './components/FileContextPanel';
 import TimelineView from './components/TimelineView';
 import SessionReplay from './components/SessionReplay';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
+import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
 
 const FOCUS_MODE_STORAGE_KEY = 'fabric-focus-mode';
 
@@ -19,6 +20,16 @@ const FOCUS_MODE_STORAGE_KEY = 'fabric-focus-mode';
 const RECONNECT_BASE_DELAY = 1000; // 1 second
 const RECONNECT_MAX_DELAY = 30000; // 30 seconds
 const RECONNECT_MAX_RETRIES = 10;  // Max retries before manual intervention
+
+// Focus preset manager singleton
+let presetManagerInstance: FocusPresetManager | null = null;
+
+function getPresetManager(): FocusPresetManager {
+  if (!presetManagerInstance) {
+    presetManagerInstance = createWebPresetManager();
+  }
+  return presetManagerInstance;
+}
 
 // Connection states
 type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
@@ -255,6 +266,13 @@ const App: React.FC = () => {
   const [pinnedWorkers, setPinnedWorkers] = useState<Set<string>>(new Set());
   const [pinnedBeads, setPinnedBeads] = useState<Set<string>>(new Set());
 
+  // Focus Preset state
+  const [presets, setPresets] = useState<FocusPreset[]>([]);
+  const [showPresetDropdown, setShowPresetDropdown] = useState(false);
+  const [showPresetSaveDialog, setShowPresetSaveDialog] = useState(false);
+  const [presetNameInput, setPresetNameInput] = useState('');
+  const presetManager = getPresetManager();
+
   // Load Focus Mode state from localStorage on mount
   useEffect(() => {
     const savedState = localStorage.getItem(FOCUS_MODE_STORAGE_KEY);
@@ -279,6 +297,15 @@ const App: React.FC = () => {
     };
     localStorage.setItem(FOCUS_MODE_STORAGE_KEY, JSON.stringify(state));
   }, [focusModeEnabled, pinnedWorkers, pinnedBeads]);
+
+  // Load presets on mount and subscribe to changes
+  useEffect(() => {
+    setPresets(presetManager.getPresets());
+    const unsubscribe = presetManager.subscribe(() => {
+      setPresets(presetManager.getPresets());
+    });
+    return unsubscribe;
+  }, [presetManager]);
 
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
     if (message.type === 'init') {
@@ -379,6 +406,30 @@ const App: React.FC = () => {
     });
   }, []);
 
+  // Focus Preset callbacks
+  const saveCurrentPreset = useCallback(() => {
+    if (!presetNameInput.trim()) return;
+    presetManager.savePreset(
+      presetNameInput.trim(),
+      Array.from(pinnedWorkers),
+      Array.from(pinnedBeads)
+    );
+    setPresetNameInput('');
+    setShowPresetSaveDialog(false);
+  }, [presetNameInput, pinnedWorkers, pinnedBeads, presetManager]);
+
+  const loadPreset = useCallback((preset: FocusPreset) => {
+    setPinnedWorkers(new Set(preset.pinnedWorkers));
+    setPinnedBeads(new Set(preset.pinnedBeads));
+    setFocusModeEnabled(true);
+    setShowPresetDropdown(false);
+  }, []);
+
+  const deletePreset = useCallback((name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    presetManager.deletePreset(name);
+  }, [presetManager]);
+
   // Timeline time selection handler
   const handleTimelineTimeSelect = useCallback((timestamp: number) => {
     setSelectedTimelineTime(timestamp);
@@ -418,6 +469,83 @@ const App: React.FC = () => {
               </span>
             )}
           </button>
+
+          {/* Focus Presets Dropdown */}
+          <div className="preset-dropdown-container">
+            <button
+              className="preset-toggle"
+              onClick={() => setShowPresetDropdown(!showPresetDropdown)}
+              title="Focus Presets"
+            >
+              <span className="preset-icon">💾</span>
+              <span className="preset-label">Presets</span>
+              {presets.length > 0 && (
+                <span className="preset-count">{presets.length}</span>
+              )}
+            </button>
+            {showPresetDropdown && (
+              <div className="preset-dropdown">
+                <button
+                  className="preset-item preset-save"
+                  onClick={() => {
+                    setShowPresetSaveDialog(true);
+                    setShowPresetDropdown(false);
+                  }}
+                >
+                  <span className="preset-item-icon">+</span>
+                  <span>Save Current...</span>
+                </button>
+                {presets.length > 0 && <div className="preset-divider" />}
+                {presets.map(preset => (
+                  <div
+                    key={preset.name}
+                    className="preset-item"
+                    onClick={() => loadPreset(preset)}
+                  >
+                    <span className="preset-item-icon">▶</span>
+                    <span className="preset-item-name">{preset.name}</span>
+                    <button
+                      className="preset-delete"
+                      onClick={(e) => deletePreset(preset.name, e)}
+                      title="Delete preset"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {presets.length === 0 && (
+                  <div className="preset-empty">No presets saved</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Preset Save Dialog */}
+          {showPresetSaveDialog && (
+            <div className="preset-dialog-overlay" onClick={() => setShowPresetSaveDialog(false)}>
+              <div className="preset-dialog" onClick={e => e.stopPropagation()}>
+                <h3>Save Focus Preset</h3>
+                <input
+                  type="text"
+                  placeholder="Preset name..."
+                  value={presetNameInput}
+                  onChange={e => setPresetNameInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && saveCurrentPreset()}
+                  autoFocus
+                />
+                <div className="preset-dialog-buttons">
+                  <button onClick={() => setShowPresetSaveDialog(false)}>Cancel</button>
+                  <button
+                    className="primary"
+                    onClick={saveCurrentPreset}
+                    disabled={!presetNameInput.trim()}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <button
             className="dag-toggle"
             onClick={() => setShowDependencyDag(!showDependencyDag)}

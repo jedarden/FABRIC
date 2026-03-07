@@ -25,6 +25,7 @@ import { FileContextPanel } from './components/FileContextPanel.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
 import { parseGitEvents } from '../gitParser.js';
+import { FocusPresetManager, createTuiPresetManager, FocusPreset } from '../focusPresets.js';
 
 export interface TuiOptions {
   /** Log file path to tail */
@@ -50,6 +51,12 @@ export class FabricTuiApp {
   private focusModeEnabled = false;
   private pinnedWorkerId?: string;
   private pinnedBeadId?: string;
+
+  // Focus preset management
+  private presetManager: FocusPresetManager;
+  private currentPresetIndex = 0;
+  private presetInputMode: 'save' | 'load' | 'delete' | 'none' = 'none';
+  private presetInputBox?: blessed.Widgets.TextboxElement;
 
   // UI Components
   private headerBox!: blessed.Widgets.BoxElement;
@@ -93,6 +100,9 @@ export class FabricTuiApp {
       this.currentTheme = theme;
       this.render();
     });
+
+    // Initialize preset manager
+    this.presetManager = createTuiPresetManager();
 
     this.screen = this.createScreen();
     this.createLayout();
@@ -389,7 +399,8 @@ export class FabricTuiApp {
       content += `  {${this.currentTheme === 'dark' ? 'blue' : 'yellow'}-fg}[${this.currentTheme.toUpperCase()}]{/}`;
 
       content += '  [p]Pin Worker  [P]Pin Bead  [F]Focus';
-      content += '  [Ctrl+F]File Panel  [?/]]Resize';
+      content += '  [Ctrl+F]File Panel  [{/}]Resize';
+      content += '  [[/]]Focus Presets';
       content += '  [Ctrl+T]Theme  [?] Help  [q] Quit';
 
       return content;
@@ -429,6 +440,8 @@ export class FabricTuiApp {
 
     // Command palette
     this.screen.key(['C-k'], () => {
+      // Update command palette with current presets before showing
+      this.updateCommandPalettePresets();
       this.commandPalette.toggle();
     });
 
@@ -516,13 +529,22 @@ export class FabricTuiApp {
       this.toggleFileContextPanel();
     });
 
-    // Resize split view
-    this.screen.key(['['], () => {
+    // Resize split view (Shift+[ and Shift+])
+    this.screen.key(['{'], () => {
       this.resizeFileContext(-0.05);
     });
 
-    this.screen.key([']'], () => {
+    this.screen.key(['}'], () => {
       this.resizeFileContext(0.05);
+    });
+
+    // Focus preset save/load
+    this.screen.key(['['], () => {
+      this.showPresetSaveDialog();
+    });
+
+    this.screen.key([']'], () => {
+      this.cycleToNextPreset();
     });
 
     // Theme toggle (Ctrl+T)
@@ -575,6 +597,36 @@ export class FabricTuiApp {
       getThemeManager().setTheme('dark');
     } else if (cmd === 'theme:light') {
       getThemeManager().setTheme('light');
+    } else if (cmd.startsWith('preset:load:')) {
+      const presetName = cmd.replace('preset:load:', '');
+      this.loadPresetByName(presetName);
+    } else if (cmd.startsWith('preset:delete:')) {
+      const presetName = cmd.replace('preset:delete:', '');
+      this.deletePresetByName(presetName);
+    } else if (cmd === 'preset:save') {
+      this.showPresetSaveDialog();
+    } else if (cmd === 'preset:list') {
+      const presets = this.presetManager.getPresets();
+      if (presets.length === 0) {
+        const originalContent = this.headerBox.getContent();
+        this.headerBox.setContent(' {yellow-fg}No presets saved. Use [ to save a preset.{/}');
+        this.screen.render();
+        setTimeout(() => {
+          this.headerBox.setContent(originalContent);
+          this.updateHeader();
+          this.screen.render();
+        }, 2000);
+      } else {
+        const presetList = presets.map(p => p.name).join(', ');
+        const originalContent = this.headerBox.getContent();
+        this.headerBox.setContent(` {cyan-fg}Presets: ${presetList}{/}`);
+        this.screen.render();
+        setTimeout(() => {
+          this.headerBox.setContent(originalContent);
+          this.updateHeader();
+          this.screen.render();
+        }, 3000);
+      }
     }
   }
 
@@ -1055,6 +1107,184 @@ export class FabricTuiApp {
   }
 
   /**
+   * Show preset save dialog
+   */
+  private showPresetSaveDialog(): void {
+    if (this.viewMode !== 'default') return;
+
+    // Create input box for preset name
+    this.presetInputBox = blessed.textbox({
+      parent: this.screen,
+      top: 'center',
+      left: 'center',
+      width: '50%',
+      height: 5,
+      border: { type: 'line' },
+      style: {
+        border: { fg: colors.focus },
+      },
+      label: ' Save Focus Preset (Enter to save, Esc to cancel) ',
+      inputOnFocus: true,
+    });
+
+    this.presetInputBox.focus();
+
+    this.presetInputBox.on('submit', (name: string) => {
+      this.saveCurrentPreset(name);
+      this.presetInputBox?.destroy();
+      this.presetInputBox = undefined;
+      this.screen.render();
+    });
+
+    this.presetInputBox.on('cancel', () => {
+      this.presetInputBox?.destroy();
+      this.presetInputBox = undefined;
+      this.screen.render();
+    });
+
+    this.screen.render();
+  }
+
+  /**
+   * Save current focus configuration as a preset
+   */
+  private saveCurrentPreset(name: string): void {
+    if (!name || name.trim() === '') return;
+
+    const pinnedWorkers = this.pinnedWorkerId ? [this.pinnedWorkerId] : [];
+    const pinnedBeads = this.pinnedBeadId ? [this.pinnedBeadId] : [];
+
+    const success = this.presetManager.savePreset(name.trim(), pinnedWorkers, pinnedBeads);
+
+    if (success) {
+      // Show success message briefly
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(` {green-fg}Preset "${name.trim()}" saved!{/}`);
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 1500);
+    }
+  }
+
+  /**
+   * Cycle to next preset and apply it
+   */
+  private cycleToNextPreset(): void {
+    if (this.viewMode !== 'default') return;
+
+    const presets = this.presetManager.getPresets();
+    if (presets.length === 0) {
+      // Show message that no presets exist
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(' {yellow-fg}No presets saved. Use [ to save a preset.{/}');
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 2000);
+      return;
+    }
+
+    // Cycle through presets
+    this.currentPresetIndex = (this.currentPresetIndex + 1) % presets.length;
+    const preset = presets[this.currentPresetIndex];
+
+    // Apply the preset
+    this.applyPreset(preset);
+  }
+
+  /**
+   * Apply a preset to the current focus mode state
+   */
+  private applyPreset(preset: FocusPreset): void {
+    // Enable focus mode
+    this.focusModeEnabled = true;
+
+    // Apply pinned workers (take first if multiple)
+    this.pinnedWorkerId = preset.pinnedWorkers[0];
+    this.pinnedBeadId = preset.pinnedBeads[0];
+
+    // Show message
+    const originalContent = this.headerBox.getContent();
+    this.headerBox.setContent(` {green-fg}Loaded preset: "${preset.name}"{/}`);
+    this.screen.render();
+    setTimeout(() => {
+      this.headerBox.setContent(originalContent);
+      this.updateHeader();
+      this.screen.render();
+    }, 1500);
+
+    this.updateFooter();
+    this.render();
+  }
+
+  /**
+   * Load a preset by name (for command palette)
+   */
+  private loadPresetByName(name: string): void {
+    const config = this.presetManager.loadPreset(name);
+    if (!config) return;
+
+    const preset = this.presetManager.getPreset(name);
+    if (preset) {
+      this.applyPreset(preset);
+    }
+  }
+
+  /**
+   * Delete a preset by name (for command palette)
+   */
+  private deletePresetByName(name: string): void {
+    const deleted = this.presetManager.deletePreset(name);
+    if (deleted) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(` {yellow-fg}Deleted preset: "${name}"{/}`);
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 1500);
+    }
+  }
+
+  /**
+   * List all presets (for command palette suggestions)
+   */
+  private getPresetCommands(): Array<{ label: string; category: string; action: string }> {
+    const presets = this.presetManager.getPresets();
+    const commands: Array<{ label: string; category: string; action: string }> = [];
+
+    for (const preset of presets) {
+      commands.push({
+        label: `Load preset: ${preset.name}`,
+        category: 'Focus Preset',
+        action: `preset:load:${preset.name}`,
+      });
+      commands.push({
+        label: `Delete preset: ${preset.name}`,
+        category: 'Focus Preset',
+        action: `preset:delete:${preset.name}`,
+      });
+    }
+
+    return commands;
+  }
+
+  /**
+   * Update command palette with current preset suggestions
+   */
+  private updateCommandPalettePresets(): void {
+    const presetCommands = this.getPresetCommands();
+    this.commandPalette.clearSuggestions();
+    this.commandPalette.addSuggestions(presetCommands);
+  }
+
+  /**
    * Toggle file context panel (split view)
    */
   private toggleFileContextPanel(): void {
@@ -1146,11 +1376,19 @@ Focus Mode:
   F       - Toggle focus mode
   p       - Pin/unpin selected worker
   P       - Pin/unpin bead (from selected worker)
+  [       - Save current focus as preset
+  ]       - Cycle through saved presets
+
+Focus Presets (Command Palette Ctrl+K):
+  preset:save        - Save focus configuration
+  preset:list        - List all saved presets
+  preset:load:<name> - Load a specific preset
+  preset:delete:<name> - Delete a preset
 
 File Context Panel (Split View):
   Ctrl+F  - Toggle file context panel
-  [       - Decrease file context panel width
-  ]       - Increase file context panel width
+  {       - Decrease file context panel width (Shift+[)
+  }       - Increase file context panel width (Shift+])
   o       - Open current file in editor
   Tab     - Switch focus between panels
 
