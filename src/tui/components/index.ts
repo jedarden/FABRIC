@@ -51,3 +51,9 @@ export type { SemanticNarrativePanelOptions } from './SemanticNarrativePanel.js'
 
 export { WorkerAnalyticsPanel } from './WorkerAnalyticsPanel.js';
 export type { WorkerAnalyticsPanelOptions } from './WorkerAnalyticsPanel.js';
+
+export { FileContextPanel } from './FileContextPanel.js';
+export type { FileContextPanelOptions, FileContext, FileOperation } from './FileContextPanel.js';
+
+export { BudgetAlertPanel, createBudgetAlertPanel } from './BudgetAlertPanel.js';
+export type { BudgetAlertPanelOptions } from './BudgetAlertPanel.js';
