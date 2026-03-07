@@ -1,4 +1,5 @@
 :root {
+  /* Dark theme (default) */
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
   --bg-tertiary: #0f3460;
@@ -10,6 +11,29 @@
   --warning: #ffc107;
   --error: #f44336;
   --info: #2196f3;
+  --border-color: #2a2a4e;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  --input-bg: #0f3460;
+  --hover-bg: #1a1a4e;
+}
+
+/* Light theme */
+[data-theme="light"] {
+  --bg-primary: #f5f5f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8e8e8;
+  --accent: #c62828;
+  --accent-dim: #c6282860;
+  --text-primary: #212121;
+  --text-secondary: #666666;
+  --success: #2e7d32;
+  --warning: #f57c00;
+  --error: #c62828;
+  --info: #1565c0;
+  --border-color: #d0d0d0;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --input-bg: #ffffff;
+  --hover-bg: #f0f0f0;
 }
 
 * {
@@ -149,6 +173,41 @@ body {
 
 .status-dot.connected {
   background: var(--success);
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: rgba(156, 39, 176, 0.2);
+  border: 1px solid #9c27b0;
+  color: #9c27b0;
+  padding: 0.375rem 0.625rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.theme-toggle:hover {
+  background: rgba(156, 39, 176, 0.3);
+}
+
+[data-theme="light"] .theme-toggle {
+  background: rgba(156, 39, 176, 0.15);
+}
+
+.theme-toggle:hover {
+  background: rgba(156, 39, 176, 0.3);
+}
+
+.theme-toggle-icon {
+  font-size: 1rem;
+}
+
+.theme-toggle-label {
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .main-content {
@@ -2659,4 +2718,323 @@ body {
     font-size: 0.7rem;
     padding: 0.2rem 0.4rem;
   }
+}
+
+/* ============================================
+   File Context Panel Styles
+   ============================================ */
+
+.file-context-panel {
+  position: fixed;
+  top: 60px;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+}
+
+.file-context-panel .resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: ew-resize;
+  background: transparent;
+  transition: background 0.2s;
+}
+
+.file-context-panel .resize-handle:hover {
+  background: var(--accent);
+}
+
+.file-context-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--bg-primary);
+}
+
+.file-context-panel .panel-header h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.file-context-panel .panel-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.file-context-panel .panel-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.file-context-panel .panel-btn:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.file-context-panel .panel-btn.close:hover {
+  color: var(--error);
+}
+
+.file-context-panel .file-selector {
+  padding: 0.5rem 1rem;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--bg-tertiary);
+}
+
+.file-context-panel .file-selector select {
+  width: 100%;
+  padding: 0.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.file-context-panel .file-info {
+  padding: 0.75rem 1rem;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--bg-tertiary);
+}
+
+.file-context-panel .file-path {
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.8rem;
+  color: var(--info);
+  margin-bottom: 0.25rem;
+  word-break: break-all;
+}
+
+.file-context-panel .file-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.file-context-panel .language-badge {
+  background: var(--bg-tertiary);
+  padding: 0.125rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.file-context-panel .file-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.file-context-panel .no-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.file-context-panel .no-file-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.3;
+}
+
+.file-context-panel .no-file-text {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.file-context-panel .no-file-hint {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  max-width: 200px;
+}
+
+.file-context-panel .content-placeholder {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.file-context-panel .placeholder-message {
+  text-align: center;
+  padding: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.file-context-panel .placeholder-hint {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  margin-bottom: 1rem;
+}
+
+.file-context-panel .simulated-lines {
+  flex: 1;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+.file-context-panel .simulated-line {
+  display: flex;
+  align-items: center;
+  padding: 0.25rem 0;
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.75rem;
+}
+
+.file-context-panel .line-num {
+  color: var(--text-secondary);
+  opacity: 0.5;
+  width: 30px;
+  text-align: right;
+  margin-right: 1rem;
+  user-select: none;
+}
+
+.file-context-panel .line-text {
+  flex: 1;
+  background: var(--bg-secondary);
+  height: 0.875rem;
+  border-radius: 2px;
+  opacity: 0.3;
+}
+
+.file-context-panel .operations-list {
+  padding: 0.75rem 1rem;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--bg-tertiary);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.file-context-panel .operations-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.file-context-panel .operations-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.file-context-panel .operation-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+}
+
+.file-context-panel .op-icon {
+  font-size: 0.875rem;
+}
+
+.file-context-panel .op-type {
+  color: var(--info);
+  text-transform: capitalize;
+}
+
+.file-context-panel .op-worker {
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.file-context-panel .op-time {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.file-context-panel .more-operations {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  padding: 0.5rem;
+}
+
+.file-context-panel .quick-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--bg-primary);
+}
+
+.file-context-panel .quick-actions button {
+  flex: 1;
+  padding: 0.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-primary);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.file-context-panel .quick-actions button:hover {
+  background: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+.file-context-panel .quick-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* File context toggle button */
+.file-context-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.375rem 0.75rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.file-context-toggle:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.file-context-icon {
+  font-size: 0.875rem;
+}
+
+.file-context-label {
+  font-size: 0.75rem;
+  font-weight: 500;
 }

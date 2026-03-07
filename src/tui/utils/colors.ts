@@ -2,8 +2,10 @@
  * FABRIC TUI Color Scheme
  *
  * Color definitions for terminal UI rendering.
- * Uses bright/light color variants for better contrast and
- * readability in both light and dark terminal themes.
+ * Supports dark and light themes via the theme system.
+ *
+ * This module provides a backward-compatible API while delegating
+ * to the theme manager for actual color values.
  *
  * Blessed color options:
  * - Basic: black, red, green, yellow, blue, magenta, cyan, white
@@ -12,71 +14,36 @@
  * - Gray: light-black (better than 'gray' for consistency)
  */
 
-export const colors = {
-  // Status colors - using bright variants for visibility
-  active: 'light-green',
-  idle: 'light-yellow',
-  error: 'light-red',
+import { getColors, getThemeManager, ThemeName, ThemeColors } from './theme.js';
 
-  // Log level colors - optimized for readability
-  debug: 'light-black',      // Muted but visible
-  info: 'light-cyan',         // Distinct from text
-  warn: 'light-yellow',       // High visibility warning
-  warning: 'light-yellow',    // Alias for warn
-  error_level: 'light-red',   // High visibility error
+// Re-export theme types and functions for convenience
+export type { ThemeName, ThemeColors } from './theme.js';
+export { getThemeManager, darkTheme, lightTheme } from './theme.js';
 
-  // UI colors - improved contrast
-  border: 'light-blue',
-  header: 'light-cyan',
-  focus: 'light-green',
-  muted: 'light-black',       // Consistent muted color
-  text: 'light-white',        // Bright readable text
-  selected: 'light-green',
+/**
+ * Colors object that proxies to the current theme
+ * This provides backward compatibility with existing code that imports `colors`
+ */
+export const colors: ThemeColors = new Proxy({} as ThemeColors, {
+  get(_target, prop: keyof ThemeColors) {
+    return getColors()[prop];
+  },
+});
 
-  // Background colors - transparent/none for theme compatibility
-  bgPanel: 'default',         // Use terminal's default background
-  bgFocus: 'blue',            // Distinct but not too bright
-
-  // Input colors
-  inputBg: 'default',         // Use terminal's default background
-  inputFocusBg: 'blue',
-  dim: 'light-black',
-
-  // Heat level colors - progressive intensity
-  heatCold: 'light-blue',
-  heatWarm: 'light-yellow',
-  heatHot: 'light-magenta',
-  heatCritical: 'light-red',
-
-  // Named colors (for components that reference by name)
-  // Using light variants for better contrast
-  green: 'light-green',
-  yellow: 'light-yellow',
-  blue: 'light-blue',
-  red: 'light-red',
-  cyan: 'light-cyan',
-  magenta: 'light-magenta',
-  orange: 'yellow',           // Orange not widely supported, use yellow
-  purple: 'light-magenta',
-  teal: 'light-cyan',
-  white: 'light-white',
-  black: 'black',
-  gray: 'light-black',        // Consistent gray using light-black
-} as const;
-
-export type ColorName = keyof typeof colors;
+export type ColorName = keyof ThemeColors;
 
 /**
  * Get color for worker status
  */
 export function getStatusColor(status: 'active' | 'idle' | 'error'): string {
-  return colors[status];
+  return getColors()[status];
 }
 
 /**
  * Get color for log level
  */
 export function getLevelColor(level: 'debug' | 'info' | 'warn' | 'error'): string {
+  const colors = getColors();
   switch (level) {
     case 'debug': return colors.debug;
     case 'info': return colors.info;
@@ -89,6 +56,7 @@ export function getLevelColor(level: 'debug' | 'info' | 'warn' | 'error'): strin
  * Get color for heat level
  */
 export function getHeatColor(level: 'cold' | 'warm' | 'hot' | 'critical'): string {
+  const colors = getColors();
   switch (level) {
     case 'cold': return colors.heatCold;
     case 'warm': return colors.heatWarm;

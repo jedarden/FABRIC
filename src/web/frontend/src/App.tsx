@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { LogEvent, WorkerInfo, WebSocketMessage, CollisionAlert as CollisionAlertData, RecoverySuggestion } from './types';
+import { ThemeProvider, useTheme } from './ThemeContext';
 import WorkerGrid from './components/WorkerGrid';
 import ActivityStream from './components/ActivityStream';
 import WorkerDetail from './components/WorkerDetail';
@@ -7,6 +8,7 @@ import CollisionAlert from './components/CollisionAlert';
 import FileHeatmap from './components/FileHeatmap';
 import DependencyDag from './components/DependencyDag';
 import RecoveryPanel from './components/RecoveryPanel';
+import FileContextPanel from './components/FileContextPanel';
 
 const FOCUS_MODE_STORAGE_KEY = 'fabric-focus-mode';
 
@@ -15,6 +17,24 @@ interface FocusModeState {
   pinnedWorkers: string[];
   pinnedBeads: string[];
 }
+
+/**
+ * Theme toggle button component
+ */
+const ThemeToggle: React.FC = () => {
+  const { theme, toggleTheme } = useTheme();
+
+  return (
+    <button
+      className="theme-toggle"
+      onClick={toggleTheme}
+      title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+    >
+      <span className="theme-toggle-icon">{theme === 'dark' ? '☀️' : '🌙'}</span>
+      <span className="theme-toggle-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
+    </button>
+  );
+};
 
 const App: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
@@ -26,6 +46,7 @@ const App: React.FC = () => {
   const [showFileHeatmap, setShowFileHeatmap] = useState(false);
   const [showDependencyDag, setShowDependencyDag] = useState(false);
   const [showRecoveryPanel, setShowRecoveryPanel] = useState(false);
+  const [showFileContext, setShowFileContext] = useState(false);
   const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
 
   // Focus Mode state
@@ -203,6 +224,7 @@ const App: React.FC = () => {
       <header className="header">
         <h1>FABRIC</h1>
         <div className="header-actions">
+          <ThemeToggle />
           <button
             className={`focus-mode-toggle ${focusModeEnabled ? 'active' : ''}`}
             onClick={toggleFocusMode}
@@ -239,6 +261,14 @@ const App: React.FC = () => {
           >
             <span className="file-heatmap-icon">🔥</span>
             <span className="file-heatmap-label">Heatmap</span>
+          </button>
+          <button
+            className="file-context-toggle"
+            onClick={() => setShowFileContext(!showFileContext)}
+            title="Toggle file context panel"
+          >
+            <span className="file-context-icon">📄</span>
+            <span className="file-context-label">Context</span>
           </button>
           {unacknowledgedAlertCount > 0 && (
             <button
@@ -314,9 +344,28 @@ const App: React.FC = () => {
             onClose={() => setShowRecoveryPanel(false)}
           />
         )}
+
+        {showFileContext && (
+          <FileContextPanel
+            visible={showFileContext}
+            onClose={() => setShowFileContext(false)}
+            events={filteredEvents}
+            onOpenInEditor={(path, line) => {
+              console.log(`Opening ${path}:${line || 1} in editor...`);
+              // In a real implementation, this would trigger the editor
+            }}
+          />
+        )}
       </main>
     </div>
   );
 };
 
-export default App;
+// Wrap with ThemeProvider for theme support
+const AppWithTheme: React.FC = () => (
+  <ThemeProvider>
+    <App />
+  </ThemeProvider>
+);
+
+export default AppWithTheme;

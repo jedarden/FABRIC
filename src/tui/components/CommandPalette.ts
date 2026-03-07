@@ -39,6 +39,9 @@ const DEFAULT_SUGGESTIONS: CommandSuggestion[] = [
   { label: 'Clear filters', category: 'Action', action: 'clear' },
   { label: 'Toggle pause', category: 'Action', action: 'pause' },
   { label: 'Refresh', category: 'Action', action: 'refresh' },
+  { label: 'Toggle theme', category: 'Theme', action: 'theme:toggle' },
+  { label: 'Dark theme', category: 'Theme', action: 'theme:dark' },
+  { label: 'Light theme', category: 'Theme', action: 'theme:light' },
   { label: 'Help', category: 'Navigation', action: 'help' },
   { label: 'Quit', category: 'Navigation', action: 'quit' },
 ];

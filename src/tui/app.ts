@@ -7,7 +7,7 @@
 import blessed from 'blessed';
 import { LogEvent, WorkerInfo, WorkerStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
-import { colors, getStatusColor } from './utils/colors.js';
+import { colors, getStatusColor, getThemeManager, ThemeName } from './utils/colors.js';
 import { WorkerGrid } from './components/WorkerGrid.js';
 import { ActivityStream } from './components/ActivityStream.js';
 import { WorkerDetail } from './components/WorkerDetail.js';
@@ -21,6 +21,7 @@ import { CollisionAlert } from './components/CollisionAlert.js';
 import { GitIntegration } from './components/GitIntegration.js';
 import { SemanticNarrativePanel } from './components/SemanticNarrativePanel.js';
 import { WorkerAnalyticsPanel } from './components/WorkerAnalyticsPanel.js';
+import { FileContextPanel } from './components/FileContextPanel.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
 import { parseGitEvents } from '../gitParser.js';
@@ -65,8 +66,17 @@ export class FabricTuiApp {
   private gitIntegration!: GitIntegration;
   private semanticNarrativePanel!: SemanticNarrativePanel;
   private workerAnalyticsPanel!: WorkerAnalyticsPanel;
+  private fileContextPanel!: FileContextPanel;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
+
+  // Split view state
+  private fileContextVisible = false;
+  private splitRatio = 0.5; // 50% for activity, 50% for file context
+
+  // Theme
+  private currentTheme: ThemeName;
+  private themeUnsubscribe?: () => void;
 
   constructor(store: InMemoryEventStore, options: TuiOptions = {}) {
     this.store = store;
@@ -75,6 +85,14 @@ export class FabricTuiApp {
       maxEvents: options.maxEvents || 1000,
       refreshInterval: options.refreshInterval || 100,
     };
+
+    // Initialize theme
+    const themeManager = getThemeManager();
+    this.currentTheme = themeManager.getTheme();
+    this.themeUnsubscribe = themeManager.subscribe((theme) => {
+      this.currentTheme = theme;
+      this.render();
+    });
 
     this.screen = this.createScreen();
     this.createLayout();
@@ -319,6 +337,16 @@ export class FabricTuiApp {
     });
     this.workerAnalyticsPanel.hide();
 
+    // File Context panel (split view, 'F' key)
+    this.fileContextPanel = new FileContextPanel({
+      parent: this.screen,
+      top: 1,
+      left: '60%',
+      width: '40%',
+      bottom: 1,
+    });
+    this.fileContextPanel.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -352,8 +380,17 @@ export class FabricTuiApp {
         }
       }
 
+      // Show file context status
+      if (this.fileContextVisible) {
+        content += `  {cyan-fg}[FILE CONTEXT ${Math.round((1-this.splitRatio)*100)}%]{/}`;
+      }
+
+      // Show current theme
+      content += `  {${this.currentTheme === 'dark' ? 'blue' : 'yellow'}-fg}[${this.currentTheme.toUpperCase()}]{/}`;
+
       content += '  [p]Pin Worker  [P]Pin Bead  [F]Focus';
-      content += '  [?] Help  [q] Quit';
+      content += '  [Ctrl+F]File Panel  [?/]]Resize';
+      content += '  [Ctrl+T]Theme  [?] Help  [q] Quit';
 
       return content;
     }
@@ -473,6 +510,25 @@ export class FabricTuiApp {
     this.screen.key(['F'], () => {
       this.toggleFocusMode();
     });
+
+    // Toggle file context panel (Ctrl+F)
+    this.screen.key(['C-f'], () => {
+      this.toggleFileContextPanel();
+    });
+
+    // Resize split view
+    this.screen.key(['['], () => {
+      this.resizeFileContext(-0.05);
+    });
+
+    this.screen.key([']'], () => {
+      this.resizeFileContext(0.05);
+    });
+
+    // Theme toggle (Ctrl+T)
+    this.screen.key(['C-t'], () => {
+      this.toggleTheme();
+    });
   }
 
   /**
@@ -513,6 +569,12 @@ export class FabricTuiApp {
     } else if (cmd.startsWith('filter:level:')) {
       const level = cmd.replace('filter:level:', '');
       this.activityStream.setFilter({ level });
+    } else if (cmd === 'theme' || cmd === 'theme:toggle') {
+      this.toggleTheme();
+    } else if (cmd === 'theme:dark') {
+      getThemeManager().setTheme('dark');
+    } else if (cmd === 'theme:light') {
+      getThemeManager().setTheme('light');
     }
   }
 
@@ -616,6 +678,24 @@ export class FabricTuiApp {
   }
 
   /**
+   * Toggle theme between dark and light
+   */
+  private toggleTheme(): void {
+    const themeManager = getThemeManager();
+    const newTheme = themeManager.toggleTheme();
+    // Update header to show theme change briefly
+    const originalContent = this.headerBox.getContent();
+    this.headerBox.setContent(` FABRIC - Theme: ${newTheme.toUpperCase()}`);
+    this.screen.render();
+    // Restore original content after a short delay
+    setTimeout(() => {
+      this.headerBox.setContent(originalContent);
+      this.updateHeader();
+      this.screen.render();
+    }, 1000);
+  }
+
+  /**
    * Update collision alerts from store
    */
   private updateCollisionAlerts(): void {
@@ -629,6 +709,12 @@ export class FabricTuiApp {
   private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics'): void {
     this.viewMode = mode;
 
+    // Hide file context panel when switching views (except default)
+    if (mode !== 'default') {
+      this.fileContextPanel.hide();
+      this.fileContextVisible = false;
+    }
+
     if (mode === 'heatmap') {
       // Hide other panels
       this.workerGrid.getElement().hide();
@@ -636,6 +722,7 @@ export class FabricTuiApp {
       this.dependencyDag.getElement().hide();
       this.sessionReplay.hide();
       this.errorGroupPanel.hide();
+      this.fileContextPanel.hide();
 
       // Show heatmap
       this.fileHeatmap.getElement().show();
@@ -855,10 +942,21 @@ export class FabricTuiApp {
       this.gitIntegration.hide();
       this.semanticNarrativePanel.hide();
       this.workerAnalyticsPanel.hide();
+      this.fileContextPanel.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
       this.activityStream.getElement().show();
+
+      // Restore file context panel if it was visible
+      if (this.fileContextVisible) {
+        this.updateSplitViewLayout();
+        this.fileContextPanel.show();
+      } else {
+        // Restore activity stream to full width
+        this.activityStream.getElement().right = 0;
+        this.activityStream.getElement().width = '60%';
+      }
 
       // Update header
       this.headerBox.setContent(' FABRIC - Worker Activity Monitor');
@@ -956,6 +1054,54 @@ export class FabricTuiApp {
   }
 
   /**
+   * Toggle file context panel (split view)
+   */
+  private toggleFileContextPanel(): void {
+    if (this.viewMode !== 'default') return;
+
+    this.fileContextVisible = !this.fileContextVisible;
+
+    if (this.fileContextVisible) {
+      this.updateSplitViewLayout();
+      this.fileContextPanel.show();
+    } else {
+      this.fileContextPanel.hide();
+      // Restore activity stream to full width
+      this.activityStream.getElement().right = 0;
+      this.activityStream.getElement().width = '60%';
+    }
+
+    this.screen.render();
+  }
+
+  /**
+   * Resize file context panel
+   */
+  private resizeFileContext(delta: number): void {
+    if (!this.fileContextVisible || this.viewMode !== 'default') return;
+
+    this.splitRatio = Math.max(0.2, Math.min(0.8, this.splitRatio + delta));
+    this.updateSplitViewLayout();
+    this.screen.render();
+  }
+
+  /**
+   * Update split view layout based on split ratio
+   */
+  private updateSplitViewLayout(): void {
+    const activityWidth = Math.round(this.splitRatio * 100);
+    const fileContextWidth = 100 - activityWidth;
+
+    // Update activity stream
+    this.activityStream.getElement().width = `${activityWidth}%`;
+    this.activityStream.getElement().right = `${fileContextWidth}%`;
+
+    // Update file context panel
+    this.fileContextPanel.getElement().left = `${activityWidth}%`;
+    this.fileContextPanel.getElement().width = `${fileContextWidth}%`;
+  }
+
+  /**
    * Toggle help overlay
    */
   private toggleHelp(): void {
@@ -999,6 +1145,13 @@ Focus Mode:
   F       - Toggle focus mode
   p       - Pin/unpin selected worker
   P       - Pin/unpin bead (from selected worker)
+
+File Context Panel (Split View):
+  Ctrl+F  - Toggle file context panel
+  [       - Decrease file context panel width
+  ]       - Increase file context panel width
+  o       - Open current file in editor
+  Tab     - Switch focus between panels
 
 Heatmap View:
   s       - Cycle sort mode
@@ -1054,6 +1207,9 @@ Worker Analytics:
   r       - Refresh metrics
   Esc     - Return to default view
 
+Theme:
+  Ctrl+T  - Toggle dark/light theme
+
 General:
   ?       - Toggle this help
   q       - Quit
@@ -1092,6 +1248,11 @@ General:
     // Update focus mode state after rendering
     this.workerGrid.setFocusMode(this.focusModeEnabled, this.pinnedWorkerId);
     this.activityStream.setFocusMode(this.focusModeEnabled, this.pinnedBeadId, this.pinnedWorkerId);
+
+    // Update file context panel if this is a file event
+    if (event.path && this.fileContextVisible) {
+      this.fileContextPanel.setContextFromEvent(event);
+    }
 
     // Update heatmap if visible
     if (this.viewMode === 'heatmap') {
@@ -1145,6 +1306,10 @@ General:
    */
   stop(): void {
     this.isRunning = false;
+    // Clean up theme subscription
+    if (this.themeUnsubscribe) {
+      this.themeUnsubscribe();
+    }
     this.screen.destroy();
     process.exit(0);
   }
