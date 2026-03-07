@@ -566,6 +566,176 @@ export class SessionReplay extends EventEmitter {
   }
 
   /**
+   * Get all events (for export)
+   */
+  getEvents(): LogEvent[] {
+    return [...this.events];
+  }
+
+  /**
+   * Get filtered events (for export)
+   */
+  getFilteredEvents(): LogEvent[] {
+    return [...this.filteredEvents];
+  }
+
+  /**
+   * Export session to file
+   */
+  exportToFile(filePath?: string): string {
+    const eventsToExport = this.filteredEvents.length > 0 ? this.filteredEvents : this.events;
+
+    if (eventsToExport.length === 0) {
+      throw new Error('No events to export');
+    }
+
+    // Calculate metadata
+    const timestamps = eventsToExport.map(e => e.ts);
+    const sessionStart = Math.min(...timestamps);
+    const sessionEnd = Math.max(...timestamps);
+    const workers = new Set(eventsToExport.map(e => e.worker));
+
+    const exportData = {
+      version: '1.0',
+      exportedAt: Date.now(),
+      eventCount: eventsToExport.length,
+      events: eventsToExport,
+      metadata: {
+        sessionStart,
+        sessionEnd,
+        workerCount: workers.size,
+        sourcePath: this.sourcePath || undefined,
+      },
+    };
+
+    // Generate filename if not provided
+    const exportPath = filePath || this.generateExportFilename(exportData.metadata);
+
+    fs.writeFileSync(exportPath, JSON.stringify(exportData, null, 2), 'utf-8');
+
+    return exportPath;
+  }
+
+  /**
+   * Import session from file
+   */
+  importFromFile(filePath: string): { eventCount: number; metadata: object } {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const importData = JSON.parse(content);
+
+    // Validate structure
+    if (!importData.version || !Array.isArray(importData.events)) {
+      throw new Error('Invalid replay export format');
+    }
+
+    // Validate events have required fields
+    for (const event of importData.events) {
+      if (typeof event.ts !== 'number' || !event.worker || !event.msg) {
+        throw new Error('Invalid event format in export');
+      }
+    }
+
+    // Load events
+    this.sourcePath = filePath;
+    this.events = importData.events;
+    this.applyFilter();
+    this.currentIndex = 0;
+    this.state = 'idle';
+    this.logBox.setContent('');
+    this.updateDisplay();
+    this.emit('loaded', this.events.length);
+    this.emit('imported', { eventCount: importData.eventCount, metadata: importData.metadata });
+
+    return {
+      eventCount: importData.eventCount,
+      metadata: importData.metadata,
+    };
+  }
+
+  /**
+   * Export to base64 string (for sharing)
+   */
+  exportToBase64(): string {
+    const eventsToExport = this.filteredEvents.length > 0 ? this.filteredEvents : this.events;
+
+    if (eventsToExport.length === 0) {
+      throw new Error('No events to export');
+    }
+
+    // Calculate metadata
+    const timestamps = eventsToExport.map(e => e.ts);
+    const sessionStart = Math.min(...timestamps);
+    const sessionEnd = Math.max(...timestamps);
+    const workers = new Set(eventsToExport.map(e => e.worker));
+
+    const exportData = {
+      version: '1.0',
+      exportedAt: Date.now(),
+      eventCount: eventsToExport.length,
+      events: eventsToExport,
+      metadata: {
+        sessionStart,
+        sessionEnd,
+        workerCount: workers.size,
+        sourcePath: this.sourcePath || undefined,
+      },
+    };
+
+    const jsonString = JSON.stringify(exportData);
+    return Buffer.from(jsonString, 'utf-8').toString('base64');
+  }
+
+  /**
+   * Import from base64 string
+   */
+  importFromBase64(base64String: string): { eventCount: number; metadata: object } {
+    const jsonString = Buffer.from(base64String, 'base64').toString('utf-8');
+    const importData = JSON.parse(jsonString);
+
+    // Validate structure
+    if (!importData.version || !Array.isArray(importData.events)) {
+      throw new Error('Invalid replay export format');
+    }
+
+    // Validate events have required fields
+    for (const event of importData.events) {
+      if (typeof event.ts !== 'number' || !event.worker || !event.msg) {
+        throw new Error('Invalid event format in export');
+      }
+    }
+
+    // Load events
+    this.sourcePath = '[imported]';
+    this.events = importData.events;
+    this.applyFilter();
+    this.currentIndex = 0;
+    this.state = 'idle';
+    this.logBox.setContent('');
+    this.updateDisplay();
+    this.emit('loaded', this.events.length);
+    this.emit('imported', { eventCount: importData.eventCount, metadata: importData.metadata });
+
+    return {
+      eventCount: importData.eventCount,
+      metadata: importData.metadata,
+    };
+  }
+
+  /**
+   * Generate export filename
+   */
+  private generateExportFilename(metadata: { sessionStart: number }): string {
+    const date = new Date(metadata.sessionStart);
+    const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
+    return `session-${dateStr}-${timeStr}.fabric-replay`;
+  }
+
+  /**
    * Clean up resources
    */
   destroy(): void {

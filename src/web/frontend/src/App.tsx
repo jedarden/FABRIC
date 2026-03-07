@@ -10,6 +10,8 @@ import DependencyDag from './components/DependencyDag';
 import RecoveryPanel from './components/RecoveryPanel';
 import FileContextPanel from './components/FileContextPanel';
 import TimelineView from './components/TimelineView';
+import SessionReplay from './components/SessionReplay';
+import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 
 const FOCUS_MODE_STORAGE_KEY = 'fabric-focus-mode';
 
@@ -228,6 +230,26 @@ const App: React.FC = () => {
   const [selectedTimelineTime, setSelectedTimelineTime] = useState<number | null>(null);
   const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
 
+  // Session Replay state
+  const [showSessionReplay, setShowSessionReplay] = useState(false);
+  const [replayEvents, setReplayEvents] = useState<LogEvent[]>([]);
+  const [replayMetadata, setReplayMetadata] = useState<ReplayExport['metadata'] | null>(null);
+  const [replayImportError, setReplayImportError] = useState<string | null>(null);
+
+  // Check URL for replay parameter on mount
+  useEffect(() => {
+    const replayData = extractReplayFromUrl();
+    if (replayData) {
+      setReplayEvents(replayData.events);
+      setReplayMetadata(replayData.metadata);
+      setShowSessionReplay(true);
+      // Clear the URL parameter after loading
+      const url = new URL(window.location.href);
+      url.searchParams.delete('replay');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []);
+
   // Focus Mode state
   const [focusModeEnabled, setFocusModeEnabled] = useState(false);
   const [pinnedWorkers, setPinnedWorkers] = useState<Set<string>>(new Set());
@@ -436,6 +458,14 @@ const App: React.FC = () => {
             <span className="timeline-toggle-icon">📊</span>
             <span className="timeline-toggle-label">Timeline</span>
           </button>
+          <button
+            className={`session-replay-toggle ${showSessionReplay ? 'active' : ''}`}
+            onClick={() => setShowSessionReplay(!showSessionReplay)}
+            title={showSessionReplay ? 'Hide session replay' : 'Show session replay'}
+          >
+            <span className="session-replay-toggle-icon">📼</span>
+            <span className="session-replay-toggle-label">Replay</span>
+          </button>
           {unacknowledgedAlertCount > 0 && (
             <button
               className="collision-alert-toggle"
@@ -554,6 +584,42 @@ const App: React.FC = () => {
               // In a real implementation, this would trigger the editor
             }}
           />
+        )}
+
+        {showSessionReplay && (
+          <div className="session-replay-panel">
+            <div className="session-replay-header">
+              <h3>
+                Session Replay
+                {replayMetadata && (
+                  <span className="replay-info">
+                    {replayMetadata.eventCount || replayEvents.length} events | {replayMetadata.workerCount} workers
+                  </span>
+                )}
+              </h3>
+              <button
+                className="close-button"
+                onClick={() => {
+                  setShowSessionReplay(false);
+                  setReplayEvents([]);
+                  setReplayMetadata(null);
+                }}
+              >
+                ×
+              </button>
+            </div>
+            {replayImportError && (
+              <div className="replay-import-error">{replayImportError}</div>
+            )}
+            <SessionReplay
+              events={replayEvents.length > 0 ? replayEvents : filteredEvents}
+              onImport={(importedEvents, metadata) => {
+                setReplayEvents(importedEvents);
+                setReplayMetadata(metadata);
+                setReplayImportError(null);
+              }}
+            />
+          </div>
         )}
       </main>
     </div>

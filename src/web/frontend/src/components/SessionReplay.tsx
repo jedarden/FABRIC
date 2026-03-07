@@ -3,10 +3,18 @@
  *
  * Provides session replay functionality - ability to replay worker activity
  * history chronologically with playback controls.
+ * Includes export/import functionality for sharing sessions.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LogEvent, ReplaySpeed, ReplayState } from '../types';
+import {
+  exportToBase64Browser,
+  importFromBase64Browser,
+  exportToJsonWeb,
+  importFromJsonWeb,
+  ReplayExportWeb,
+} from '../utils/replayExport';
 
 // Re-export types for external use
 export type { ReplaySpeed, ReplayState };
@@ -26,6 +34,9 @@ interface SessionReplayProps {
 
   /** Optional CSS class */
   className?: string;
+
+  /** Callback when events are imported */
+  onImport?: (events: LogEvent[], metadata: ReplayExportWeb['metadata']) => void;
 }
 
 /**
@@ -62,6 +73,7 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
   onEvent,
   onStateChange,
   className = '',
+  onImport,
 }) => {
   // Playback state
   const [state, setState] = useState<ReplayState>('idle');
@@ -69,9 +81,16 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
   const [speed, setSpeed] = useState<ReplaySpeed>(1);
   const [displayedEvents, setDisplayedEvents] = useState<LogEvent[]>([]);
 
+  // Export/Import state
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+
   // Refs
   const playbackTimerRef = useRef<NodeJS.Timeout | null>(null);
   const eventListRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Filter events
   const filteredEvents = React.useMemo(() => {
@@ -164,6 +183,20 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
       eventListRef.current.scrollTop = eventListRef.current.scrollHeight;
     }
   }, [displayedEvents, state]);
+
+  // Click outside to close export menu
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showExportMenu]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -316,6 +349,116 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
     seekToPercent(percent);
   };
 
+  // ============================================
+  // Export/Import Functions
+  // ============================================
+
+  /**
+   * Export as shareable link (copies to clipboard)
+   */
+  const handleExportLink = useCallback(async () => {
+    if (filteredEvents.length === 0) {
+      setImportError('No events to export');
+      return;
+    }
+
+    try {
+      const base64Data = exportToBase64Browser(filteredEvents);
+      const url = `${window.location.origin}${window.location.pathname}?replay=${base64Data}`;
+
+      await navigator.clipboard.writeText(url);
+      setExportSuccess('Link copied to clipboard!');
+      setTimeout(() => setExportSuccess(null), 3000);
+      setShowExportMenu(false);
+    } catch (err) {
+      setImportError(`Failed to create shareable link: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setTimeout(() => setImportError(null), 5000);
+    }
+  }, [filteredEvents]);
+
+  /**
+   * Export as .fabric-replay file
+   */
+  const handleExportFile = useCallback(() => {
+    if (filteredEvents.length === 0) {
+      setImportError('No events to export');
+      return;
+    }
+
+    try {
+      const jsonData = exportToJsonWeb(filteredEvents);
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      // Generate filename with timestamp
+      const date = new Date();
+      const dateStr = date.toISOString().split('T')[0];
+      const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-');
+      const filename = `session-${dateStr}-${timeStr}.fabric-replay`;
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setExportSuccess(`Exported as ${filename}`);
+      setTimeout(() => setExportSuccess(null), 3000);
+      setShowExportMenu(false);
+    } catch (err) {
+      setImportError(`Failed to export file: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setTimeout(() => setImportError(null), 5000);
+    }
+  }, [filteredEvents]);
+
+  /**
+   * Import from file
+   */
+  const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const importData = importFromJsonWeb(content);
+
+        if (importData.events.length === 0) {
+          setImportError('No events found in import file');
+          return;
+        }
+
+        onImport?.(importData.events, importData.metadata);
+        setExportSuccess(`Imported ${importData.eventCount} events`);
+        setTimeout(() => setExportSuccess(null), 3000);
+        setShowExportMenu(false);
+      } catch (err) {
+        setImportError(`Failed to import file: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setTimeout(() => setImportError(null), 5000);
+      }
+    };
+
+    reader.onerror = () => {
+      setImportError('Failed to read file');
+      setTimeout(() => setImportError(null), 5000);
+    };
+
+    reader.readAsText(file);
+
+    // Reset input for re-import of same file
+    e.target.value = '';
+  }, [onImport]);
+
+  /**
+   * Trigger file input click
+   */
+  const handleImportClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
   // Format event for display
   const formatEvent = (event: LogEvent): React.ReactNode => {
     const time = new Date(event.timestamp).toLocaleTimeString();
@@ -371,6 +514,18 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
           ))
         )}
       </div>
+
+      {/* Export/Import Status Messages */}
+      {importError && (
+        <div className="replay-status replay-status-error">
+          {importError}
+        </div>
+      )}
+      {exportSuccess && (
+        <div className="replay-status replay-status-success">
+          {exportSuccess}
+        </div>
+      )}
 
       {/* Controls bar */}
       <div className="replay-controls">
@@ -439,6 +594,53 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
         </div>
 
         <div className="replay-controls-right">
+          {/* Export/Import Menu */}
+          <div className="replay-export-menu" ref={exportMenuRef}>
+            <button
+              className="replay-btn replay-btn-share"
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              title="Export/Import replay"
+            >
+              📤
+            </button>
+            {showExportMenu && (
+              <div className="replay-export-dropdown">
+                <button
+                  className="replay-dropdown-item"
+                  onClick={handleExportLink}
+                  disabled={filteredEvents.length === 0}
+                  title="Copy shareable link to clipboard"
+                >
+                  🔗 Copy Share Link
+                </button>
+                <button
+                  className="replay-dropdown-item"
+                  onClick={handleExportFile}
+                  disabled={filteredEvents.length === 0}
+                  title="Download as .fabric-replay file"
+                >
+                  💾 Export File
+                </button>
+                <button
+                  className="replay-dropdown-item"
+                  onClick={handleImportClick}
+                  title="Import from .fabric-replay file"
+                >
+                  📂 Import File
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Hidden file input for import */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".fabric-replay,.json"
+            onChange={handleImportFile}
+            style={{ display: 'none' }}
+          />
+
           <span className="replay-help">
             [Space] Play/Pause | [←/→] Step | [↑/↓] Speed | [r] Reset
           </span>
