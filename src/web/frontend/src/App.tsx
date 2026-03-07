@@ -9,6 +9,7 @@ import FileHeatmap from './components/FileHeatmap';
 import DependencyDag from './components/DependencyDag';
 import RecoveryPanel from './components/RecoveryPanel';
 import FileContextPanel from './components/FileContextPanel';
+import TimelineView from './components/TimelineView';
 
 const FOCUS_MODE_STORAGE_KEY = 'fabric-focus-mode';
 
@@ -223,6 +224,8 @@ const App: React.FC = () => {
   const [showDependencyDag, setShowDependencyDag] = useState(false);
   const [showRecoveryPanel, setShowRecoveryPanel] = useState(false);
   const [showFileContext, setShowFileContext] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(true);
+  const [selectedTimelineTime, setSelectedTimelineTime] = useState<number | null>(null);
   const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
 
   // Focus Mode state
@@ -354,6 +357,13 @@ const App: React.FC = () => {
     });
   }, []);
 
+  // Timeline time selection handler
+  const handleTimelineTimeSelect = useCallback((timestamp: number) => {
+    setSelectedTimelineTime(timestamp);
+    // Clear the selection after 5 seconds
+    setTimeout(() => setSelectedTimelineTime(null), 5000);
+  }, []);
+
   // Filter workers and events based on Focus Mode
   const filteredWorkers = focusModeEnabled && pinnedWorkers.size > 0
     ? workers.filter(w => pinnedWorkers.has(w.id))
@@ -418,6 +428,14 @@ const App: React.FC = () => {
             <span className="file-context-icon">📄</span>
             <span className="file-context-label">Context</span>
           </button>
+          <button
+            className={`timeline-toggle ${showTimeline ? 'active' : ''}`}
+            onClick={() => setShowTimeline(!showTimeline)}
+            title={showTimeline ? 'Hide timeline' : 'Show timeline'}
+          >
+            <span className="timeline-toggle-icon">📊</span>
+            <span className="timeline-toggle-label">Timeline</span>
+          </button>
           {unacknowledgedAlertCount > 0 && (
             <button
               className="collision-alert-toggle"
@@ -466,12 +484,24 @@ const App: React.FC = () => {
           focusModeEnabled={focusModeEnabled}
         />
 
+        {showTimeline && (
+          <TimelineView
+            events={filteredEvents}
+            workers={filteredWorkers}
+            onTimeSelect={handleTimelineTimeSelect}
+            selectedWorker={selectedWorker}
+            focusModeEnabled={focusModeEnabled}
+            pinnedWorkers={pinnedWorkers}
+          />
+        )}
+
         <ActivityStream
           events={filteredEvents}
           selectedWorker={selectedWorker}
           pinnedBeads={pinnedBeads}
           onTogglePinBead={togglePinBead}
           focusModeEnabled={focusModeEnabled}
+          selectedTimelineTime={selectedTimelineTime}
         />
 
         {selectedWorkerInfo && (

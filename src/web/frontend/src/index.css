@@ -3107,3 +3107,323 @@ body {
   font-size: 0.75rem;
   font-weight: 500;
 }
+
+/* ============================================
+   Timeline View Component Styles
+   ============================================ */
+
+.timeline-view {
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 0.75rem;
+}
+
+.timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--bg-primary);
+}
+
+.timeline-header h3 {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.time-range-selector {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.time-range-button {
+  background: transparent;
+  border: 1px solid var(--bg-primary);
+  color: var(--text-secondary);
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.time-range-button:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.time-range-button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.timeline-content {
+  position: relative;
+  padding: 0.5rem 0.75rem;
+  min-height: 120px;
+  cursor: crosshair;
+}
+
+/* Time axis */
+.timeline-axis {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--bg-tertiary);
+}
+
+.timeline-worker-label-spacer {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.timeline-time-labels {
+  flex: 1;
+  position: relative;
+  height: 16px;
+}
+
+.timeline-time-label {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', Monaco, monospace;
+}
+
+/* Worker rows */
+.timeline-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  height: 24px;
+}
+
+.timeline-worker-label {
+  width: 80px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-right: 0.5rem;
+}
+
+.worker-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.worker-status-dot.active {
+  background: var(--success);
+  box-shadow: 0 0 4px var(--success);
+}
+
+.worker-status-dot.idle {
+  background: var(--text-secondary);
+}
+
+.worker-status-dot.error {
+  background: var(--error);
+  box-shadow: 0 0 4px var(--error);
+}
+
+.timeline-worker-label .worker-name {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', Monaco, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-bar-container {
+  flex: 1;
+  position: relative;
+  height: 16px;
+  background: var(--bg-primary);
+  border-radius: 2px;
+  overflow: visible;
+}
+
+/* Timeline segments (activity bars) */
+.timeline-segment {
+  position: absolute;
+  top: 2px;
+  height: 12px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-width: 2px;
+}
+
+.timeline-segment:hover {
+  transform: scaleY(1.2);
+  z-index: 10;
+}
+
+/* Timeline tooltip */
+.timeline-tooltip {
+  position: absolute;
+  top: -40px;
+  background: var(--bg-primary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 4px;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.7rem;
+  z-index: 100;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.tooltip-time {
+  font-family: 'SF Mono', Monaco, monospace;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.tooltip-count {
+  color: var(--text-secondary);
+}
+
+.tooltip-level {
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.tooltip-level.debug { color: var(--info); }
+.tooltip-level.info { color: var(--success); }
+.tooltip-level.warn { color: var(--warning); }
+.tooltip-level.error { color: var(--error); }
+
+/* Current time indicator */
+.timeline-current-time {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.timeline-current-time::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
+/* Empty state */
+.timeline-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 80px;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+/* Hint text */
+.timeline-hint {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-align: center;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--bg-tertiary);
+}
+
+/* Timeline toggle button */
+.timeline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.375rem 0.75rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.timeline-toggle:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.timeline-toggle-icon {
+  font-size: 0.875rem;
+}
+
+.timeline-toggle-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Responsive adjustments for Timeline */
+@media (max-width: 768px) {
+  .timeline-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .time-range-selector {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .time-range-button {
+    flex: 1;
+    text-align: center;
+  }
+
+  .timeline-worker-label-spacer,
+  .timeline-worker-label {
+    width: 60px;
+  }
+
+  .timeline-worker-label .worker-name {
+    font-size: 0.65rem;
+  }
+}
+
+/* Timeline highlight animation for activity stream */
+.event-item.timeline-highlight {
+  animation: timeline-highlight-pulse 3s ease-out;
+  background: rgba(233, 69, 96, 0.2);
+  border-left: 3px solid var(--accent);
+}
+
+@keyframes timeline-highlight-pulse {
+  0% {
+    background: rgba(233, 69, 96, 0.4);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* Timeline toggle button active state */
+.timeline-toggle.active {
+  background: rgba(233, 69, 96, 0.3);
+  border-color: var(--accent);
+  color: var(--accent);
+}

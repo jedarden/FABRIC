@@ -10,6 +10,7 @@ interface ActivityStreamProps {
   pinnedBeads?: Set<string>;
   onTogglePinBead?: (beadId: string) => void;
   focusModeEnabled?: boolean;
+  selectedTimelineTime?: number | null;
 }
 
 const ActivityStream: React.FC<ActivityStreamProps> = ({
@@ -20,16 +21,10 @@ const ActivityStream: React.FC<ActivityStreamProps> = ({
   pinnedBeads = new Set(),
   onTogglePinBead,
   focusModeEnabled = false,
+  selectedTimelineTime,
 }) => {
   const listRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = React.useState<ActivityFilter>({});
-
-  // Auto-scroll to bottom on new events
-  useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
-  }, [events]);
 
   // Filter events based on filter criteria
   const filteredEvents = useMemo(() => {
@@ -68,6 +63,44 @@ const ActivityStream: React.FC<ActivityStreamProps> = ({
       return true;
     });
   }, [events, filter]);
+
+  // Auto-scroll to bottom on new events
+  useEffect(() => {
+    if (listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
+  }, [events]);
+
+  // Scroll to events around selected timeline time
+  useEffect(() => {
+    if (selectedTimelineTime && listRef.current && filteredEvents.length > 0) {
+      // Find the first event after the selected time
+      const targetIndex = filteredEvents.findIndex(
+        e => new Date(e.timestamp).getTime() >= selectedTimelineTime
+      );
+      if (targetIndex !== -1 && listRef.current) {
+        // Use setTimeout to ensure DOM is updated
+        const timeoutId = setTimeout(() => {
+          if (!listRef.current) return;
+          const eventElements = listRef.current.querySelectorAll('.event-item');
+          const targetElement = eventElements[targetIndex] as HTMLElement | undefined;
+          if (targetElement && typeof targetElement.scrollIntoView === 'function') {
+            targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Add a highlight class temporarily (check classList exists for jsdom compatibility)
+            if (targetElement.classList && typeof targetElement.classList.add === 'function') {
+              targetElement.classList.add('timeline-highlight');
+              setTimeout(() => {
+                if (targetElement.classList && typeof targetElement.classList.remove === 'function') {
+                  targetElement.classList.remove('timeline-highlight');
+                }
+              }, 3000);
+            }
+          }
+        }, 0);
+        return () => clearTimeout(timeoutId);
+      }
+    }
+  }, [selectedTimelineTime, filteredEvents]);
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString('en-US', {
