@@ -3,11 +3,13 @@
  *
  * Displays a heatmap of files showing modification frequency and collision risks.
  * Helps identify hotspots and potential collision areas between workers.
+ * Includes anomaly detection for unexpected file activity.
  */
 
 import blessed from 'blessed';
-import { FileHeatmapEntry, FileHeatmapStats, HeatmapOptions, HeatLevel } from '../../types.js';
+import { FileHeatmapEntry, FileHeatmapStats, HeatmapOptions, HeatLevel, FileAnomaly, AnomalyDetectionOptions } from '../../types.js';
 import { colors, getHeatColor, getHeatIcon } from '../utils/colors.js';
+import { getAnomalyIcon, getAnomalyColor, getAnomalyTypeLabel } from '../utils/fileAnomalyDetection.js';
 
 export interface FileHeatmapOptions {
   /** Parent screen */
@@ -35,10 +37,13 @@ export class FileHeatmap {
   private box: blessed.Widgets.BoxElement;
   private entries: FileHeatmapEntry[] = [];
   private stats: FileHeatmapStats | null = null;
+  private anomalies: FileAnomaly[] = [];
   private selectedIndex = 0;
   private sortMode: HeatmapSortMode = 'modifications';
   private filter: string = '';
   private showCollisionOnly = false;
+  private showAnomaliesOnly = false;
+  private anomalyIndex = 0;
 
   constructor(options: FileHeatmapOptions) {
     this.box = blessed.box({
@@ -95,6 +100,15 @@ export class FileHeatmap {
     // Toggle collision filter
     this.box.key(['c'], () => {
       this.showCollisionOnly = !this.showCollisionOnly;
+      this.showAnomaliesOnly = false; // Reset anomaly mode
+      this.render();
+    });
+
+    // Toggle anomaly view
+    this.box.key(['a'], () => {
+      this.showAnomaliesOnly = !this.showAnomaliesOnly;
+      this.showCollisionOnly = false; // Reset collision mode
+      this.anomalyIndex = 0;
       this.render();
     });
   }
@@ -198,12 +212,18 @@ export class FileHeatmap {
     const heatDist = stats.heatDistribution;
     const sortLabel = `Sort: ${this.sortMode}`;
     const filterLabel = this.showCollisionOnly ? ' | Collisions Only' : '';
+    const anomalyLabel = this.showAnomaliesOnly ? ' | Anomalies Only' : '';
+
+    const anomalyCount = this.anomalies.length;
+    const anomalyDisplay = anomalyCount > 0
+      ? ` | {yellow-fg}⚠ ${anomalyCount} anomalies{/}`
+      : '';
 
     return `{bold}Files: ${stats.totalFiles}{/} | ` +
       `Mods: ${stats.totalModifications} | ` +
       `Active: ${stats.activeFiles} | ` +
-      `{red-fg}⚠ ${stats.collisionFiles}{/} | ` +
-      `[s] ${sortLabel}${filterLabel}\n` +
+      `{red-fg}⚠ ${stats.collisionFiles}{/}${anomalyDisplay} | ` +
+      `[s] ${sortLabel}${filterLabel}${anomalyLabel}\n` +
       `{blue-fg}○${heatDist.cold}{/} ` +
       `{yellow-fg}◐${heatDist.warm}{/} ` +
       `{magenta-fg}●${heatDist.hot}{/} ` +
@@ -211,9 +231,52 @@ export class FileHeatmap {
   }
 
   /**
+   * Format a single anomaly entry
+   */
+  private formatAnomaly(anomaly: FileAnomaly, isSelected: boolean): string {
+    const icon = getAnomalyIcon(anomaly.severity);
+    const color = getAnomalyColor(anomaly.severity);
+    const typeLabel = getAnomalyTypeLabel(anomaly.type);
+    const path = this.formatPath(anomaly.path);
+
+    const selectedMarker = isSelected ? '>' : ' ';
+
+    // Format: [icon] [type] [severity] [path] [message]
+    const severityTag = `{${color}-fg}[${anomaly.severity.toUpperCase()}]{/}`;
+    const typeTag = `{gray-fg}[${typeLabel}]{/}`;
+
+    // Truncate message if too long
+    let message = anomaly.message;
+    if (message.length > 30) {
+      message = message.substring(0, 27) + '...';
+    }
+
+    return `${selectedMarker} {${color}-fg}${icon}{/} ${typeTag} ${severityTag} ${path}\n` +
+      `      ${message}`;
+  }
+
+  /**
+   * Format anomaly section header
+   */
+  private formatAnomalyHeader(): string {
+    const critical = this.anomalies.filter(a => a.severity === 'critical').length;
+    const warning = this.anomalies.filter(a => a.severity === 'warning').length;
+    const info = this.anomalies.filter(a => a.severity === 'info').length;
+
+    return `{bold}Unexpected Activity{/} ` +
+      `({red-fg}🚨 ${critical}{/} ` +
+      `{yellow-fg}⚠ ${warning}{/} ` +
+      `{blue-fg}ℹ ${info}{/})`;
+  }
+
+  /**
    * Update heatmap data
    */
-  updateData(getHeatmap: (options: HeatmapOptions) => FileHeatmapEntry[], getStats: () => FileHeatmapStats): void {
+  updateData(
+    getHeatmap: (options: HeatmapOptions) => FileHeatmapEntry[],
+    getStats: () => FileHeatmapStats,
+    getAnomalies?: (options: AnomalyDetectionOptions) => FileAnomaly[]
+  ): void {
     this.entries = getHeatmap({
       sortBy: this.sortMode,
       maxEntries: 100,
@@ -221,7 +284,14 @@ export class FileHeatmap {
       directoryFilter: this.filter || undefined,
     });
     this.stats = getStats();
+
+    // Get anomalies if getter provided
+    if (getAnomalies) {
+      this.anomalies = getAnomalies({});
+    }
+
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.entries.length - 1));
+    this.anomalyIndex = Math.min(this.anomalyIndex, Math.max(0, this.anomalies.length - 1));
     this.render();
   }
 
@@ -239,6 +309,7 @@ export class FileHeatmap {
   clearFilter(): void {
     this.filter = '';
     this.showCollisionOnly = false;
+    this.showAnomaliesOnly = false;
     this.render();
   }
 
@@ -246,8 +317,13 @@ export class FileHeatmap {
    * Select next entry
    */
   selectNext(): void {
-    if (this.entries.length === 0) return;
-    this.selectedIndex = (this.selectedIndex + 1) % this.entries.length;
+    if (this.showAnomaliesOnly) {
+      if (this.anomalies.length === 0) return;
+      this.anomalyIndex = (this.anomalyIndex + 1) % this.anomalies.length;
+    } else {
+      if (this.entries.length === 0) return;
+      this.selectedIndex = (this.selectedIndex + 1) % this.entries.length;
+    }
     this.render();
   }
 
@@ -255,10 +331,17 @@ export class FileHeatmap {
    * Select previous entry
    */
   selectPrevious(): void {
-    if (this.entries.length === 0) return;
-    this.selectedIndex = this.selectedIndex === 0
-      ? this.entries.length - 1
-      : this.selectedIndex - 1;
+    if (this.showAnomaliesOnly) {
+      if (this.anomalies.length === 0) return;
+      this.anomalyIndex = this.anomalyIndex === 0
+        ? this.anomalies.length - 1
+        : this.anomalyIndex - 1;
+    } else {
+      if (this.entries.length === 0) return;
+      this.selectedIndex = this.selectedIndex === 0
+        ? this.entries.length - 1
+        : this.selectedIndex - 1;
+    }
     this.render();
   }
 
@@ -267,6 +350,13 @@ export class FileHeatmap {
    */
   getSelected(): FileHeatmapEntry | undefined {
     return this.entries[this.selectedIndex];
+  }
+
+  /**
+   * Get currently selected anomaly
+   */
+  getSelectedAnomaly(): FileAnomaly | undefined {
+    return this.anomalies[this.anomalyIndex];
   }
 
   /**
@@ -284,6 +374,13 @@ export class FileHeatmap {
   }
 
   /**
+   * Get anomaly filter state
+   */
+  getAnomalyFilter(): boolean {
+    return this.showAnomaliesOnly;
+  }
+
+  /**
    * Render the component
    */
   render(): void {
@@ -295,27 +392,72 @@ export class FileHeatmap {
       lines.push(''); // Empty line separator
     }
 
-    if (this.entries.length === 0) {
-      lines.push('{gray-fg}No file modifications detected{/}');
-      if (this.showCollisionOnly) {
-        lines.push('{gray-fg}Press [c] to show all files{/}');
+    // Anomaly-only view mode
+    if (this.showAnomaliesOnly) {
+      lines.push(this.formatAnomalyHeader());
+      lines.push('');
+
+      if (this.anomalies.length === 0) {
+        lines.push('{green-fg}✓ No anomalies detected{/}');
+        lines.push('{gray-fg}Press [a] to return to file view{/}');
+      } else {
+        for (let i = 0; i < this.anomalies.length; i++) {
+          const anomaly = this.anomalies[i];
+          const isSelected = i === this.anomalyIndex;
+          lines.push(this.formatAnomaly(anomaly, isSelected));
+        }
+
+        // Footer help
+        lines.push('');
+        lines.push('{gray-fg}[a] Back to files  [j/k] Scroll{/}');
       }
     } else {
-      for (let i = 0; i < this.entries.length; i++) {
-        const entry = this.entries[i];
-        const isSelected = i === this.selectedIndex;
-        lines.push(this.formatEntry(entry, isSelected));
+      // Normal file view
+      if (this.entries.length === 0) {
+        lines.push('{gray-fg}No file modifications detected{/}');
+        if (this.showCollisionOnly) {
+          lines.push('{gray-fg}Press [c] to show all files{/}');
+        }
+      } else {
+        for (let i = 0; i < this.entries.length; i++) {
+          const entry = this.entries[i];
+          const isSelected = i === this.selectedIndex;
+          lines.push(this.formatEntry(entry, isSelected));
+        }
+
+        // Footer help
+        lines.push('');
+        lines.push('{gray-fg}[s] Sort  [c] Collisions  [a] Anomalies  [j/k] Scroll{/}');
       }
 
-      // Footer help
-      lines.push('');
-      lines.push('{gray-fg}[s] Sort  [c] Collisions only  [j/k] Scroll{/}');
+      // Add anomaly summary section if there are anomalies
+      if (this.anomalies.length > 0 && !this.showCollisionOnly) {
+        lines.push('');
+        lines.push('─'.repeat(40));
+        lines.push(this.formatAnomalyHeader());
+
+        // Show top 3 anomalies
+        const topAnomalies = this.anomalies.slice(0, 3);
+        for (const anomaly of topAnomalies) {
+          const icon = getAnomalyIcon(anomaly.severity);
+          const color = getAnomalyColor(anomaly.severity);
+          const path = this.formatPath(anomaly.path, 25);
+          lines.push(`  {${color}-fg}${icon}{/} ${path}`);
+        }
+
+        if (this.anomalies.length > 3) {
+          lines.push(`  {gray-fg}  ... +${this.anomalies.length - 3} more (press [a] to view){/}`);
+        }
+      }
     }
 
     // Update label with current mode
-    const label = this.showCollisionOnly
-      ? ' File Heatmap [COLLISIONS] '
-      : ' File Heatmap ';
+    let label = ' File Heatmap ';
+    if (this.showCollisionOnly) {
+      label = ' File Heatmap [COLLISIONS] ';
+    } else if (this.showAnomaliesOnly) {
+      label = ' File Heatmap [ANOMALIES] ';
+    }
     this.box.setLabel(label);
 
     this.box.setContent(lines.join('\n'));

@@ -35,7 +35,11 @@ import {
   SemanticNarrative,
   NarrativeOptions,
   NarrativeUpdate,
+  FileAnomaly,
+  AnomalyDetectionOptions,
+  AnomalyStats,
 } from './types.js';
+import { detectAnomalies, getAnomalyStats } from './tui/utils/fileAnomalyDetection.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
 import { CrossReferenceManager, getCrossReferenceManager } from './crossReferenceManager.js';
@@ -817,6 +821,26 @@ export class InMemoryEventStore implements EventStore {
         return scoreB - scoreA;
       })
       .slice(0, 20);
+  }
+
+  // ============================================
+  // File Anomaly Detection
+  // ============================================
+
+  /**
+   * Get file anomalies detected from current activity
+   */
+  getFileAnomalies(options: AnomalyDetectionOptions = {}): FileAnomaly[] {
+    const entries = this.getFileHeatmap({ maxEntries: Infinity });
+    return detectAnomalies(entries, options);
+  }
+
+  /**
+   * Get statistics about detected anomalies
+   */
+  getAnomalyStats(): AnomalyStats {
+    const anomalies = this.getFileAnomalies();
+    return getAnomalyStats(anomalies);
   }
 
   // ============================================

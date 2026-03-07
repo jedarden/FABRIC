@@ -728,13 +728,14 @@ export class FabricTuiApp {
       this.fileHeatmap.getElement().show();
       this.fileHeatmap.updateData(
         (opts) => this.store.getFileHeatmap(opts),
-        () => this.store.getFileHeatmapStats()
+        () => this.store.getFileHeatmapStats(),
+        (opts) => this.store.getFileAnomalies(opts)
       );
       this.fileHeatmap.focus();
 
       // Update header
       this.headerBox.setContent(' FABRIC - File Heatmap');
-      this.footerBox.setContent(' [s] Sort  [c] Collisions  [Esc] Back  [?] Help  [q] Quit');
+      this.footerBox.setContent(' [s] Sort  [c] Collisions  [a] Anomalies  [Esc] Back  [?] Help  [q] Quit');
     } else if (mode === 'dag') {
       // Hide other panels
       this.workerGrid.getElement().hide();
@@ -1258,7 +1259,8 @@ General:
     if (this.viewMode === 'heatmap') {
       this.fileHeatmap.updateData(
         (opts) => this.store.getFileHeatmap(opts),
-        () => this.store.getFileHeatmapStats()
+        () => this.store.getFileHeatmapStats(),
+        (opts) => this.store.getFileAnomalies(opts)
       );
     }
 
@@ -1279,7 +1281,8 @@ General:
     if (this.viewMode === 'heatmap') {
       this.fileHeatmap.updateData(
         (opts) => this.store.getFileHeatmap(opts),
-        () => this.store.getFileHeatmapStats()
+        () => this.store.getFileHeatmapStats(),
+        (opts) => this.store.getFileAnomalies(opts)
       );
     } else if (this.viewMode === 'dag') {
       // DAG view handles its own refresh

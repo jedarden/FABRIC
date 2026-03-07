@@ -699,6 +699,107 @@ export interface FileHeatmapStats {
 }
 
 // ============================================
+// File Anomaly Detection Types
+// ============================================
+
+/**
+ * Types of file activity anomalies
+ */
+export type AnomalyType =
+  | 'config_modification'      // Config file modified outside expected context
+  | 'high_frequency'           // Unusually high modification rate
+  | 'burst_activity'           // Sudden burst of modifications
+  | 'unusual_pattern'          // Activity pattern outside normal bounds
+  | 'sensitive_file';          // Sensitive file (secrets, credentials) touched
+
+/**
+ * Severity level for anomalies
+ */
+export type AnomalySeverity = 'info' | 'warning' | 'critical';
+
+/**
+ * Detected file anomaly
+ */
+export interface FileAnomaly {
+  /** File path with anomaly */
+  path: string;
+
+  /** Type of anomaly detected */
+  type: AnomalyType;
+
+  /** Severity level */
+  severity: AnomalySeverity;
+
+  /** Human-readable description */
+  message: string;
+
+  /** When the anomaly was detected */
+  detectedAt: number;
+
+  /** Supporting data for the anomaly */
+  details: {
+    /** Modification count involved */
+    modifications?: number;
+
+    /** Workers involved */
+    workers?: string[];
+
+    /** Time span of anomalous activity (ms) */
+    timeSpan?: number;
+
+    /** Expected normal value */
+    expectedValue?: number;
+
+    /** Actual observed value */
+    actualValue?: number;
+
+    /** Additional context */
+    context?: Record<string, unknown>;
+  };
+}
+
+/**
+ * Options for anomaly detection
+ */
+export interface AnomalyDetectionOptions {
+  /** Minimum modifications to consider for anomaly detection */
+  minModifications?: number;
+
+  /** Threshold multiplier for high-frequency detection (e.g., 3 = 3x average) */
+  frequencyThreshold?: number;
+
+  /** Time window for burst detection (ms) */
+  burstWindow?: number;
+
+  /** Minimum burst count to trigger anomaly */
+  burstThreshold?: number;
+
+  /** Custom patterns for sensitive files */
+  sensitivePatterns?: string[];
+}
+
+/**
+ * Statistics for anomaly detection
+ */
+export interface AnomalyStats {
+  /** Total anomalies detected */
+  totalAnomalies: number;
+
+  /** Count by type */
+  byType: Record<AnomalyType, number>;
+
+  /** Count by severity */
+  bySeverity: Record<AnomalySeverity, number>;
+
+  /** Files with most anomalies */
+  topAnomalyFiles: Array<{
+    path: string;
+    count: number;
+    types: AnomalyType[];
+  }>;
+}
+
+// ============================================
 // Dependency DAG Types
 // ============================================
 
