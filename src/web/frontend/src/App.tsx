@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LogEvent, WorkerInfo, WebSocketMessage, CollisionAlert as CollisionAlertData, RecoverySuggestion } from './types';
 import { ThemeProvider, useTheme } from './ThemeContext';
 import WorkerGrid from './components/WorkerGrid';
@@ -11,6 +11,183 @@ import RecoveryPanel from './components/RecoveryPanel';
 import FileContextPanel from './components/FileContextPanel';
 
 const FOCUS_MODE_STORAGE_KEY = 'fabric-focus-mode';
+
+// WebSocket reconnection configuration
+const RECONNECT_BASE_DELAY = 1000; // 1 second
+const RECONNECT_MAX_DELAY = 30000; // 30 seconds
+const RECONNECT_MAX_RETRIES = 10;  // Max retries before manual intervention
+
+// Connection states
+type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
+
+interface ReconnectState {
+  state: ConnectionState;
+  attemptCount: number;
+  nextRetryIn: number | null;
+}
+
+/**
+ * Custom hook for WebSocket with auto-reconnect and exponential backoff
+ */
+function useWebSocketReconnect(
+  onMessage: (message: WebSocketMessage) => void
+): {
+  reconnectState: ReconnectState;
+  connect: () => void;
+  disconnect: () => void;
+  resetAndReconnect: () => void;
+} {
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const attemptCountRef = useRef(0);
+
+  const [reconnectState, setReconnectState] = useState<ReconnectState>({
+    state: 'disconnected',
+    attemptCount: 0,
+    nextRetryIn: null,
+  });
+
+  const getReconnectDelay = useCallback((attempt: number): number => {
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max)
+    const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, attempt), RECONNECT_MAX_DELAY);
+    return delay;
+  }, []);
+
+  const clearTimers = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+  }, []);
+
+  const scheduleReconnect = useCallback(() => {
+    clearTimers();
+
+    if (attemptCountRef.current >= RECONNECT_MAX_RETRIES) {
+      // Max retries reached - require manual intervention
+      setReconnectState({
+        state: 'disconnected',
+        attemptCount: attemptCountRef.current,
+        nextRetryIn: null,
+      });
+      return;
+    }
+
+    const delay = getReconnectDelay(attemptCountRef.current);
+    const targetTime = Date.now() + delay;
+
+    setReconnectState(prev => ({
+      ...prev,
+      state: 'reconnecting',
+      attemptCount: attemptCountRef.current,
+      nextRetryIn: Math.ceil(delay / 1000),
+    }));
+
+    // Countdown interval
+    countdownIntervalRef.current = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((targetTime - Date.now()) / 1000));
+      setReconnectState(prev => ({
+        ...prev,
+        nextRetryIn: remaining,
+      }));
+    }, 1000);
+
+    // Schedule reconnect
+    reconnectTimeoutRef.current = setTimeout(() => {
+      attemptCountRef.current++;
+      connectInternal();
+    }, delay);
+  }, [getReconnectDelay, clearTimers]);
+
+  const connectInternal = useCallback(() => {
+    clearTimers();
+
+    // Close existing connection if any
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      attemptCountRef.current = 0;
+      setReconnectState({
+        state: 'connected',
+        attemptCount: 0,
+        nextRetryIn: null,
+      });
+      console.log('WebSocket connected');
+    };
+
+    ws.onclose = (event) => {
+      console.log('WebSocket disconnected', event.code, event.reason);
+      // Only attempt reconnect if not manually closed (1000 = normal closure)
+      if (event.code !== 1000) {
+        scheduleReconnect();
+      } else {
+        setReconnectState({
+          state: 'disconnected',
+          attemptCount: attemptCountRef.current,
+          nextRetryIn: null,
+        });
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error('WebSocket error:', err);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data) as WebSocketMessage;
+        onMessage(message);
+      } catch (err) {
+        console.error('Failed to parse message:', err);
+      }
+    };
+  }, [onMessage, clearTimers, scheduleReconnect]);
+
+  const connect = useCallback(() => {
+    connectInternal();
+  }, [connectInternal]);
+
+  const disconnect = useCallback(() => {
+    clearTimers();
+    if (wsRef.current) {
+      wsRef.current.close(1000, 'Manual disconnect');
+      wsRef.current = null;
+    }
+    setReconnectState({
+      state: 'disconnected',
+      attemptCount: 0,
+      nextRetryIn: null,
+    });
+  }, [clearTimers]);
+
+  const resetAndReconnect = useCallback(() => {
+    clearTimers();
+    attemptCountRef.current = 0;
+    connectInternal();
+  }, [clearTimers, connectInternal]);
+
+  // Auto-connect on mount
+  useEffect(() => {
+    connectInternal();
+    return () => {
+      disconnect();
+    };
+  }, [connectInternal, disconnect]);
+
+  return { reconnectState, connect, disconnect, resetAndReconnect };
+}
 
 interface FocusModeState {
   enabled: boolean;
@@ -40,7 +217,6 @@ const App: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [selectedWorker, setSelectedWorker] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
   const [collisionAlerts, setCollisionAlerts] = useState<CollisionAlertData[]>([]);
   const [showCollisionPanel, setShowCollisionPanel] = useState(false);
   const [showFileHeatmap, setShowFileHeatmap] = useState(false);
@@ -124,36 +300,8 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`);
-
-    ws.onopen = () => {
-      setConnected(true);
-      console.log('WebSocket connected');
-    };
-
-    ws.onclose = () => {
-      setConnected(false);
-      console.log('WebSocket disconnected');
-    };
-
-    ws.onerror = (err) => {
-      console.error('WebSocket error:', err);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data) as WebSocketMessage;
-        handleWebSocketMessage(message);
-      } catch (err) {
-        console.error('Failed to parse message:', err);
-      }
-    };
-
-    return () => {
-      ws.close();
-    };
-  }, [handleWebSocketMessage]);
+  // Use the auto-reconnect hook
+  const { reconnectState, resetAndReconnect } = useWebSocketReconnect(handleWebSocketMessage);
 
   const filteredEvents = selectedWorker
     ? filteredEventsByFocusMode.filter(e => e.worker === selectedWorker)
@@ -280,9 +428,30 @@ const App: React.FC = () => {
               <span className="collision-alert-count">{unacknowledgedAlertCount}</span>
             </button>
           )}
-          <div className="connection-status">
-            <span className={`status-dot ${connected ? 'connected' : ''}`}></span>
-            {connected ? 'Connected' : 'Disconnected'}
+          <div className={`connection-status ${reconnectState.state}`}>
+            <span className={`status-dot ${reconnectState.state}`}></span>
+            {reconnectState.state === 'connected' && 'Connected'}
+            {reconnectState.state === 'reconnecting' && (
+              <span className="reconnecting-text">
+                Reconnecting...
+                {reconnectState.nextRetryIn !== null && (
+                  <span className="retry-countdown"> ({reconnectState.nextRetryIn}s)</span>
+                )}
+                <span className="attempt-count">[{reconnectState.attemptCount + 1}]</span>
+              </span>
+            )}
+            {reconnectState.state === 'disconnected' && (
+              <>
+                <span>Disconnected</span>
+                <button
+                  className="reconnect-button"
+                  onClick={resetAndReconnect}
+                  title="Click to reconnect"
+                >
+                  Retry
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>

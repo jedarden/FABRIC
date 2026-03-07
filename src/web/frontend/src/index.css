@@ -164,15 +164,84 @@ body {
   color: var(--text-secondary);
 }
 
+.connection-status.connected {
+  color: var(--success);
+}
+
+.connection-status.reconnecting {
+  color: var(--warning);
+}
+
+.connection-status.disconnected {
+  color: var(--error);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--error);
+  transition: background 0.3s ease;
 }
 
 .status-dot.connected {
   background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+
+.status-dot.reconnecting {
+  background: var(--warning);
+  box-shadow: 0 0 6px var(--warning);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-dot.disconnected {
+  background: var(--error);
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+.reconnecting-text {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.retry-countdown {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.attempt-count {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-left: 0.25rem;
+}
+
+.reconnect-button {
+  margin-left: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reconnect-button:hover {
+  background: var(--accent-dim);
+  transform: scale(1.05);
 }
 
 /* Theme toggle button */
