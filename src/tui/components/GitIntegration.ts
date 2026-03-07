@@ -2,12 +2,13 @@
  * GitIntegration Component
  *
  * Displays live git status per workspace including current branch,
- * staged/unstaged files, recent commits, and conflict detection.
+ * staged/unstaged files, recent commits, PR preview, and conflict detection.
  */
 
 import blessed from 'blessed';
-import { GitEvent, GitStatusEvent, GitCommitEvent, GitFileChange } from '../../types.js';
+import { GitEvent, GitStatusEvent, GitCommitEvent, GitFileChange, PRPreview, PRFileChange } from '../../types.js';
 import { colors } from '../utils/colors.js';
+import { generatePRPreview, formatPRPreview } from '../utils/prPreview.js';
 
 export interface GitIntegrationOptions {
   /** Parent screen */
@@ -36,13 +37,17 @@ export interface GitIntegrationOptions {
 }
 
 /**
- * GitIntegration displays live git status and activity
+ * View mode for the git panel
+ */
+type GitViewMode = 'status' | 'pr-preview' | 'diff';
+
+/**
+ * GitIntegration displays live git status and activity with PR preview
  */
 export class GitIntegration {
   private box: blessed.Widgets.BoxElement;
-  private statusBox: blessed.Widgets.BoxElement;
-  private filesBox: blessed.Widgets.BoxElement;
-  private commitsBox: blessed.Widgets.BoxElement;
+  private contentBox: blessed.Widgets.BoxElement;
+  private buttonBox: blessed.Widgets.BoxElement;
   private maxCommits: number;
   private maxFiles: number;
 
@@ -51,6 +56,8 @@ export class GitIntegration {
   private currentStatus?: GitStatusEvent;
   private recentCommits: GitCommitEvent[] = [];
   private conflictDetected = false;
+  private prPreview?: PRPreview;
+  private viewMode: GitViewMode = 'status';
 
   // Workspace tracking (worker -> workspace path)
   private workspaces: Map<string, string> = new Map();
@@ -79,31 +86,28 @@ export class GitIntegration {
       tags: true,
     });
 
-    // Create inner sections
-    this.statusBox = blessed.box({
+    // Create content box for scrollable content
+    this.contentBox = blessed.box({
       parent: this.box,
       top: 0,
       left: 0,
       right: 0,
-      height: 'shrink',
+      bottom: 1,
       tags: true,
+      scrollable: true,
+      alwaysScroll: true,
+      keys: true,
+      vi: true,
+      mouse: true,
     });
 
-    this.filesBox = blessed.box({
+    // Create button bar at bottom
+    this.buttonBox = blessed.box({
       parent: this.box,
-      top: 5,
-      left: 0,
-      right: 0,
-      height: 'shrink',
-      tags: true,
-    });
-
-    this.commitsBox = blessed.box({
-      parent: this.box,
-      top: 15,
-      left: 0,
-      right: 0,
       bottom: 0,
+      left: 0,
+      right: 0,
+      height: 1,
       tags: true,
     });
 
@@ -123,13 +127,54 @@ export class GitIntegration {
       this.clearHistory();
     });
 
+    this.box.key(['p'], () => {
+      this.togglePRPreview();
+    });
+
+    this.box.key(['d'], () => {
+      this.toggleDiffView();
+    });
+
+    this.box.key(['s'], () => {
+      this.toggleStatusView();
+    });
+
     this.box.key(['escape'], () => {
-      this.hide();
+      if (this.viewMode !== 'status') {
+        this.viewMode = 'status';
+        this.render();
+      } else {
+        this.hide();
+      }
     });
   }
 
   private get screen(): blessed.Widgets.Screen {
     return this.box.screen;
+  }
+
+  /**
+   * Toggle PR preview view
+   */
+  private togglePRPreview(): void {
+    this.viewMode = this.viewMode === 'pr-preview' ? 'status' : 'pr-preview';
+    this.render();
+  }
+
+  /**
+   * Toggle diff view
+   */
+  private toggleDiffView(): void {
+    this.viewMode = this.viewMode === 'diff' ? 'status' : 'diff';
+    this.render();
+  }
+
+  /**
+   * Toggle status view
+   */
+  private toggleStatusView(): void {
+    this.viewMode = 'status';
+    this.render();
   }
 
   /**
@@ -157,15 +202,25 @@ export class GitIntegration {
   }
 
   /**
-   * Format file change for display
+   * Format file change for display with line counts
    */
-  private formatFileChange(file: GitFileChange, maxLength: number = 50): string {
+  private formatFileChange(file: PRFileChange | GitFileChange, maxLength: number = 50): string {
     const statusInfo = this.getFileStatusIcon(file.status);
     const path = file.path.length > maxLength
       ? '...' + file.path.slice(-maxLength + 3)
       : file.path;
 
     let line = `{${statusInfo.color}-fg}${statusInfo.icon}{/} ${path}`;
+
+    // Add line counts if available (PRFileChange)
+    const prFile = file as PRFileChange;
+    if (prFile.linesAdded !== undefined || prFile.linesDeleted !== undefined) {
+      const added = prFile.linesAdded || 0;
+      const deleted = prFile.linesDeleted || 0;
+      if (added > 0 || deleted > 0) {
+        line += ` {green-fg}+${added}{/}/{red-fg}-${deleted}{/}`;
+      }
+    }
 
     if (file.originalPath) {
       line += ` {gray-fg}(from ${file.originalPath}){/}`;
@@ -221,6 +276,9 @@ export class GitIntegration {
     const commitEvents = events.filter((e): e is GitCommitEvent => e.type === 'commit');
     this.recentCommits = commitEvents.slice(-this.maxCommits);
 
+    // Generate PR preview
+    this.prPreview = generatePRPreview(events);
+
     this.render();
   }
 
@@ -247,6 +305,7 @@ export class GitIntegration {
     this.currentStatus = undefined;
     this.recentCommits = [];
     this.conflictDetected = false;
+    this.prPreview = undefined;
     this.render();
   }
 
@@ -317,7 +376,7 @@ export class GitIntegration {
   }
 
   /**
-   * Render files section
+   * Render files section with line counts
    */
   private renderFiles(): string {
     if (!this.currentStatus) {
@@ -329,9 +388,19 @@ export class GitIntegration {
     const unstaged = this.currentStatus.unstaged.slice(0, this.maxFiles);
     const untracked = this.currentStatus.untracked.slice(0, this.maxFiles);
 
+    // Calculate totals
+    const stagedAdded = staged.length;
+    const unstagedCount = unstaged.length;
+    const untrackedCount = untracked.length;
+
+    // Summary line
+    if (stagedAdded > 0 || unstagedCount > 0 || untrackedCount > 0) {
+      lines.push(`\n{bold}Changes:{/} {green-fg}${stagedAdded} staged{/}, {yellow-fg}${unstagedCount} unstaged{/}, {gray-fg}${untrackedCount} untracked{/}`);
+    }
+
     // Staged files
     if (staged.length > 0) {
-      lines.push(`\n{bold}{green-fg}Staged ({/}${this.currentStatus.staged.length}{green-fg}):{/}`);
+      lines.push(`\n{bold}{green-fg}Staged:{/}`);
       for (const file of staged) {
         lines.push(`  ${this.formatFileChange(file)}`);
       }
@@ -342,7 +411,7 @@ export class GitIntegration {
 
     // Unstaged files
     if (unstaged.length > 0) {
-      lines.push(`\n{bold}{yellow-fg}Unstaged ({/}${this.currentStatus.unstaged.length}{yellow-fg}):{/}`);
+      lines.push(`\n{bold}{yellow-fg}Unstaged:{/}`);
       for (const file of unstaged) {
         lines.push(`  ${this.formatFileChange(file)}`);
       }
@@ -353,7 +422,7 @@ export class GitIntegration {
 
     // Untracked files
     if (untracked.length > 0) {
-      lines.push(`\n{bold}{gray-fg}Untracked ({/}${this.currentStatus.untracked.length}{gray-fg}):{/}`);
+      lines.push(`\n{bold}{gray-fg}Untracked:{/}`);
       for (const file of untracked.slice(0, this.maxFiles)) {
         lines.push(`  {gray-fg}? ${file}{/}`);
       }
@@ -379,7 +448,7 @@ export class GitIntegration {
     }
 
     const lines: string[] = [];
-    lines.push(`{bold}Recent Commits (${this.recentCommits.length}):{/}`);
+    lines.push(`\n{bold}Recent Commits (${this.recentCommits.length}):{/}`);
 
     for (const commit of this.recentCommits.slice().reverse()) {
       lines.push(`  ${this.formatCommit(commit)}`);
@@ -389,23 +458,94 @@ export class GitIntegration {
   }
 
   /**
+   * Render PR preview section
+   */
+  private renderPRPreview(): string {
+    if (!this.prPreview) {
+      return '{gray-fg}No PR preview available{/}';
+    }
+
+    return formatPRPreview(this.prPreview);
+  }
+
+  /**
+   * Render potential conflicts section
+   */
+  private renderConflicts(): string {
+    if (!this.prPreview || !this.prPreview.conflicts) {
+      return '';
+    }
+
+    const conflicts = this.prPreview.conflicts;
+    const lines: string[] = [];
+
+    if (conflicts.hasUpstreamCommits || conflicts.rebaseRecommended) {
+      lines.push('\n{bold}{yellow-fg}⚠ Potential Conflicts{/}');
+      lines.push('');
+
+      if (conflicts.upstreamCommitCount > 0) {
+        lines.push(`  {yellow-fg}main has ${conflicts.upstreamCommitCount} new commit${conflicts.upstreamCommitCount !== 1 ? 's' : ''} since branch creation{/}`);
+      }
+
+      if (conflicts.conflictingFiles.length > 0) {
+        lines.push('  {gray-fg}Files that may conflict:{/}');
+        for (const file of conflicts.conflictingFiles.slice(0, 3)) {
+          lines.push(`    {red-fg}• ${file}{/}`);
+        }
+        if (conflicts.conflictingFiles.length > 3) {
+          lines.push(`    {gray-fg}... and ${conflicts.conflictingFiles.length - 3} more{/}`);
+        }
+      }
+
+      if (conflicts.rebaseRecommended) {
+        lines.push('');
+        lines.push(`  {cyan-fg}Recommendation: rebase before merging{/}`);
+        if (conflicts.rebaseReason) {
+          lines.push(`  {gray-fg}${conflicts.rebaseReason}{/}`);
+        }
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Render the button bar
+   */
+  private renderButtons(): string {
+    const modeIndicator = this.viewMode === 'pr-preview' ? '{green-fg}[PR Preview]{/} '
+                      : this.viewMode === 'diff' ? '{cyan-fg}[Diff View]{/} '
+                      : '';
+
+    return `${modeIndicator}{gray-fg}[p] Preview PR  [d] Diff  [s] Status  [r] Refresh  [c] Clear  [Esc] Back{/}`;
+  }
+
+  /**
    * Render the component
    */
   render(): void {
-    // Render status
-    this.statusBox.setContent(this.renderStatus());
+    let content: string;
 
-    // Render files
-    this.filesBox.setContent(this.renderFiles());
+    switch (this.viewMode) {
+      case 'pr-preview':
+        content = this.renderPRPreview() + '\n' + this.renderConflicts();
+        break;
+      case 'diff':
+        content = this.renderFiles() + '\n' + this.renderCommits();
+        break;
+      default:
+        content = this.renderStatus() + this.renderFiles() + this.renderCommits();
+    }
 
-    // Render commits
-    this.commitsBox.setContent(this.renderCommits());
+    this.contentBox.setContent(content);
+    this.buttonBox.setContent(this.renderButtons());
 
-    // Add keyboard hints at bottom
-    const hints = '{gray-fg}[r] Refresh  [c] Clear  [Esc] Close{/}';
-    this.box.setLabel(this.conflictDetected
-      ? ' Git Integration {red-fg}⚠ CONFLICTS{/} '
-      : ' Git Integration ');
+    // Update label
+    const modeLabel = this.viewMode === 'pr-preview' ? ' PR Preview '
+                    : this.viewMode === 'diff' ? ' Git Diff '
+                    : ' Git Integration ';
+    const conflictLabel = this.conflictDetected ? ' {red-fg}⚠ CONFLICTS{/} ' : '';
+    this.box.setLabel(` ${modeLabel}${conflictLabel}`);
 
     this.screen.render();
   }
@@ -458,6 +598,20 @@ export class GitIntegration {
    */
   getCommitsCount(): number {
     return this.recentCommits.length;
+  }
+
+  /**
+   * Get current PR preview
+   */
+  getPRPreview(): PRPreview | undefined {
+    return this.prPreview;
+  }
+
+  /**
+   * Get current view mode
+   */
+  getViewMode(): GitViewMode {
+    return this.viewMode;
   }
 }
 

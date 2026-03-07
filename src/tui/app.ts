@@ -867,7 +867,7 @@ export class FabricTuiApp {
 
       // Update header
       this.headerBox.setContent(' FABRIC - Git Integration');
-      this.footerBox.setContent(' [r] Refresh  [c] Clear  [Esc] Back  [?] Help  [q] Quit');
+      this.footerBox.setContent(' [p] Preview PR  [d] Diff  [s] Status  [r] Refresh  [c] Clear  [Esc] Back  [?] Help  [q] Quit');
     } else if (mode === 'narrative') {
       // Hide other panels
       this.workerGrid.getElement().hide();

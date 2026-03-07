@@ -1148,6 +1148,114 @@ export interface GitParseOptions {
 }
 
 // ============================================
+// PR Preview Types
+// ============================================
+
+/**
+ * File change with diff statistics
+ */
+export interface PRFileChange extends GitFileChange {
+  /** Lines added in this file */
+  linesAdded: number;
+
+  /** Lines deleted in this file */
+  linesDeleted: number;
+
+  /** Worker who made the change */
+  worker?: string;
+}
+
+/**
+ * Upstream commit that might conflict
+ */
+export interface UpstreamCommit {
+  /** Commit hash */
+  hash: string;
+
+  /** Commit message */
+  message: string;
+
+  /** Author name */
+  author?: string;
+
+  /** Files changed in this commit */
+  files: string[];
+
+  /** Timestamp */
+  ts: number;
+}
+
+/**
+ * Potential conflict information
+ */
+export interface PotentialConflict {
+  /** Whether there are upstream commits */
+  hasUpstreamCommits: boolean;
+
+  /** Number of upstream commits */
+  upstreamCommitCount: number;
+
+  /** Upstream commits that might conflict */
+  upstreamCommits: UpstreamCommit[];
+
+  /** Files that might have conflicts */
+  conflictingFiles: string[];
+
+  /** Whether rebase is recommended */
+  rebaseRecommended: boolean;
+
+  /** Reason for rebase recommendation */
+  rebaseReason?: string;
+}
+
+/**
+ * PR Preview data
+ */
+export interface PRPreview {
+  /** Generated PR title */
+  title: string;
+
+  /** Generated PR description */
+  description: string;
+
+  /** Commit message preview */
+  commitMessage: string;
+
+  /** All files changed */
+  files: PRFileChange[];
+
+  /** Total lines added */
+  totalLinesAdded: number;
+
+  /** Total lines deleted */
+  totalLinesDeleted: number;
+
+  /** Number of files changed */
+  filesChanged: number;
+
+  /** Potential conflicts with upstream */
+  conflicts: PotentialConflict;
+
+  /** Source branch */
+  sourceBranch: string;
+
+  /** Target branch (usually main) */
+  targetBranch: string;
+
+  /** Number of commits ahead */
+  ahead: number;
+
+  /** Number of commits behind */
+  behind: number;
+
+  /** Whether there are uncommitted changes */
+  hasUncommittedChanges: boolean;
+
+  /** Timestamp when preview was generated */
+  generatedAt: number;
+}
+
+// ============================================
 // Cross-Reference Types
 // ============================================
 
