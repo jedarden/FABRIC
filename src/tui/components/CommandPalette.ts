@@ -5,7 +5,11 @@
  */
 
 import blessed from 'blessed';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import { colors } from '../utils/colors.js';
+import { fuzzyMatch, highlightMatches } from '../utils/fuzzyMatch.js';
 
 export interface CommandPaletteOptions {
   /** Parent screen */
@@ -28,6 +32,15 @@ export interface CommandSuggestion {
   /** Action to perform */
   action: string;
 }
+
+interface ScoredSuggestion {
+  suggestion: CommandSuggestion;
+  score: number;
+  labelIndices: number[];
+}
+
+const MAX_RECENT_COMMANDS = 10;
+const RECENT_COMMANDS_FILE = join(homedir(), '.fabric', 'recent-commands.json');
 
 /**
  * Default command suggestions
@@ -58,14 +71,16 @@ export class CommandPalette {
   private onSubmit?: (command: string) => void;
   private onSearch?: (query: string) => void;
   private suggestions: CommandSuggestion[];
-  private filteredSuggestions: CommandSuggestion[];
+  private scoredSuggestions: ScoredSuggestion[];
   private selectedIndex = 0;
+  private recentCommands: string[];
 
   constructor(options: CommandPaletteOptions) {
     this.onSubmit = options.onSubmit;
     this.onSearch = options.onSearch;
     this.suggestions = [...DEFAULT_SUGGESTIONS];
-    this.filteredSuggestions = [...this.suggestions];
+    this.scoredSuggestions = this.suggestions.map(s => ({ suggestion: s, score: 0, labelIndices: [] }));
+    this.recentCommands = CommandPalette.loadRecentCommands();
 
     // Container box
     this.box = blessed.box({
@@ -166,21 +181,84 @@ export class CommandPalette {
   }
 
   private filterSuggestions(query: string): void {
-    const q = query.toLowerCase();
-    this.filteredSuggestions = this.suggestions.filter(s =>
-      s.label.toLowerCase().includes(q) ||
-      s.category.toLowerCase().includes(q) ||
-      s.action.toLowerCase().includes(q)
-    );
+    if (!query) {
+      // No query: show recent commands first, then all suggestions
+      const recentSet = new Set(this.recentCommands);
+      const recentSuggestions: ScoredSuggestion[] = [];
+      const otherSuggestions: ScoredSuggestion[] = [];
+
+      for (const s of this.suggestions) {
+        const entry: ScoredSuggestion = { suggestion: s, score: 0, labelIndices: [] };
+        if (recentSet.has(s.action)) {
+          // Order by recency (index in recentCommands)
+          recentSuggestions.push(entry);
+        } else {
+          otherSuggestions.push(entry);
+        }
+      }
+
+      // Sort recent by recency order
+      recentSuggestions.sort((a, b) =>
+        this.recentCommands.indexOf(a.suggestion.action) -
+        this.recentCommands.indexOf(b.suggestion.action)
+      );
+
+      this.scoredSuggestions = [...recentSuggestions, ...otherSuggestions];
+    } else {
+      // Fuzzy match each suggestion across label, category, and action
+      const scored: ScoredSuggestion[] = [];
+
+      for (const s of this.suggestions) {
+        const labelMatch = fuzzyMatch(s.label, query);
+        const catMatch = fuzzyMatch(s.category, query);
+        const actionMatch = fuzzyMatch(s.action, query);
+
+        // Pick the best match across all fields
+        let bestScore = -Infinity;
+        let labelIndices: number[] = [];
+
+        if (labelMatch) {
+          bestScore = labelMatch.score;
+          labelIndices = labelMatch.matchIndices;
+        }
+        if (catMatch && catMatch.score > bestScore) {
+          bestScore = catMatch.score;
+          labelIndices = []; // Matched on category, no label highlights
+        }
+        if (actionMatch && actionMatch.score > bestScore) {
+          bestScore = actionMatch.score;
+          labelIndices = []; // Matched on action, no label highlights
+        }
+
+        if (bestScore > -Infinity) {
+          // Boost recently-used commands
+          const recentIdx = this.recentCommands.indexOf(s.action);
+          if (recentIdx >= 0) {
+            bestScore += (MAX_RECENT_COMMANDS - recentIdx);
+          }
+          scored.push({ suggestion: s, score: bestScore, labelIndices });
+        }
+      }
+
+      // Sort by score descending
+      scored.sort((a, b) => b.score - a.score);
+      this.scoredSuggestions = scored;
+    }
+
     this.selectedIndex = 0;
     this.renderSuggestions();
   }
 
   private renderSuggestions(): void {
-    const items = this.filteredSuggestions.map((s, i) => {
+    const items = this.scoredSuggestions.map((entry, i) => {
+      const s = entry.suggestion;
+      const label = entry.labelIndices.length > 0
+        ? highlightMatches(s.label, entry.labelIndices, '{yellow-fg}', '{/}')
+        : s.label;
+      const prefix = `${s.category}: `;
       const selected = i === this.selectedIndex ? '{green-fg}' : '';
       const end = i === this.selectedIndex ? '{/}' : '';
-      return `${selected}${s.category}: ${s.label}${end}`;
+      return `${selected}${prefix}${label}${end}`;
     });
 
     this.suggestionBox.setItems(items);
@@ -189,25 +267,57 @@ export class CommandPalette {
   }
 
   private selectNext(): void {
-    if (this.filteredSuggestions.length === 0) return;
-    this.selectedIndex = (this.selectedIndex + 1) % this.filteredSuggestions.length;
+    if (this.scoredSuggestions.length === 0) return;
+    this.selectedIndex = (this.selectedIndex + 1) % this.scoredSuggestions.length;
     this.renderSuggestions();
   }
 
   private selectPrevious(): void {
-    if (this.filteredSuggestions.length === 0) return;
+    if (this.scoredSuggestions.length === 0) return;
     this.selectedIndex = this.selectedIndex === 0
-      ? this.filteredSuggestions.length - 1
+      ? this.scoredSuggestions.length - 1
       : this.selectedIndex - 1;
     this.renderSuggestions();
   }
 
   private executeSelected(): void {
-    const selected = this.filteredSuggestions[this.selectedIndex];
-    if (selected && this.onSubmit) {
-      this.onSubmit(selected.action);
+    const entry = this.scoredSuggestions[this.selectedIndex];
+    if (entry && this.onSubmit) {
+      this.addRecentCommand(entry.suggestion.action);
+      this.onSubmit(entry.suggestion.action);
     }
     this.hide();
+  }
+
+  private addRecentCommand(action: string): void {
+    this.recentCommands = [action, ...this.recentCommands.filter(c => c !== action)]
+      .slice(0, MAX_RECENT_COMMANDS);
+    CommandPalette.saveRecentCommands(this.recentCommands);
+  }
+
+  private static loadRecentCommands(): string[] {
+    try {
+      if (existsSync(RECENT_COMMANDS_FILE)) {
+        const data = readFileSync(RECENT_COMMANDS_FILE, 'utf-8');
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed)) return parsed.slice(0, MAX_RECENT_COMMANDS);
+      }
+    } catch {
+      // Ignore read errors
+    }
+    return [];
+  }
+
+  private static saveRecentCommands(commands: string[]): void {
+    try {
+      const dir = join(homedir(), '.fabric');
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+      writeFileSync(RECENT_COMMANDS_FILE, JSON.stringify(commands));
+    } catch {
+      // Ignore write errors
+    }
   }
 
   /**
@@ -216,9 +326,8 @@ export class CommandPalette {
   show(): void {
     this.box.show();
     this.input.setValue('');
-    this.filteredSuggestions = [...this.suggestions];
+    this.filterSuggestions('');
     this.selectedIndex = 0;
-    this.renderSuggestions();
     this.input.focus();
     this.box.screen.render();
   }
