@@ -13,6 +13,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
+import { parseEventObject } from '../parser.js';
+
+/** Maximum payload size for POST requests (64KB) */
+const MAX_PAYLOAD_SIZE = 64 * 1024;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -49,6 +53,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
     app = express();
     httpServer = createServer(app);
     wsServer = new WebSocketServer({ server: httpServer });
+
+    // JSON body parser for POST requests
+    app.use(express.json({ limit: MAX_PAYLOAD_SIZE }));
 
     // WebSocket connection handling
     wsServer.on('connection', (ws: WebSocket) => {
@@ -99,6 +106,48 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
       const events = store.query(filter).slice(-limit);
       res.json(events);
+    });
+
+    // POST endpoint to ingest NEEDLE telemetry events
+    app.post('/api/events', (req: Request, res: Response) => {
+      try {
+        const eventObj = req.body;
+
+        // Validate request body exists
+        if (!eventObj || typeof eventObj !== 'object') {
+          res.status(400).json({ error: 'Invalid request body', message: 'Expected JSON object' });
+          return;
+        }
+
+        // Validate required fields for NEEDLE format
+        if (!eventObj.ts) {
+          res.status(400).json({ error: 'Missing required field', message: 'Field "ts" is required' });
+          return;
+        }
+        if (!eventObj.event) {
+          res.status(400).json({ error: 'Missing required field', message: 'Field "event" is required' });
+          return;
+        }
+
+        // Parse the event object
+        const logEvent = parseEventObject(eventObj);
+        if (!logEvent) {
+          res.status(400).json({ error: 'Invalid event format', message: 'Failed to parse event object' });
+          return;
+        }
+
+        // Store the event
+        store.add(logEvent);
+
+        // Broadcast to all connected WebSocket clients
+        broadcast(logEvent);
+
+        // Return success
+        res.status(201).json({ success: true, event: logEvent });
+      } catch (err) {
+        console.error('Error processing POST /api/events:', err);
+        res.status(500).json({ error: 'Internal server error', message: err instanceof Error ? err.message : 'Unknown error' });
+      }
     });
 
     // Get worker details

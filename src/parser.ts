@@ -220,6 +220,64 @@ function inferLogLevel(eventName: string): LogLevel {
 }
 
 /**
+ * Parse a JSON object directly into a LogEvent
+ *
+ * Used for HTTP-ingested events that are already parsed as JSON objects.
+ *
+ * @param obj - Parsed JSON object
+ * @returns Parsed LogEvent or null if invalid
+ */
+export function parseEventObject(obj: unknown): LogEvent | null {
+  if (typeof obj !== 'object' || obj === null) {
+    return null;
+  }
+
+  // Check for NEEDLE format
+  if (isNeedleFormat(obj)) {
+    return parseNeedleFormat(obj);
+  }
+
+  // Try as legacy format - validate required fields
+  const parsed = obj as Record<string, unknown>;
+  if (typeof parsed.ts !== 'number') {
+    return null;
+  }
+  if (typeof parsed.worker !== 'string') {
+    return null;
+  }
+  if (!isValidLogLevel(parsed.level)) {
+    return null;
+  }
+  if (typeof parsed.msg !== 'string') {
+    return null;
+  }
+
+  // Construct LogEvent with validated fields
+  const event: LogEvent = {
+    ts: parsed.ts,
+    worker: parsed.worker,
+    level: parsed.level,
+    msg: parsed.msg,
+  };
+
+  // Copy optional fields if present
+  if (typeof parsed.tool === 'string') event.tool = parsed.tool;
+  if (typeof parsed.path === 'string') event.path = parsed.path;
+  if (typeof parsed.bead === 'string') event.bead = parsed.bead;
+  if (typeof parsed.duration_ms === 'number') event.duration_ms = parsed.duration_ms;
+  if (typeof parsed.error === 'string') event.error = parsed.error;
+
+  // Copy any additional fields
+  for (const key of Object.keys(parsed)) {
+    if (!isStandardField(key) && !(key in event)) {
+      event[key] = parsed[key];
+    }
+  }
+
+  return event;
+}
+
+/**
  * Parse multiple log lines
  *
  * @param content - Multi-line string of log entries
