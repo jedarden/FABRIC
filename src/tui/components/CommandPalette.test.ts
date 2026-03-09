@@ -59,7 +59,7 @@ function createMockScreen() {
 describe('CommandPalette', () => {
   let palette: CommandPalette;
   let mockScreen: blessed.Widgets.Screen;
-  let onSubmit: ReturnType<typeof vi.fn>;
+  let onSubmit: (command: string) => void;
   let mockInput: any;
   let mockList: any;
   let mockBox: any;
@@ -69,7 +69,7 @@ describe('CommandPalette', () => {
     (existsSync as any).mockReturnValue(false);
 
     mockScreen = createMockScreen();
-    onSubmit = vi.fn();
+    onSubmit = vi.fn() as (command: string) => void;
 
     // Get mock instances
     const blessedMock = blessed as any;
