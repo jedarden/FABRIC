@@ -59,25 +59,32 @@ export function createWebServer(options: WebServerOptions): WebServer {
     httpServer = createServer(app);
     wsServer = new WebSocketServer({ server: httpServer });
 
- createAuthMiddleware(authToken: string | undefined) {
-  /**
-   * Creates Express middleware for Bearer token authentication
-   * @param authToken - The optional auth token for POST endpoints
-   */
-  return function createAuthMiddleware(authToken?: string) {
-  if (authToken) {
-    const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/);
-    return token !== authToken;
-  }
-  return function(req: Request, res: Response, next) {
-    // If no auth header) {
-      res.status(401).json({ error: 'Missing authorization', message: 'Authorization header required' });
-      return;
-    }
+    // Parse JSON bodies
+    app.use(express.json({ limit: MAX_PAYLOAD_SIZE.toString() }));
 
-    next();
-  }
-};
+    // Create auth middleware for POST endpoints if token is configured
+    const authMiddleware = (req: Request, res: Response, next: () => void) => {
+      if (!authToken) {
+        // No auth configured, allow all requests
+        next();
+        return;
+      }
+
+      const authHeader = req.headers.authorization;
+      if (!authHeader) {
+        res.status(401).json({ error: 'Missing authorization', message: 'Authorization header required' });
+        return;
+      }
+
+      const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/);
+      if (!tokenMatch || tokenMatch[1] !== authToken) {
+        res.status(403).json({ error: 'Forbidden', message: 'Invalid or expired token' });
+        return;
+      }
+
+      next();
+    };
+
     wsServer.on('connection', (ws: WebSocket) => {
       clients.add(ws);
       console.log(`WebSocket client connected (${clients.size} total)`);
@@ -129,7 +136,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // POST endpoint to ingest NEEDLE telemetry events
-    app.post('/api/events', (req: Request, res: Response) => {
+    app.post('/api/events', authMiddleware, (req: Request, res: Response) => {
       try {
         const eventObj = req.body;
 
@@ -171,7 +178,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // POST endpoint to ingest batched NEEDLE telemetry events
-    app.post('/api/events/batch', (req: Request, res: Response) => {
+    app.post('/api/events/batch', authMiddleware, (req: Request, res: Response) => {
       try {
         const eventsArray = req.body;
 
