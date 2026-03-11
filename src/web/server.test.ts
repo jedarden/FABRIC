@@ -883,4 +883,278 @@ describe('Web Server API Endpoints', () => {
       expect(response.status).toBe(200);
     });
   });
+
+  describe('POST /api/events', () => {
+    it('should accept a valid NEEDLE format event', async () => {
+      const needleEvent = {
+        ts: '2026-03-09T12:33:59.517Z',
+        event: 'bead.claimed',
+        level: 'info',
+        session: 'needle-claude-test',
+        worker: 'claude-code-test',
+        data: { bead_id: 'bd-123', workspace: '/home/coder/NEEDLE' }
+      };
+
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(needleEvent)
+      });
+
+      expect(response.status).toBe(201);
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.event).toBeDefined();
+      expect(data.event.msg).toBe('bead.claimed');
+    });
+
+    it('should store the event in the store', async () => {
+      const needleEvent = {
+        ts: '2026-03-09T12:34:00.000Z',
+        event: 'worker.started',
+        worker: 'test-worker-post'
+      };
+
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(needleEvent)
+      });
+
+      expect(response.status).toBe(201);
+
+      // Verify the event is in the store
+      const eventsResponse = await fetchApi('/api/events');
+      const events = await eventsResponse.json() as any[];
+      expect(events.some(e => e.worker === 'test-worker-post')).toBe(true);
+    });
+
+    it('should broadcast the event to WebSocket clients', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      // Set up listener for event message
+      const messagePromise = new Promise<any>((resolve) => {
+        ws.on('message', (data: Buffer) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'event' && msg.data.msg === 'test.broadcast') {
+            resolve(msg);
+          }
+        });
+      });
+
+      // Wait for connection
+      await new Promise<void>((resolve) => {
+        ws.on('open', resolve);
+      });
+
+      // Small delay to ensure connection is ready
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Post an event
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ts: new Date().toISOString(),
+          event: 'test.broadcast',
+          worker: 'ws-test-worker'
+        })
+      });
+
+      expect(response.status).toBe(201);
+
+      // Wait for WebSocket broadcast
+      const message = await messagePromise;
+      expect(message.type).toBe('event');
+      expect(message.data.msg).toBe('test.broadcast');
+
+      ws.close();
+    });
+
+    it('should return 400 for missing ts field', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'test.event',
+          worker: 'test-worker'
+        })
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json() as any;
+      expect(data.error).toContain('Missing required field');
+      expect(data.message).toContain('ts');
+    });
+
+    it('should return 400 for missing event field', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ts: '2026-03-09T12:34:00.000Z',
+          worker: 'test-worker'
+        })
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json() as any;
+      expect(data.error).toContain('Missing required field');
+      expect(data.message).toContain('event');
+    });
+
+    it('should return 400 for invalid JSON body', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'not valid json'
+      });
+
+      // Express.json() will reject malformed JSON
+      expect(response.status).toBe(400);
+    });
+
+    it('should return 400 for array body (arrays fail field validation)', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(['array', 'not', 'object'])
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json() as any;
+      // Arrays pass the object check but fail field validation
+      expect(data.error).toContain('Missing required field');
+    });
+
+    it('should accept NEEDLE format with string worker', async () => {
+      // NEEDLE format can have worker as a string like "runner-provider-model-id"
+      const needleEvent = {
+        ts: '2026-03-09T12:36:00.000Z',
+        event: 'worker.ping',
+        worker: 'claude-code-glm-5-alpha'
+      };
+
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(needleEvent)
+      });
+
+      expect(response.status).toBe(201);
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.event.worker).toBe('claude-code-glm-5-alpha');
+    });
+  });
+
+  describe('POST /api/events/batch', () => {
+    it('should accept an array of events', async () => {
+      const events = [
+        { ts: '2026-03-09T12:35:00.000Z', event: 'batch.1', worker: 'batch-worker' },
+        { ts: '2026-03-09T12:35:01.000Z', event: 'batch.2', worker: 'batch-worker' },
+        { ts: '2026-03-09T12:35:02.000Z', event: 'batch.3', worker: 'batch-worker' }
+      ];
+
+      const response = await fetchApi('/api/events/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(events)
+      });
+
+      expect(response.status).toBe(201);
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.ingested).toBe(3);
+      expect(data.total).toBe(3);
+    });
+
+    it('should return 400 for non-array body', async () => {
+      const response = await fetchApi('/api/events/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ts: '2026-03-09T12:35:00.000Z', event: 'test' })
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json() as any;
+      expect(data.error).toContain('Invalid request body');
+      expect(data.message).toContain('array');
+    });
+
+    it('should return 400 for empty array', async () => {
+      const response = await fetchApi('/api/events/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([])
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json() as any;
+      expect(data.error).toContain('Empty batch');
+    });
+
+    it('should return errors for invalid events in batch', async () => {
+      const events = [
+        { ts: '2026-03-09T12:35:00.000Z', event: 'valid.event', worker: 'worker' },
+        { ts: '2026-03-09T12:35:01.000Z' }, // missing event
+        { event: 'missing.ts', worker: 'worker' }, // missing ts
+        { ts: '2026-03-09T12:35:02.000Z', event: 'another.valid', worker: 'worker' }
+      ];
+
+      const response = await fetchApi('/api/events/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(events)
+      });
+
+      expect(response.status).toBe(201);
+      const data = await response.json() as any;
+      expect(data.ingested).toBe(2);
+      expect(data.total).toBe(4);
+      expect(data.errors).toBeDefined();
+      expect(data.errors.length).toBe(2);
+    });
+
+    it('should broadcast all valid events to WebSocket clients', async () => {
+      const WebSocket = (await import('ws')).default;
+      const ws = new WebSocket(`ws://localhost:${port}`);
+
+      const messages: any[] = [];
+      const messagePromise = new Promise<void>((resolve) => {
+        let count = 0;
+        ws.on('message', (data: Buffer) => {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'event' && msg.data.msg?.startsWith('batch.broadcast')) {
+            messages.push(msg);
+            count++;
+            if (count === 2) resolve();
+          }
+        });
+      });
+
+      await new Promise<void>((resolve) => {
+        ws.on('open', resolve);
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const events = [
+        { ts: new Date().toISOString(), event: 'batch.broadcast.1', worker: 'batch-worker' },
+        { ts: new Date().toISOString(), event: 'batch.broadcast.2', worker: 'batch-worker' }
+      ];
+
+      await fetchApi('/api/events/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(events)
+      });
+
+      await messagePromise;
+      expect(messages.length).toBe(2);
+
+      ws.close();
+    });
+  });
 });
