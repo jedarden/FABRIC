@@ -27,6 +27,8 @@ export interface WebServerOptions {
   port: number;
   logPath: string;
   store: InMemoryEventStore;
+  /** Optional auth token for POST endpoints. If provided, requires Bearer token in Authorization header */
+  authToken?: string;
 }
 
 export interface WebServer extends EventEmitter {
@@ -41,7 +43,7 @@ export interface WebServer extends EventEmitter {
  * Create the FABRIC web server
  */
 export function createWebServer(options: WebServerOptions): WebServer {
-  const { port, logPath, store } = options;
+  const { port, logPath, store, authToken } = options;
   const emitter = new EventEmitter();
 
   let app: Express;
@@ -57,10 +59,25 @@ export function createWebServer(options: WebServerOptions): WebServer {
     httpServer = createServer(app);
     wsServer = new WebSocketServer({ server: httpServer });
 
-    // JSON body parser for POST requests
-    app.use(express.json({ limit: MAX_PAYLOAD_SIZE }));
+ createAuthMiddleware(authToken: string | undefined) {
+  /**
+   * Creates Express middleware for Bearer token authentication
+   * @param authToken - The optional auth token for POST endpoints
+   */
+  return function createAuthMiddleware(authToken?: string) {
+  if (authToken) {
+    const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/);
+    return token !== authToken;
+  }
+  return function(req: Request, res: Response, next) {
+    // If no auth header) {
+      res.status(401).json({ error: 'Missing authorization', message: 'Authorization header required' });
+      return;
+    }
 
-    // WebSocket connection handling
+    next();
+  }
+};
     wsServer.on('connection', (ws: WebSocket) => {
       clients.add(ws);
       console.log(`WebSocket client connected (${clients.size} total)`);

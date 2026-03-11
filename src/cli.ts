@@ -78,9 +78,11 @@ program
   .description('Launch web dashboard')
   .option('-p, --port <number>', 'Port to listen on', '3000')
   .option('-f, --file <path>', 'Log file to tail', '~/.needle/logs/workers.log')
+  .option('-a, --auth-token <token>', 'Auth token for POST endpoints (or use FABRIC_AUTH_TOKEN env var)')
   .action(async (options) => {
     const filePath = options.file.replace('~', process.env.HOME || '');
     const port = parseInt(options.port, 10) || 3000;
+    const authToken = options.authToken || process.env.FABRIC_AUTH_TOKEN;
 
     try {
       const store = getStore();
@@ -88,6 +90,7 @@ program
         port,
         logPath: filePath,
         store,
+        authToken,
       });
 
       // Setup log tailing
