@@ -262,9 +262,7 @@ export class InMemoryEventStore implements EventStore {
       // Find the completion event for this bead
       const completionEvent = this.events.find(e =>
         e.bead === beadId &&
-        (e.msg.toLowerCase().includes('completed') ||
-         e.msg.toLowerCase().includes('finished') ||
-         e.msg.toLowerCase().includes('closed'))
+        (e.msg === 'bead.completed' || e.msg === 'bead.failed')
       );
 
       if (completionEvent) {
