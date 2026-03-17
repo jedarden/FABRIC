@@ -1,0 +1,17 @@
+[Unit]
+Description=FABRIC Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/coding/FABRIC
+ExecStart=/usr/bin/node dist/cli.js web --port 3000
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fabric-web
+
+[Install]
+WantedBy=default.target
