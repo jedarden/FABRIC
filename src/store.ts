@@ -411,18 +411,30 @@ export class InMemoryEventStore implements EventStore {
       }
     }
 
-    // Update status based on event
+    // Update status based on NEEDLE event type (event.msg holds the event type string)
+    const needleEvent = event.msg;
     if (event.level === 'error') {
       worker.status = 'error';
-    } else if (event.msg.includes('completed') || event.msg.includes('complete')) {
+    } else if (
+      needleEvent === 'bead.completed' ||
+      needleEvent === 'worker.idle' ||
+      needleEvent === 'worker.stopped' ||
+      needleEvent === 'worker.draining'
+    ) {
       worker.status = 'idle';
-      if (event.bead) {
+      if (needleEvent === 'bead.completed' && event.bead) {
         worker.beadsCompleted++;
       }
-      // Clear active files and bead on completion
-      worker.activeFiles = [];
-      worker.activeBead = undefined;
-    } else if (event.msg.includes('Starting') || event.msg.includes('starting')) {
+      if (needleEvent === 'bead.completed') {
+        worker.activeFiles = [];
+        worker.activeBead = undefined;
+      }
+    } else if (
+      needleEvent === 'worker.started' ||
+      needleEvent === 'bead.claimed' ||
+      needleEvent === 'bead.agent_started' ||
+      needleEvent === 'execution.started'
+    ) {
       worker.status = 'active';
     }
 
@@ -455,15 +467,9 @@ export class InMemoryEventStore implements EventStore {
       this.taskStartTimes.set(beadId, event.ts);
     }
 
-    // Check for task completion
-    const msg = event.msg?.toLowerCase() || '';
-    if (
-      msg.includes('completed') ||
-      msg.includes('finished') ||
-      msg.includes('done') ||
-      msg.includes('success') ||
-      msg.includes('closed')
-    ) {
+    // Check for task completion — match on NEEDLE event type exactly
+    const msg = event.msg || '';
+    if (msg === 'bead.completed' || msg === 'bead.failed') {
       const startTime = this.taskStartTimes.get(beadId);
       if (startTime) {
         const durationMs = event.ts - startTime;

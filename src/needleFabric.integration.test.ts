@@ -33,7 +33,7 @@ describe('NEEDLE-FABRIC Integration', () => {
 
       expect(result).not.toBeNull();
       expect(result?.ts).toBe(new Date('2026-03-04T16:17:34.008Z').getTime());
-      expect(result?.worker).toBe('claude-test12');
+      expect(result?.worker).toBe('claude-anthropic-sonnet-test12');
       expect(result?.level).toBe('info');
       expect(result?.msg).toBe('worker.started');
       expect(result?.session).toBe('needle-claude-anthropic-sonnet-test12');
@@ -153,9 +153,11 @@ describe('NEEDLE-FABRIC Integration', () => {
     });
 
     it('should parse bead.claim_retry event with warn level', () => {
+      // NEEDLE emits bead.claim_retry with explicit level: "warn"
       const log = JSON.stringify({
         ts: '2026-03-04T19:37:22.192Z',
         event: 'bead.claim_retry',
+        level: 'warn',
         session: 'forge-glm-test',
         worker: {
           runner: 'claude',
@@ -313,19 +315,15 @@ describe('NEEDLE-FABRIC Integration', () => {
   });
 
   describe('error events', () => {
-    it('should infer error level for events with "error" in name', () => {
+    it('should parse error.* events with error level (explicit in NEEDLE output)', () => {
+      // NEEDLE emits error.* events with explicit level: "error"
       const log = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
-        event: 'bead.error',
+        event: 'error.agent_crash',
+        level: 'error',
         session: 'test-session',
-        worker: {
-          runner: 'claude',
-          provider: 'code',
-          model: 'sonnet',
-          identifier: 'test',
-        },
+        worker: 'claude-code-sonnet-test',
         data: {
-          bead_id: 'bd-abc',
           error: 'Failed to process bead',
         },
       });
@@ -334,14 +332,16 @@ describe('NEEDLE-FABRIC Integration', () => {
 
       expect(result).not.toBeNull();
       expect(result?.level).toBe('error');
-      expect(result?.msg).toBe('bead.error');
+      expect(result?.msg).toBe('error.agent_crash');
       expect(result?.error).toBe('Failed to process bead');
     });
 
-    it('should infer error level for events with "fail" in name', () => {
+    it('should parse bead.failed with error level (explicit in NEEDLE output)', () => {
+      // NEEDLE emits bead.failed with explicit level: "error"
       const log = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
         event: 'bead.failed',
+        level: 'error',
         session: 'test-session',
         worker: 'claude-test',
         data: {
@@ -356,20 +356,22 @@ describe('NEEDLE-FABRIC Integration', () => {
       expect(result?.msg).toBe('bead.failed');
     });
 
-    it('should infer error level for queue.exhausted events', () => {
+    it('should parse bead.claim_exhausted with error level (explicit in NEEDLE output)', () => {
+      // NEEDLE emits bead.claim_exhausted with explicit level: "error"
       const log = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
-        event: 'queue.exhausted',
+        event: 'bead.claim_exhausted',
+        level: 'error',
         session: 'test-session',
         worker: 'claude-test',
-        data: {},
+        data: { max_retries: 5 },
       });
 
       const result = parseLogLine(log);
 
       expect(result).not.toBeNull();
       expect(result?.level).toBe('error');
-      expect(result?.msg).toBe('queue.exhausted');
+      expect(result?.msg).toBe('bead.claim_exhausted');
     });
   });
 
@@ -388,7 +390,7 @@ describe('NEEDLE-FABRIC Integration', () => {
 
       // Verify first event
       expect(results[0].msg).toBe('worker.started');
-      expect(results[0].worker).toBe('claude-w1');
+      expect(results[0].worker).toBe('claude-code-sonnet-w1');
       expect(results[0].pid).toBe(123);
 
       // Verify second event
@@ -405,7 +407,7 @@ describe('NEEDLE-FABRIC Integration', () => {
       expect(results[3].consecutive_empty).toBe(1);
 
       // All events should have same worker
-      expect(results.every((r) => r.worker === 'claude-w1')).toBe(true);
+      expect(results.every((r) => r.worker === 'claude-code-sonnet-w1')).toBe(true);
 
       // All events should have same session
       expect(results.every((r) => r.session === 'test')).toBe(true);
@@ -573,7 +575,7 @@ describe('NEEDLE-FABRIC Integration', () => {
       expect(events).toHaveLength(7);
 
       // Verify all events have correct worker
-      expect(events.every((e) => e.worker === 'claude-test')).toBe(true);
+      expect(events.every((e) => e.worker === 'claude-code-glm-4.7-test')).toBe(true);
 
       // Verify all events have correct session
       expect(events.every((e) => e.session === 'forge-glm-test')).toBe(true);

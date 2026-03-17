@@ -8,6 +8,92 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export type WorkerStatus = 'active' | 'idle' | 'error';
 
+/**
+ * NEEDLE worker status values as emitted in heartbeat files and worker.* events.
+ * FABRIC maps these to the simpler WorkerStatus for display.
+ */
+export type NeedleWorkerStatus = 'idle' | 'executing' | 'draining' | 'starting';
+
+/**
+ * All event types emitted by NEEDLE's telemetry pipeline.
+ * Format: category.action — matches NEEDLE's _needle_telemetry_emit event_type argument.
+ */
+export type NeedleEventType =
+  // Worker lifecycle
+  | 'worker.started'
+  | 'worker.idle'
+  | 'worker.stopped'
+  | 'worker.draining'
+  // Bead lifecycle
+  | 'bead.claimed'
+  | 'bead.prompt_built'
+  | 'bead.agent_started'
+  | 'bead.agent_completed'
+  | 'bead.completed'
+  | 'bead.failed'
+  | 'bead.released'
+  | 'bead.claim_retry'
+  | 'bead.claim_exhausted'
+  // Bead mitosis
+  | 'bead.mitosis.check'
+  | 'bead.mitosis.started'
+  | 'bead.mitosis.child_created'
+  | 'bead.mitosis.complete'
+  | 'bead.mitosis.failed'
+  | 'bead.mitosis.skipped'
+  // Strand lifecycle
+  | 'strand.started'
+  | 'strand.completed'
+  | 'strand.fallthrough'
+  | 'strand.skipped'
+  // Hook lifecycle
+  | 'hook.started'
+  | 'hook.completed'
+  | 'hook.failed'
+  // Heartbeat
+  | 'heartbeat.emitted'
+  | 'heartbeat.stuck_detected'
+  | 'heartbeat.recovery'
+  // Mend (maintenance)
+  | 'mend.orphan_released'
+  | 'mend.heartbeat_cleaned'
+  | 'mend.logs_pruned'
+  | 'mend.completed'
+  // Unravel (alternatives)
+  | 'unravel.alternatives_created'
+  | 'unravel.alternative_created'
+  | 'unravel.analysis_started'
+  | 'unravel.analysis_completed'
+  // Weave (documentation gaps)
+  | 'weave.bead_created'
+  | 'weave.analysis_started'
+  | 'weave.analysis_completed'
+  // Pulse (health monitoring)
+  | 'pulse.bead_created'
+  | 'pulse.scan_started'
+  | 'pulse.scan_completed'
+  | 'pulse.issue_detected'
+  | 'pulse.detector_started'
+  | 'pulse.detector_completed'
+  // Error events
+  | 'error.claim_failed'
+  | 'error.agent_crash'
+  | 'error.timeout'
+  | 'error.release_failed'
+  // Effort & budget
+  | 'effort.recorded'
+  | 'budget.warning'
+  | 'budget.exceeded'
+  | 'budget.per_bead_exceeded'
+  // File locks
+  | 'file.checkout'
+  | 'file.conflict'
+  | 'file.release'
+  | 'file.stale'
+  | 'lock.priority_bump'
+  | 'lock.priority_bump_received'
+  | 'lock.expired';
+
 // ============================================
 // Conversation Event Types
 // ============================================
@@ -257,6 +343,15 @@ export interface LogEvent {
 
   /** Optional: Error details */
   error?: string;
+
+  /** NEEDLE session identifier (e.g. 'needle-claude-anthropic-sonnet-alpha') */
+  session?: string;
+
+  /** AI provider extracted from NEEDLE worker string (e.g. 'anthropic', 'openai') */
+  provider?: string;
+
+  /** AI model identifier extracted from NEEDLE worker string (e.g. 'sonnet', 'gpt-4o') */
+  model?: string;
 
   /** Any additional fields */
   [key: string]: unknown;

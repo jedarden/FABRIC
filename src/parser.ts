@@ -85,19 +85,28 @@ export function parseLogLine(line: string): LogEvent | null {
 }
 
 /**
- * NEEDLE log format interface
+ * NEEDLE worker object — legacy format only, present in some tests.
+ * Production NEEDLE emits worker as a flat string: runner-provider-model-identifier.
+ */
+interface NeedleWorkerObject {
+  runner: string;     // e.g., "claude"
+  provider: string;   // e.g., "anthropic", "openai"
+  model: string;      // e.g., "sonnet", "gpt-4o"
+  identifier: string; // e.g., "alpha", "bravo"
+}
+
+/**
+ * NEEDLE log format interface.
+ * worker is a flat string in current NEEDLE output (runner-provider-model-identifier).
+ * The object form is retained for backward compat with legacy test fixtures.
  */
 interface NeedleLogEntry {
-  ts: string;                    // ISO 8601 timestamp
-  event: string;                 // Event type (e.g., "worker.started", "bead.claimed")
-  session: string;               // Session identifier
-  worker: {
-    runner: string;              // e.g., "claude"
-    provider: string;            // e.g., "code", "anthropic"
-    model: string;               // e.g., "glm-4.7", "sonnet"
-    identifier: string;          // e.g., "test", "align"
-  };
-  data: Record<string, unknown>; // Event-specific payload
+  ts: string;                              // ISO 8601 timestamp
+  event: string;                           // Event type (e.g., "worker.started", "bead.claimed")
+  level?: string;                          // Log level — always present in current NEEDLE output
+  session: string;                         // Session identifier
+  worker: string | NeedleWorkerObject;     // Flat string in production; object in legacy fixtures
+  data: Record<string, unknown>;           // Event-specific payload
 }
 
 /**
@@ -125,16 +134,16 @@ function parseNeedleFormat(entry: NeedleLogEntry): LogEvent {
   // Convert ISO timestamp to Unix milliseconds
   const ts = new Date(entry.ts).getTime();
 
-  // Handle worker as string (aligned format) or object (legacy)
+  // Handle worker as string (current NEEDLE format) or object (legacy test fixtures)
   const worker = typeof entry.worker === 'string'
     ? entry.worker
-    : `${entry.worker.runner}-${entry.worker.identifier}`;
+    : `${entry.worker.runner}-${entry.worker.provider}-${entry.worker.model}-${entry.worker.identifier}`;
 
-  // Use event as message
+  // Use event type as message
   const msg = entry.event;
 
-  // Infer log level from event name
-  const level = inferLogLevel(entry.event);
+  // Use the level NEEDLE provides; fall back to inference only for legacy entries without it
+  const level = isValidLogLevel(entry.level) ? entry.level as LogLevel : inferLogLevel(entry.event);
 
   // Build LogEvent
   const event: LogEvent = {
@@ -172,10 +181,12 @@ function parseNeedleFormat(entry: NeedleLogEntry): LogEvent {
     event.path = data.path;
   }
 
-  // Copy session and other NEEDLE-specific fields
+  // Copy session and, when available from the object form, provider/model
   event.session = entry.session;
-  event.provider = entry.worker.provider;
-  event.model = entry.worker.model;
+  if (typeof entry.worker !== 'string') {
+    event.provider = entry.worker.provider;
+    event.model = entry.worker.model;
+  }
 
   // Copy remaining data fields (excluding already extracted ones)
   const extractedFields = ['bead_id', 'duration_ms', 'error', 'tool', 'path'];
@@ -189,33 +200,22 @@ function parseNeedleFormat(entry: NeedleLogEntry): LogEvent {
 }
 
 /**
- * Infer log level from event name
+ * Infer log level from event name.
  *
- * Maps NEEDLE event types to log levels:
- * - error: events containing "error", "fail", "exhausted"
- * - warn: events containing "retry", "warn"
- * - debug: events containing "debug"
- * - info: everything else
+ * Mirrors NEEDLE's _needle_telemetry_infer_level rules exactly:
+ *   error.*         → error
+ *   *.failed        → warn
+ *   *.retry         → warn
+ *   debug.*         → debug
+ *   everything else → info
+ *
+ * This is only used as a fallback when the event's level field is absent
+ * (legacy log entries). Current NEEDLE always includes level explicitly.
  */
 function inferLogLevel(eventName: string): LogLevel {
-  const lower = eventName.toLowerCase();
-
-  // Error-level events
-  if (lower.includes('error') || lower.includes('fail') || lower.includes('exhausted')) {
-    return 'error';
-  }
-
-  // Warn-level events
-  if (lower.includes('retry') || lower.includes('warn')) {
-    return 'warn';
-  }
-
-  // Debug-level events
-  if (lower.includes('debug')) {
-    return 'debug';
-  }
-
-  // Default to info
+  if (eventName.startsWith('error.')) return 'error';
+  if (eventName.endsWith('.failed') || eventName.endsWith('.retry')) return 'warn';
+  if (eventName.startsWith('debug.')) return 'debug';
   return 'info';
 }
 

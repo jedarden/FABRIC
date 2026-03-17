@@ -168,33 +168,33 @@ describe('InMemoryEventStore', () => {
       expect(worker?.status).toBe('error');
     });
 
-    it('should set status to idle on completed message', () => {
-      store.add(createEvent({ worker: 'w-test', msg: 'Task completed successfully' }));
+    it('should set status to idle on bead.completed event', () => {
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.completed' }));
 
       const worker = store.getWorker('w-test');
       expect(worker?.status).toBe('idle');
     });
 
-    it('should set status to idle on complete message', () => {
-      store.add(createEvent({ worker: 'w-test', msg: 'Task complete' }));
+    it('should set status to idle on worker.idle event', () => {
+      store.add(createEvent({ worker: 'w-test', msg: 'worker.idle' }));
 
       const worker = store.getWorker('w-test');
       expect(worker?.status).toBe('idle');
     });
 
-    it('should set status to active on Starting message', () => {
+    it('should set status to active on worker.started event', () => {
       // First make it idle
-      store.add(createEvent({ worker: 'w-test', msg: 'Task completed' }));
-      // Then starting
-      store.add(createEvent({ worker: 'w-test', msg: 'Starting new task' }));
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.completed' }));
+      // Then active
+      store.add(createEvent({ worker: 'w-test', msg: 'worker.started' }));
 
       const worker = store.getWorker('w-test');
       expect(worker?.status).toBe('active');
     });
 
-    it('should increment beadsCompleted when task completes with bead', () => {
-      store.add(createEvent({ worker: 'w-test', msg: 'Task completed', bead: 'bd-1' }));
-      store.add(createEvent({ worker: 'w-test', msg: 'Task completed', bead: 'bd-2' }));
+    it('should increment beadsCompleted when bead.completed event has bead', () => {
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.completed', bead: 'bd-1' }));
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.completed', bead: 'bd-2' }));
 
       const worker = store.getWorker('w-test');
       expect(worker?.beadsCompleted).toBe(2);

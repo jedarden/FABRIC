@@ -126,7 +126,7 @@ describe('parseLogLine', () => {
 
       expect(result).not.toBeNull();
       expect(result?.ts).toBe(1772641054008); // Unix ms from '2026-03-04T16:17:34.008Z'
-      expect(result?.worker).toBe('claude-test');
+      expect(result?.worker).toBe('claude-code-glm-4.7-test');
       expect(result?.msg).toBe('worker.started');
       expect(result?.level).toBe('info');
       expect(result?.session).toBe('forge-glm-test');
@@ -184,10 +184,11 @@ describe('parseLogLine', () => {
     });
 
     it('should infer error level from event name', () => {
+      // NEEDLE rule: events with error.* prefix -> error
       const errorEvents = [
-        'bead.error',
-        'worker.failed',
-        'bead.claim_exhausted',
+        'error.claim_failed',
+        'error.agent_crash',
+        'error.timeout',
       ];
 
       for (const eventName of errorEvents) {
@@ -210,7 +211,8 @@ describe('parseLogLine', () => {
     });
 
     it('should infer warn level from event name', () => {
-      const warnEvents = ['bead.claim_retry', 'worker.warning'];
+      // NEEDLE rule: events with *.failed or *.retry suffix -> warn
+      const warnEvents = ['bead.failed', 'hook.failed'];
 
       for (const eventName of warnEvents) {
         const line = JSON.stringify({
@@ -232,9 +234,10 @@ describe('parseLogLine', () => {
     });
 
     it('should infer debug level from event name', () => {
+      // NEEDLE rule: events with debug.* prefix -> debug
       const line = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
-        event: 'worker.debug',
+        event: 'debug.probe',
         session: 'test',
         worker: {
           runner: 'claude',
@@ -304,7 +307,7 @@ describe('parseLogLine', () => {
       expect(result?.workspace).toBe('/home/coder/test');
     });
 
-    it('should flatten worker to runner-identifier format', () => {
+    it('should flatten worker to runner-provider-model-identifier format', () => {
       const line = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
         event: 'worker.started',
@@ -320,7 +323,7 @@ describe('parseLogLine', () => {
 
       const result = parseLogLine(line);
 
-      expect(result?.worker).toBe('needle-prod-worker-1');
+      expect(result?.worker).toBe('needle-anthropic-opus-prod-worker-1');
     });
   });
 
@@ -1818,7 +1821,7 @@ describe('parseLogLine - NEEDLE format', () => {
 
       expect(result).not.toBeNull();
       expect(result?.ts).toBe(new Date('2026-03-04T16:17:34.008Z').getTime());
-      expect(result?.worker).toBe('claude-test12');
+      expect(result?.worker).toBe('claude-anthropic-sonnet-test12');
       expect(result?.level).toBe('info');
       expect(result?.msg).toBe('worker.started');
       expect(result?.session).toBe('needle-claude-anthropic-sonnet-test12');
@@ -1849,7 +1852,7 @@ describe('parseLogLine - NEEDLE format', () => {
       const result = parseLogLine(line);
 
       expect(result).not.toBeNull();
-      expect(result?.worker).toBe('claude-test');
+      expect(result?.worker).toBe('claude-code-glm-4.7-test');
       expect(result?.provider).toBe('code');
       expect(result?.model).toBe('glm-4.7');
       expect(result?.session).toBe('forge-glm-test');
@@ -1886,7 +1889,7 @@ describe('parseLogLine - NEEDLE format', () => {
       expect(result?.msg).toBe('bead.claimed');
       expect(result?.level).toBe('info');
       expect(result?.bead).toBe('bd-2ok0');
-      expect(result?.worker).toBe('claude-test');
+      expect(result?.worker).toBe('claude-code-glm-4.7-test');
       expect(result?.attempt).toBe(1);
       expect(result?.actor).toBe('forge-glm-test');
     });
@@ -1952,10 +1955,11 @@ describe('parseLogLine - NEEDLE format', () => {
 
   describe('bead.claim_retry event', () => {
     it('should parse bead.claim_retry event with warn level', () => {
-      // Sample from ~/.needle/logs/forge-glm-test.log
+      // NEEDLE emits bead.claim_retry with explicit level: "warn"
       const line = JSON.stringify({
         ts: '2026-03-04T19:37:22.192Z',
         event: 'bead.claim_retry',
+        level: 'warn',
         session: 'forge-glm-test',
         worker: {
           runner: 'claude',
@@ -1975,7 +1979,7 @@ describe('parseLogLine - NEEDLE format', () => {
 
       expect(result).not.toBeNull();
       expect(result?.msg).toBe('bead.claim_retry');
-      expect(result?.level).toBe('warn'); // 'retry' in event name triggers warn level
+      expect(result?.level).toBe('warn'); // NEEDLE emits this with explicit level: "warn"
       expect(result?.bead).toBe('bd-e6jq');
       expect(result?.attempt).toBe(1);
       expect(result?.max_retries).toBe(5);
@@ -1993,6 +1997,7 @@ describe('parseLogLine - NEEDLE format', () => {
         const line = JSON.stringify({
           ts: '2026-03-04T19:37:22.536Z',
           event: 'bead.claim_retry',
+          level: 'warn',
           session: 'forge-glm-test',
           worker: {
             runner: 'claude',
@@ -2018,10 +2023,11 @@ describe('parseLogLine - NEEDLE format', () => {
 
   describe('bead.claim_exhausted event', () => {
     it('should parse bead.claim_exhausted event with error level', () => {
-      // Sample from ~/.needle/logs/forge-glm-test.log
+      // NEEDLE emits bead.claim_exhausted with explicit level: "error"
       const line = JSON.stringify({
         ts: '2026-03-04T19:37:23.647Z',
         event: 'bead.claim_exhausted',
+        level: 'error',
         session: 'forge-glm-test',
         worker: {
           runner: 'claude',
@@ -2040,7 +2046,7 @@ describe('parseLogLine - NEEDLE format', () => {
 
       expect(result).not.toBeNull();
       expect(result?.msg).toBe('bead.claim_exhausted');
-      expect(result?.level).toBe('error'); // 'exhausted' in event name triggers error level
+      expect(result?.level).toBe('error'); // NEEDLE emits this with explicit level: "error"
       expect(result?.max_retries).toBe(5);
     });
   });
@@ -2070,7 +2076,7 @@ describe('parseLogLine - NEEDLE format', () => {
       expect(result).not.toBeNull();
       expect(result?.msg).toBe('heartbeat.emitted');
       expect(result?.level).toBe('info');
-      expect(result?.worker).toBe('claude-test12');
+      expect(result?.worker).toBe('claude-anthropic-sonnet-test12');
       expect(result?.session).toBe('needle-claude-anthropic-sonnet-test12');
       expect(result?.uptime_seconds).toBe(3600);
       expect(result?.beads_completed).toBe(5);
@@ -2137,10 +2143,15 @@ describe('parseLogLine - NEEDLE format', () => {
   });
 
   describe('level inference from event names', () => {
-    it('should infer error level for events with "error"', () => {
+    // inferLogLevel is the fallback used when no explicit level field is present (legacy logs).
+    // NEEDLE always includes level explicitly; these tests verify the inference rules match
+    // NEEDLE's _needle_telemetry_infer_level: error.* -> error, *.failed/*.retry -> warn,
+    // debug.* -> debug, else -> info.
+
+    it('should infer error level for error.* prefix events', () => {
       const line = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
-        event: 'worker.error',
+        event: 'error.agent_crash',
         session: 'test-session',
         worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
         data: {}
@@ -2150,7 +2161,7 @@ describe('parseLogLine - NEEDLE format', () => {
       expect(result?.level).toBe('error');
     });
 
-    it('should infer error level for events with "fail"', () => {
+    it('should infer warn level for *.failed suffix events', () => {
       const line = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
         event: 'bead.failed',
@@ -2160,13 +2171,13 @@ describe('parseLogLine - NEEDLE format', () => {
       });
 
       const result = parseLogLine(line);
-      expect(result?.level).toBe('error');
+      expect(result?.level).toBe('warn');
     });
 
-    it('should infer warn level for events with "retry"', () => {
+    it('should infer warn level for *.retry suffix events', () => {
       const line = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
-        event: 'bead.claim_retry',
+        event: 'claim.retry',
         session: 'test-session',
         worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
         data: {}
@@ -2176,23 +2187,10 @@ describe('parseLogLine - NEEDLE format', () => {
       expect(result?.level).toBe('warn');
     });
 
-    it('should infer warn level for events with "warn"', () => {
+    it('should infer debug level for debug.* prefix events', () => {
       const line = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
-        event: 'worker.warning',
-        session: 'test-session',
-        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
-        data: {}
-      });
-
-      const result = parseLogLine(line);
-      expect(result?.level).toBe('warn');
-    });
-
-    it('should infer debug level for events with "debug"', () => {
-      const line = JSON.stringify({
-        ts: '2026-03-04T16:17:34.008Z',
-        event: 'worker.debug',
+        event: 'debug.probe',
         session: 'test-session',
         worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
         data: {}
@@ -2213,6 +2211,22 @@ describe('parseLogLine - NEEDLE format', () => {
 
       const result = parseLogLine(line);
       expect(result?.level).toBe('info');
+    });
+
+    it('should use explicit level field when present rather than inferring', () => {
+      // bead.claim_retry would infer info (ends with _retry not .retry) but NEEDLE
+      // always emits it with explicit level: "warn"
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'bead.claim_retry',
+        level: 'warn',
+        session: 'test-session',
+        worker: { runner: 'claude', provider: 'code', model: 'sonnet', identifier: 'test' },
+        data: {}
+      });
+
+      const result = parseLogLine(line);
+      expect(result?.level).toBe('warn');
     });
   });
 
@@ -2248,7 +2262,7 @@ describe('parseLogLine - NEEDLE format', () => {
   });
 
   describe('worker identifier flattening', () => {
-    it('should flatten worker object to runner-identifier format', () => {
+    it('should flatten worker object to runner-provider-model-identifier format', () => {
       const line = JSON.stringify({
         ts: '2026-03-04T16:17:34.008Z',
         event: 'worker.started',
@@ -2258,7 +2272,7 @@ describe('parseLogLine - NEEDLE format', () => {
       });
 
       const result = parseLogLine(line);
-      expect(result?.worker).toBe('claude-prod');
+      expect(result?.worker).toBe('claude-anthropic-opus-prod');
     });
 
     it('should preserve provider and model as separate fields', () => {
@@ -2296,7 +2310,7 @@ describe('parseLogLine - NEEDLE format', () => {
       const needleResult = parseLogLine(needleLine);
       const legacyResult = parseLogLine(legacyLine);
 
-      expect(needleResult?.worker).toBe('claude-test');
+      expect(needleResult?.worker).toBe('claude-code-sonnet-test');
       expect(needleResult?.msg).toBe('worker.started');
 
       expect(legacyResult?.worker).toBe('w-legacy');
