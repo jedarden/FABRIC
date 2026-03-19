@@ -189,11 +189,20 @@ export class ThemeManager {
    * Get the config file path for theme persistence
    */
   private getConfigPath(): string {
-    const configDir = path.join(os.homedir(), '.fabric');
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
+    try {
+      const home = os.homedir();
+      if (!home) {
+        return '';
+      }
+      const configDir = path.join(home, '.fabric');
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+      return path.join(configDir, 'theme.json');
+    } catch {
+      // In CI or environments without a home directory, skip config persistence
+      return '';
     }
-    return path.join(configDir, 'theme.json');
   }
 
   /**
@@ -201,7 +210,7 @@ export class ThemeManager {
    */
   private loadTheme(): ThemeName {
     try {
-      if (fs.existsSync(this.configPath)) {
+      if (this.configPath && fs.existsSync(this.configPath)) {
         const content = fs.readFileSync(this.configPath, 'utf-8');
         const config = JSON.parse(content);
         if (config.theme === 'dark' || config.theme === 'light') {
@@ -218,6 +227,7 @@ export class ThemeManager {
    * Save theme to config file
    */
   private saveTheme(): void {
+    if (!this.configPath) return;
     try {
       const config = { theme: this.currentTheme };
       fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
