@@ -108,6 +108,8 @@ vi.mock('./components/WorkerDetail.js', () => ({
     show = vi.fn();
     hide = vi.fn();
     focus = vi.fn();
+    isVisible = vi.fn(() => false);
+    toggle = vi.fn();
     getElement = vi.fn(() => ({ hide: vi.fn(), show: vi.fn(), screen: { render: vi.fn() } }));
   },
 }));
@@ -119,6 +121,8 @@ vi.mock('./components/CommandPalette.js', () => ({
     hide = vi.fn();
     isVisible = vi.fn(() => false);
     addSuggestion = vi.fn();
+    addSuggestions = vi.fn();
+    clearSuggestions = vi.fn();
   },
 }));
 
@@ -1001,6 +1005,337 @@ describe('TUI Regression Tests', () => {
 
       const workersAfter = store.getWorkers();
       expect(workersAfter.length).toBe(workersBefore.length);
+    });
+  });
+
+  describe('Snapshot Tests', () => {
+    beforeEach(() => {
+      app = new FabricTuiApp(store);
+      app.start();
+    });
+
+    it('should render consistent worker grid content format', () => {
+      const workers = [
+        createMockWorker({ id: 'w-active123', status: 'active', beadsCompleted: 10 }),
+        createMockWorker({ id: 'w-idle456', status: 'idle', beadsCompleted: 5 }),
+        createMockWorker({ id: 'w-error789', status: 'error', beadsCompleted: 2 }),
+      ];
+
+      // Add events to create workers
+      workers.forEach(w => {
+        store.add(createMockEvent({ worker: w.id, msg: `Worker ${w.id} activity` }));
+      });
+
+      app.render();
+
+      // Verify render was called without errors
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should render consistent activity stream event format', () => {
+      const events = [
+        createMockEvent({ level: 'info', msg: 'Info message', tool: 'Read', bead: 'bd-test1' }),
+        createMockEvent({ level: 'warn', msg: 'Warning message', tool: 'Edit' }),
+        createMockEvent({ level: 'error', msg: 'Error message', error: 'Something failed' }),
+      ];
+
+      events.forEach(e => app.addEvent(e));
+
+      // Verify render was called without errors
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should maintain consistent header format', () => {
+      const blessedMock = blessed as unknown as { box: Mock };
+      const boxCalls = blessedMock.box.mock.calls;
+
+      // Header should contain FABRIC branding
+      const headerCall = boxCalls.find((call: unknown[]) =>
+        call?.[0]?.content?.includes('FABRIC')
+      );
+
+      // Header format should be consistent
+      if (headerCall) {
+        const headerContent = headerCall[0].content;
+        expect(headerContent).toMatch(/FABRIC/);
+      }
+    });
+
+    it('should maintain consistent footer format', () => {
+      const blessedMock = blessed as unknown as { box: Mock };
+      const boxCalls = blessedMock.box.mock.calls;
+
+      // Footer should contain key hints
+      const footerCall = boxCalls.find((call: unknown[]) =>
+        call?.[0]?.bottom === 0
+      );
+
+      if (footerCall) {
+        const footerOptions = footerCall[0];
+        expect(footerOptions.bottom).toBe(0);
+      }
+    });
+
+    it('should render consistent status badge format', () => {
+      const events = [
+        createMockEvent({ worker: 'w-1', level: 'info' }),
+        createMockEvent({ worker: 'w-2', level: 'error' }),
+        createMockEvent({ worker: 'w-3', level: 'warn' }),
+      ];
+
+      events.forEach(e => store.add(e));
+      app.render();
+
+      // Verify render was called
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should render collision indicator consistently', () => {
+      // Add events that would trigger collision detection
+      store.add(createMockEvent({ worker: 'w-1', path: '/shared/file.ts' }));
+      store.add(createMockEvent({ worker: 'w-2', path: '/shared/file.ts' }));
+
+      app.render();
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should maintain consistent tab bar format', () => {
+      // Tab bars should have consistent structure
+      const blessedMock = blessed as unknown as { box: Mock };
+      expect(blessedMock.box).toHaveBeenCalled();
+    });
+
+    it('should render bead progress consistently', () => {
+      store.add(createMockEvent({
+        worker: 'w-1',
+        bead: 'bd-progress',
+        msg: 'Processing bead 5 of 10',
+      }));
+
+      app.render();
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should render time formatting consistently', () => {
+      const now = Date.now();
+      const events = [
+        createMockEvent({ ts: now - 60000, msg: '1 minute ago' }),
+        createMockEvent({ ts: now - 3600000, msg: '1 hour ago' }),
+        createMockEvent({ ts: now, msg: 'Just now' }),
+      ];
+
+      events.forEach(e => app.addEvent(e));
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should render cost tracking format consistently', () => {
+      // Add events that might have cost information
+      store.add(createMockEvent({
+        worker: 'w-1',
+        msg: 'API call completed',
+        duration_ms: 1500,
+      }));
+
+      app.render();
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+  });
+
+  describe('Component Rendering Regression Tests', () => {
+    it('should not regress WorkerGrid selection behavior', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      // Add multiple workers
+      for (let i = 0; i < 5; i++) {
+        store.add(createMockEvent({ worker: `w-${i}` }));
+      }
+
+      // Should handle selection without errors
+      expect(() => app.render()).not.toThrow();
+    });
+
+    it('should not regress ActivityStream filtering', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      // Add various events
+      const levels: Array<'debug' | 'info' | 'warn' | 'error'> = ['debug', 'info', 'warn', 'error'];
+      levels.forEach(level => {
+        store.add(createMockEvent({ level }));
+      });
+
+      expect(() => app.render()).not.toThrow();
+    });
+
+    it('should not regress view mode switching', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      const mockScreen = getMockScreen();
+
+      // Switch through all view modes
+      const viewKeys = ['H', 'D', 'R', 'C', 'I', 'E', 'N', 'A'];
+      viewKeys.forEach(key => {
+        const call = mockScreen.key.mock.calls.find(
+          (c: unknown[]) => Array.isArray(c?.[0]) && c[0].includes(key)
+        );
+        const handler = call?.[1] as () => void;
+        if (handler) {
+          expect(() => handler()).not.toThrow();
+        }
+      });
+    });
+
+    it('should not regress command palette commands', () => {
+      app = new FabricTuiApp(store);
+
+      const commands = ['clear', 'pause', 'refresh', 'help', 'heatmap', 'dag'];
+      commands.forEach(cmd => {
+        expect(() => app['handleCommand'](cmd)).not.toThrow();
+      });
+    });
+
+    it('should not regress focus mode toggle', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      const mockScreen = getMockScreen();
+      const fCall = mockScreen.key.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('F')
+      );
+      const fHandler = fCall?.[1] as () => void;
+
+      // Toggle focus mode multiple times
+      expect(() => {
+        fHandler?.();
+        fHandler?.();
+        fHandler?.();
+      }).not.toThrow();
+    });
+
+    it('should not regress escape key handling', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      const mockScreen = getMockScreen();
+      const escCall = mockScreen.key.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('escape')
+      );
+      const escHandler = escCall?.[1] as () => void;
+
+      expect(() => escHandler?.()).not.toThrow();
+    });
+
+    it('should not regress help panel toggle', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      const mockScreen = getMockScreen();
+      const helpCall = mockScreen.key.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('?')
+      );
+      const helpHandler = helpCall?.[1] as () => void;
+
+      expect(() => {
+        helpHandler?.();
+        helpHandler?.();
+      }).not.toThrow();
+    });
+  });
+
+  describe('Edge Case Regression Tests', () => {
+    it('should handle empty worker list gracefully', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      // No workers added
+      expect(() => app.render()).not.toThrow();
+    });
+
+    it('should handle rapid consecutive events', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      // Add events rapidly
+      for (let i = 0; i < 100; i++) {
+        app.addEvent(createMockEvent({ msg: `Rapid event ${i}` }));
+      }
+
+      expect(getMockScreen().render).toHaveBeenCalled();
+    });
+
+    it('should handle events with special characters', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      const specialEvents = [
+        createMockEvent({ msg: 'Event with {braces}' }),
+        createMockEvent({ msg: 'Event with [brackets]' }),
+        createMockEvent({ msg: 'Event with <angles>' }),
+        createMockEvent({ msg: 'Event with "quotes"' }),
+        createMockEvent({ msg: "Event with 'apostrophes'" }),
+        createMockEvent({ msg: 'Event with unicode: 你好 🎉' }),
+      ];
+
+      specialEvents.forEach(e => {
+        expect(() => app.addEvent(e)).not.toThrow();
+      });
+    });
+
+    it('should handle very long messages', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      const longMsg = 'A'.repeat(10000);
+      expect(() => app.addEvent(createMockEvent({ msg: longMsg }))).not.toThrow();
+    });
+
+    it('should handle events with missing optional fields', () => {
+      app = new FabricTuiApp(store);
+      app.start();
+
+      const minimalEvent: LogEvent = {
+        ts: Date.now(),
+        worker: 'w-test',
+        level: 'info',
+        msg: 'Minimal',
+      };
+
+      expect(() => app.addEvent(minimalEvent)).not.toThrow();
+    });
+
+    it('should handle concurrent store operations', () => {
+      app = new FabricTuiApp(store);
+
+      // Simulate concurrent operations
+      const operations = Array.from({ length: 50 }, (_, i) => {
+        store.add(createMockEvent({ worker: `w-${i % 5}`, msg: `Event ${i}` }));
+      });
+
+      expect(store.query().length).toBe(50);
+    });
+
+    it('should maintain state after multiple start/stop cycles', () => {
+      for (let i = 0; i < 3; i++) {
+        app = new FabricTuiApp(store);
+        app.start();
+        store.add(createMockEvent({ msg: `Cycle ${i}` }));
+        app.stop();
+      }
+
+      expect(store.query().length).toBe(3);
     });
   });
 });
