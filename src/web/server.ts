@@ -14,6 +14,7 @@ import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelation
 import { InMemoryEventStore } from '../store.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
 import { parseEventObject } from '../parser.js';
+import { computeFleetAnalytics } from '../analytics.js';
 
 /** Maximum payload size for POST requests (64KB) */
 const MAX_PAYLOAD_SIZE = 64 * 1024;
@@ -345,6 +346,29 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // ============================================
+    // Recovery API Endpoints
+    // ============================================
+
+    // Get all recovery suggestions
+    app.get('/api/recovery/suggestions', (_req: Request, res: Response) => {
+      const suggestions = store.getRecoverySuggestions();
+      res.json(suggestions);
+    });
+
+    // Get recovery statistics
+    app.get('/api/recovery/stats', (_req: Request, res: Response) => {
+      const stats = store.getRecoveryStats();
+      res.json(stats);
+    });
+
+    // Get recovery suggestions for a specific worker
+    app.get('/api/recovery/workers/:id', (req: Request, res: Response) => {
+      const workerId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const suggestions = store.getWorkerRecoverySuggestions(workerId);
+      res.json(suggestions);
+    });
+
+    // ============================================
     // Cross-Reference API Endpoints
     // ============================================
 
@@ -432,8 +456,129 @@ export function createWebServer(options: WebServerOptions): WebServer {
       res.json(path);
     });
 
+    // ============================================
+    // Cost & Budget API Endpoints
+    // ============================================
+
+    // Get cost summary
+    app.get('/api/cost/summary', (_req: Request, res: Response) => {
+      const costTracker = store.getCostTracker();
+      const summary = costTracker.getSummary();
+
+      res.json({
+        totalCostUsd: summary.totalCostUsd,
+        totalTokens: summary.total,
+        inputTokens: summary.total.input,
+        outputTokens: summary.total.output,
+        budget: summary.budget,
+        burnRate: summary.burnRate,
+        timeRange: summary.timeRange,
+        workerCount: summary.byWorker.size,
+      });
+    });
+
+    // Get burn rate details
+    app.get('/api/cost/burn-rate', (req: Request, res: Response) => {
+      const costTracker = store.getCostTracker();
+      const sinceMinutes = parseInt(req.query.since as string) || 60;
+      const history = costTracker.getBurnRateHistory(sinceMinutes);
+
+      res.json({
+        current: costTracker.getSummary().burnRate,
+        history,
+      });
+    });
+
+    // Get per-worker cost breakdown
+    app.get('/api/cost/workers', (_req: Request, res: Response) => {
+      const costTracker = store.getCostTracker();
+      const summary = costTracker.getSummary();
+      const workers = Array.from(summary.byWorker.values())
+        .sort((a, b) => b.costUsd - a.costUsd)
+        .map(w => ({
+          workerId: w.workerId,
+          costUsd: w.costUsd,
+          inputTokens: w.input,
+          outputTokens: w.output,
+          totalTokens: w.total,
+          apiCalls: w.apiCalls,
+          currentBead: w.currentBead,
+          lastActivityTs: w.lastActivityTs,
+        }));
+
+      res.json({
+        workers,
+        totalCostUsd: summary.totalCostUsd,
+      });
+    });
+
+    // Get per-bead cost breakdown
+    app.get('/api/cost/beads', (_req: Request, res: Response) => {
+      const costTracker = store.getCostTracker();
+      const beads = costTracker.getBeadCosts()
+        .map(b => ({
+          beadId: b.beadId,
+          costUsd: b.costUsd,
+          inputTokens: b.input,
+          outputTokens: b.output,
+          apiCalls: b.apiCalls,
+          workerCount: b.workers.size,
+          workers: Array.from(b.workers),
+          durationMinutes: b.durationMinutes,
+          firstTs: b.firstTs,
+          lastTs: b.lastTs,
+        }));
+
+      res.json({ beads });
+    });
+
+    // Get cost time-series for trend charts
+    app.get('/api/cost/history', (req: Request, res: Response) => {
+      const costTracker = store.getCostTracker();
+      const sinceMinutes = parseInt(req.query.since as string) || 60;
+      const bucketMinutes = parseInt(req.query.bucket as string) || 5;
+
+      const timeSeries = costTracker.getAggregatedTimeSeries(sinceMinutes, bucketMinutes);
+
+      res.json({
+        timeSeries,
+        sinceMinutes,
+        bucketMinutes,
+      });
+    });
+
+    // Get budget alerts
+    app.get('/api/cost/alerts', (_req: Request, res: Response) => {
+      const costTracker = store.getCostTracker();
+      const alerts = costTracker.getAlerts();
+      const allAlerts = costTracker.getAllAlerts();
+
+      res.json({
+        active: alerts,
+        all: allAlerts,
+      });
+    });
+
+    // Acknowledge a budget alert
+    app.post('/api/cost/alerts/:id/acknowledge', (req: Request, res: Response) => {
+      const alertId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const costTracker = store.getCostTracker();
+      costTracker.acknowledgeAlert(alertId);
+      res.json({ success: true });
+    });
+
+    // Fleet analytics — reads log files fresh on each request
+    app.get('/api/analytics', (_req: Request, res: Response) => {
+      try {
+        const analytics = computeFleetAnalytics();
+        res.json(analytics);
+      } catch (err) {
+        res.status(500).json({ error: String(err) });
+      }
+    });
+
     // Serve static frontend files
-    const staticPath = join(__dirname, '..', 'web');
+    const staticPath = join(__dirname, 'public');
     app.use(express.static(staticPath));
 
     // Fallback to index.html for SPA routing

@@ -8,9 +8,12 @@ import CollisionAlert from './components/CollisionAlert';
 import FileHeatmap from './components/FileHeatmap';
 import DependencyDag from './components/DependencyDag';
 import RecoveryPanel from './components/RecoveryPanel';
+import CrossReferencePanel from './components/CrossReferencePanel';
 import FileContextPanel from './components/FileContextPanel';
 import TimelineView from './components/TimelineView';
 import SessionReplay from './components/SessionReplay';
+import CostDashboard from './components/CostDashboard';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
 
@@ -236,8 +239,10 @@ const App: React.FC = () => {
   const [showFileHeatmap, setShowFileHeatmap] = useState(false);
   const [showDependencyDag, setShowDependencyDag] = useState(false);
   const [showRecoveryPanel, setShowRecoveryPanel] = useState(false);
+  const [showCrossReference, setShowCrossReference] = useState(false);
   const [showFileContext, setShowFileContext] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const [selectedTimelineTime, setSelectedTimelineTime] = useState<number | null>(null);
   const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
 
@@ -259,6 +264,28 @@ const App: React.FC = () => {
       url.searchParams.delete('replay');
       window.history.replaceState({}, '', url.toString());
     }
+  }, []);
+
+  // Fetch recovery suggestions from API
+  useEffect(() => {
+    const fetchRecoverySuggestions = async () => {
+      try {
+        const response = await fetch('/api/recovery/suggestions');
+        if (response.ok) {
+          const suggestions = await response.json();
+          setRecoverySuggestions(suggestions);
+        }
+      } catch (err) {
+        console.error('Failed to fetch recovery suggestions:', err);
+      }
+    };
+
+    // Fetch immediately
+    fetchRecoverySuggestions();
+
+    // Poll every 30 seconds for updates
+    const interval = setInterval(fetchRecoverySuggestions, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // Focus Mode state
@@ -355,28 +382,6 @@ const App: React.FC = () => {
   // Use the auto-reconnect hook
   const { reconnectState, resetAndReconnect } = useWebSocketReconnect(handleWebSocketMessage);
 
-  const filteredEvents = selectedWorker
-    ? filteredEventsByFocusMode.filter(e => e.worker === selectedWorker)
-    : filteredEventsByFocusMode;
-
-  const selectedWorkerInfo = selectedWorker
-    ? filteredWorkers.find(w => w.id === selectedWorker)
-    : null;
-
-  const handleAcknowledgeAlert = useCallback((alertId: string) => {
-    setCollisionAlerts(prev =>
-      prev.map(a => a.id === alertId ? { ...a, acknowledged: true } : a)
-    );
-  }, []);
-
-  const handleAcknowledgeAllAlerts = useCallback(() => {
-    setCollisionAlerts(prev =>
-      prev.map(a => ({ ...a, acknowledged: true }))
-    );
-  }, []);
-
-  const unacknowledgedAlertCount = collisionAlerts.filter(a => !a.acknowledged).length;
-
   // Focus Mode callbacks
   const toggleFocusMode = useCallback(() => {
     setFocusModeEnabled(prev => !prev);
@@ -449,6 +454,28 @@ const App: React.FC = () => {
         return matchesPinnedWorker || matchesPinnedBead;
       })
     : events;
+
+  const filteredEvents = selectedWorker
+    ? filteredEventsByFocusMode.filter(e => e.worker === selectedWorker)
+    : filteredEventsByFocusMode;
+
+  const selectedWorkerInfo = selectedWorker
+    ? filteredWorkers.find(w => w.id === selectedWorker)
+    : null;
+
+  const handleAcknowledgeAlert = useCallback((alertId: string) => {
+    setCollisionAlerts(prev =>
+      prev.map(a => a.id === alertId ? { ...a, acknowledged: true } : a)
+    );
+  }, []);
+
+  const handleAcknowledgeAllAlerts = useCallback(() => {
+    setCollisionAlerts(prev =>
+      prev.map(a => ({ ...a, acknowledged: true }))
+    );
+  }, []);
+
+  const unacknowledgedAlertCount = collisionAlerts.filter(a => !a.acknowledged).length;
 
   return (
     <div className="app">
@@ -571,6 +598,14 @@ const App: React.FC = () => {
             <span className="file-heatmap-label">Heatmap</span>
           </button>
           <button
+            className={`analytics-toggle ${showAnalytics ? 'active' : ''}`}
+            onClick={() => setShowAnalytics(!showAnalytics)}
+            title={showAnalytics ? 'Hide fleet analytics' : 'Show fleet analytics'}
+          >
+            <span className="analytics-toggle-icon">📈</span>
+            <span className="analytics-toggle-label">Analytics</span>
+          </button>
+          <button
             className="file-context-toggle"
             onClick={() => setShowFileContext(!showFileContext)}
             title="Toggle file context panel"
@@ -684,6 +719,13 @@ const App: React.FC = () => {
           <FileHeatmap
             visible={showFileHeatmap}
             onClose={() => setShowFileHeatmap(false)}
+          />
+        )}
+
+        {showAnalytics && (
+          <AnalyticsDashboard
+            visible={showAnalytics}
+            onClose={() => setShowAnalytics(false)}
           />
         )}
 
