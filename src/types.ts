@@ -2308,3 +2308,237 @@ export interface SemanticNarrativeManager {
   /** Get narrative as formatted string */
   formatNarrative(narrative: SemanticNarrative, style?: NarrativeStyle): string;
 }
+
+// ============================================
+// Worker Fleet Analytics Types
+// ============================================
+
+/**
+ * Duration bucket for bead completion histogram
+ */
+export type DurationBucket = '<5s' | '5-30s' | '30-120s' | '2-10m' | '10m+';
+
+/**
+ * Model performance metrics
+ */
+export interface ModelPerformanceMetrics {
+  /** Model identifier (e.g., 'sonnet', 'glm-4.7', 'gpt-4o') */
+  model: string;
+
+  /** Provider (e.g., 'anthropic', 'openai', 'glm') */
+  provider: string;
+
+  /** Total beads completed */
+  beadsCompleted: number;
+
+  /** Average bead duration in ms */
+  avgDurationMs: number;
+
+  /** Median bead duration in ms */
+  medianDurationMs: number;
+
+  /** Duration distribution histogram */
+  durationDistribution: Record<DurationBucket, number>;
+
+  /** Success rate (0-1) */
+  successRate: number;
+
+  /** Total errors */
+  errorCount: number;
+
+  /** Total cost in USD */
+  totalCostUsd: number;
+
+  /** Average cost per bead */
+  avgCostPerBead: number;
+}
+
+/**
+ * Strand utilization metrics
+ */
+export interface StrandMetrics {
+  /** Strand name (pluck, mend, explore, weave, pulse, unravel, knot) */
+  strand: string;
+
+  /** Number of invocations */
+  invocations: number;
+
+  /** Number of successful invocations (found work) */
+  successCount: number;
+
+  /** Success rate (0-1) */
+  successRate: number;
+
+  /** Total time spent in ms */
+  totalTimeMs: number;
+
+  /** Average time per invocation in ms */
+  avgTimeMs: number;
+
+  /** Beads created by this strand (for weave, explore, etc.) */
+  beadsCreated?: number;
+}
+
+/**
+ * Completion quality indicator
+ */
+export interface CompletionQualityIndicator {
+  /** Bead ID */
+  beadId: string;
+
+  /** Worker that completed */
+  workerId: string;
+
+  /** Model used */
+  model: string;
+
+  /** Duration in ms */
+  durationMs: number;
+
+  /** Quality flags */
+  flags: {
+    /** Completed in <10s - suspicious shallow */
+    isShallow: boolean;
+
+    /** Had git commits */
+    hadCommits: boolean;
+
+    /** Was reopened after closure */
+    wasReopened: boolean;
+
+    /** Was claimed by multiple workers (race) */
+    hadClaimRace: boolean;
+  };
+
+  /** Completion timestamp */
+  completedAt: number;
+}
+
+/**
+ * Fleet time series data point
+ */
+export interface FleetTimeSeriesPoint {
+  /** Timestamp */
+  ts: number;
+
+  /** Active worker count */
+  activeWorkers: number;
+
+  /** Beads completed in this bucket */
+  beadsCompleted: number;
+
+  /** Errors in this bucket */
+  errors: number;
+
+  /** Cost in this bucket */
+  costUsd: number;
+}
+
+/**
+ * Workspace coverage info
+ */
+export interface WorkspaceCoverage {
+  /** Workspace path */
+  path: string;
+
+  /** Active workers in this workspace */
+  activeWorkers: number;
+
+  /** Total beads worked on */
+  beadsWorked: number;
+
+  /** Last activity timestamp */
+  lastActivity: number;
+
+  /** Worker IDs */
+  workers: string[];
+}
+
+/**
+ * Complete fleet analytics data
+ */
+export interface FleetAnalytics {
+  /** Time range covered */
+  timeRange: {
+    start: number;
+    end: number;
+    windowLabel: string;
+  };
+
+  /** Model performance breakdown */
+  modelPerformance: ModelPerformanceMetrics[];
+
+  /** Strand utilization */
+  strandMetrics: StrandMetrics[];
+
+  /** Quality indicators */
+  qualityIndicators: {
+    /** Total shallow completions (<10s) */
+    shallowCompletions: number;
+
+    /** Completions with git commits */
+    completionsWithCommits: number;
+
+    /** Reopened beads */
+    reopenedBeads: number;
+
+    /** Claim races */
+    claimRaces: number;
+
+    /** Recent suspicious completions */
+    suspiciousCompletions: CompletionQualityIndicator[];
+  };
+
+  /** Fleet overview */
+  fleetOverview: {
+    /** Total unique workers seen */
+    totalWorkers: number;
+
+    /** Currently active workers */
+    activeWorkers: number;
+
+    /** Total beads completed */
+    totalBeadsCompleted: number;
+
+    /** Total errors */
+    totalErrors: number;
+
+    /** Bead throughput per hour */
+    beadsPerHour: number;
+
+    /** Watchdog relaunch count */
+    watchdogRelaunchCount: number;
+
+    /** Workspace coverage */
+    workspaces: WorkspaceCoverage[];
+  };
+
+  /** Time series data */
+  timeSeries: FleetTimeSeriesPoint[];
+}
+
+/**
+ * Options for fleet analytics queries
+ */
+export interface FleetAnalyticsOptions {
+  /** Time window */
+  timeWindow?: TimeWindow;
+
+  /** Custom start time */
+  startTime?: number;
+
+  /** Custom end time */
+  endTime?: number;
+
+  /** Include time series data */
+  includeTimeSeries?: boolean;
+
+  /** Time series bucket size in minutes */
+  timeSeriesBucketMinutes?: number;
+
+  /** Filter by model */
+  modelFilter?: string;
+
+  /** Maximum suspicious completions to return */
+  maxSuspiciousCompletions?: number;
+}
