@@ -22,6 +22,10 @@ import { GitIntegration } from './components/GitIntegration.js';
 import { SemanticNarrativePanel } from './components/SemanticNarrativePanel.js';
 import { WorkerAnalyticsPanel } from './components/WorkerAnalyticsPanel.js';
 import { FileContextPanel } from './components/FileContextPanel.js';
+import { ConversationTranscript } from './components/ConversationTranscript.js';
+import { CrossReferencePanel } from './components/CrossReferencePanel.js';
+import { BudgetAlertPanel } from './components/BudgetAlertPanel.js';
+import { getCostTracker } from './utils/costTracking.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
 import { parseGitEvents } from '../gitParser.js';
@@ -45,7 +49,7 @@ export class FabricTuiApp {
   private isRunning = false;
 
   // View mode
-  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics' = 'default';
+  private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics' | 'transcript' | 'xref' | 'budget' = 'default';
 
   // Focus mode state
   private focusModeEnabled = false;
@@ -74,6 +78,8 @@ export class FabricTuiApp {
   private semanticNarrativePanel!: SemanticNarrativePanel;
   private workerAnalyticsPanel!: WorkerAnalyticsPanel;
   private fileContextPanel!: FileContextPanel;
+  private conversationTranscript!: ConversationTranscript;
+  private crossReferencePanel!: CrossReferencePanel;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -357,6 +363,26 @@ export class FabricTuiApp {
     });
     this.fileContextPanel.hide();
 
+    // Conversation Transcript panel (hidden by default, 'T' key)
+    this.conversationTranscript = new ConversationTranscript({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      height: '100%-2',
+    });
+    this.conversationTranscript.hide();
+
+    // Cross Reference panel (hidden by default, 'X' key)
+    this.crossReferencePanel = new CrossReferencePanel({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      bottom: 1,
+    });
+    this.crossReferencePanel.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -377,7 +403,7 @@ export class FabricTuiApp {
    */
   private getFooterContent(): string {
     if (this.viewMode === 'default') {
-      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions  [N] Narrative  [A] Analytics';
+      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions  [N] Narrative  [A] Analytics  [T] Transcript  [X] XRef';
 
       // Show focus mode status
       if (this.focusModeEnabled) {
@@ -407,7 +433,7 @@ export class FabricTuiApp {
     }
 
     // Return default content for other views
-    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [N] Narrative  [A] Analytics  [?] Help  [q] Quit';
+    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [N] Narrative  [A] Analytics  [T] Transcript  [X] XRef  [?] Help  [q] Quit';
   }
 
   /**
@@ -496,6 +522,16 @@ export class FabricTuiApp {
     // Toggle worker analytics view
     this.screen.key(['A'], () => {
       this.toggleAnalyticsView();
+    });
+
+    // Toggle conversation transcript view
+    this.screen.key(['T'], () => {
+      this.toggleTranscriptView();
+    });
+
+    // Toggle cross-reference view
+    this.screen.key(['X'], () => {
+      this.toggleXrefView();
     });
 
     // Escape to close modals or return to default view
@@ -726,6 +762,28 @@ export class FabricTuiApp {
       this.setViewMode('default');
     } else {
       this.setViewMode('analytics');
+    }
+  }
+
+  /**
+   * Toggle conversation transcript view
+   */
+  private toggleTranscriptView(): void {
+    if (this.viewMode === 'transcript') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('transcript');
+    }
+  }
+
+  /**
+   * Toggle cross-reference view
+   */
+  private toggleXrefView(): void {
+    if (this.viewMode === 'xref') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('xref');
     }
   }
 
@@ -984,6 +1042,49 @@ export class FabricTuiApp {
       // Update header
       this.headerBox.setContent(' FABRIC - Worker Analytics');
       this.footerBox.setContent(' [↑/↓] or [j/k] Navigate  [Enter] Detail  [a] Aggregated  [s] Sort  [r] Refresh  [Esc] Back  [?] Help  [q] Quit');
+    } else if (mode === 'transcript') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+      this.collisionAlert.hide();
+      this.gitIntegration.hide();
+      this.semanticNarrativePanel.hide();
+      this.workerAnalyticsPanel.hide();
+
+      // Show conversation transcript panel
+      this.conversationTranscript.show();
+      this.conversationTranscript.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Conversation Transcript');
+      this.footerBox.setContent(' [/] Search  [t] Toggle Tools  [c] Collapse All  [e] Expand All  [j/k] Scroll  [Esc] Back  [?] Help  [q] Quit');
+    } else if (mode === 'xref') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+      this.collisionAlert.hide();
+      this.gitIntegration.hide();
+      this.semanticNarrativePanel.hide();
+      this.workerAnalyticsPanel.hide();
+      this.conversationTranscript.hide();
+
+      // Show cross-reference panel
+      this.crossReferencePanel.show();
+      this.crossReferencePanel.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Cross References');
+      this.footerBox.setContent(' [↑/↓] or [j/k] Navigate  [Enter] Follow  [s] Stats  [r] Refresh  [Esc] Back  [?] Help  [q] Quit');
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
@@ -996,6 +1097,8 @@ export class FabricTuiApp {
       this.semanticNarrativePanel.hide();
       this.workerAnalyticsPanel.hide();
       this.fileContextPanel.hide();
+      this.conversationTranscript.hide();
+      this.crossReferencePanel.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
@@ -1011,8 +1114,8 @@ export class FabricTuiApp {
         this.activityStream.getElement().width = '60%';
       }
 
-      // Update header
-      this.headerBox.setContent(' FABRIC - Worker Activity Monitor');
+      // Update header with worker count badge
+      this.headerBox.setContent(this.getHeaderContent());
       this.footerBox.setContent(this.getFooterContent());
     }
 
@@ -1483,6 +1586,9 @@ General:
   addEvent(event: LogEvent): void {
     this.activityStream.addEvent(event);
     this.renderWorkers();
+
+    // Update header badge with current worker stats
+    this.updateHeader();
 
     // Update focus mode state after rendering
     this.workerGrid.setFocusMode(this.focusModeEnabled, this.pinnedWorkerId);
