@@ -10,16 +10,11 @@
  */
 
 import { Command } from 'commander';
-import blessed from 'blessed';
 import { VERSION } from './index.js';
 import { LogTailer, tailLogFile } from './tailer.js';
 import { formatEvent } from './parser.js';
 import { getStore } from './store.js';
-import { createTuiApp } from './tui/index.js';
 import { createWebServer } from './web/index.js';
-import { SessionReplay } from './tui/components/SessionReplay.js';
-import { SessionDigestGenerator, formatDigestAsMarkdown } from './sessionDigest.js';
-import { getCostTracker } from './tui/utils/costTracking.js';
 import * as fs from 'fs';
 import type { LogLevel, EventFilter } from './types.js';
 
@@ -38,6 +33,7 @@ program
     const filePath = options.file.replace('~', process.env.HOME || '');
 
     try {
+      const { createTuiApp } = await import('./tui/index.js');
       const store = getStore();
       const app = createTuiApp(store, { logPath: filePath });
 
@@ -243,12 +239,18 @@ program
     }
 
     try {
+      const blessed = (await import('blessed')).default;
+      const { SessionReplay } = await import('./tui/components/SessionReplay.js');
+
       // Create blessed screen
       const screen = blessed.screen({
         smartCSR: true,
         title: 'FABRIC Session Replay',
         fullUnicode: true,
       });
+
+      // Create store for analytics pipeline integration
+      const store = getStore();
 
       // Create session replay component
       const replay = new SessionReplay({
@@ -258,11 +260,12 @@ program
         width: '100%',
         height: '100%',
         onEvent: (event, index, total) => {
-          // Could emit to store if needed
+          store.add(event);
         },
         onStateChange: (state) => {
           if (state === 'ended') {
-            // Show ended message
+            const summary = store.getAnalyticsSummary();
+            console.error(`\nReplay complete. ${summary}`);
           }
         },
       });
@@ -359,6 +362,8 @@ program
       console.error(`Loaded ${eventCount} events`);
 
       // Generate digest
+      const { SessionDigestGenerator, formatDigestAsMarkdown } = await import('./sessionDigest.js');
+      const { getCostTracker } = await import('./tui/utils/costTracking.js');
       const costTracker = getCostTracker();
       const generator = new SessionDigestGenerator(store, costTracker);
 
