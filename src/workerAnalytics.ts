@@ -340,6 +340,13 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
   }
 
   /**
+   * Get the underlying CostTracker instance
+   */
+  getCostTracker(): CostTracker {
+    return this.costTracker;
+  }
+
+  /**
    * Get analytics summary as formatted string
    */
   getSummary(options: WorkerAnalyticsOptions = {}): string {

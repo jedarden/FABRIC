@@ -145,6 +145,48 @@ export interface TopConsumer {
   insight?: string;
 }
 
+export interface BeadCost {
+  /** Bead ID */
+  beadId: string;
+  /** Total cost in USD */
+  costUsd: number;
+  /** Token usage */
+  input: number;
+  output: number;
+  /** Number of API calls attributed to this bead */
+  apiCalls: number;
+  /** Worker IDs that worked on this bead */
+  workers: Set<string>;
+  /** First activity timestamp */
+  firstTs: number;
+  /** Last activity timestamp */
+  lastTs: number;
+  /** Duration in minutes */
+  durationMinutes: number;
+}
+
+export interface CostTimeSeriesPoint {
+  /** Timestamp (start of bucket) */
+  ts: number;
+  /** Total cost in bucket */
+  cost: number;
+  /** Number of API calls in bucket */
+  apiCalls: number;
+  /** Active workers in bucket */
+  activeWorkers: number;
+}
+
+export interface BurnRateHistory {
+  /** Timestamp of measurement */
+  ts: number;
+  /** Raw cost per minute */
+  rawRate: number;
+  /** Smoothed cost per minute (EMA) */
+  smoothedRate: number;
+  /** Number of data points in window */
+  sampleCount: number;
+}
+
 export interface CostTrackingOptions {
   /** Budget limit in USD (0 = no limit) */
   budgetLimit?: number;
@@ -166,6 +208,15 @@ export interface CostTrackingOptions {
 
   /** High burn rate threshold in USD/min (default: 0.50) */
   highBurnRateThreshold?: number;
+
+  /** EMA smoothing factor for burn rate (default: 0.3, higher = more responsive) */
+  burnRateSmoothingFactor?: number;
+
+  /** Time-series bucket size in minutes (default: 1) */
+  timeSeriesBucketMinutes?: number;
+
+  /** How long to keep time-series data in minutes (default: 1440 = 24h) */
+  timeSeriesRetentionMinutes?: number;
 }
 
 const DEFAULT_OPTIONS: Required<CostTrackingOptions> = {
@@ -176,6 +227,9 @@ const DEFAULT_OPTIONS: Required<CostTrackingOptions> = {
   outputCostPerMillion: 15.00, // Claude Sonnet output
   burnRateWindowMinutes: 5,    // Calculate burn rate over last 5 minutes
   highBurnRateThreshold: 0.50, // High burn rate if > $0.50/min
+  burnRateSmoothingFactor: 0.3, // EMA smoothing factor
+  timeSeriesBucketMinutes: 1,  // 1-minute buckets for time-series
+  timeSeriesRetentionMinutes: 1440, // Keep 24h of time-series data
 };
 
 // Model pricing (per 1M tokens)
@@ -202,7 +256,18 @@ export class CostTracker {
   private lastEventTs: number | null = null;
 
   // Burn rate tracking
-  private costHistory: Array<{ ts: number; cost: number; worker: string }> = [];
+  private costHistory: Array<{ ts: number; cost: number; worker: string; bead?: string }> = [];
+
+  // Per-bead cost tracking
+  private beadCosts: Map<string, BeadCost> = new Map();
+  private workerCurrentBead: Map<string, string> = new Map();
+
+  // EMA-smoothed burn rate
+  private smoothedBurnRate: number | null = null;
+
+  // Time-series storage
+  private timeSeries: CostTimeSeriesPoint[] = [];
+  private burnRateHistory: BurnRateHistory[] = [];
 
   // Alert tracking
   private alerts: BudgetAlert[] = [];
@@ -268,14 +333,90 @@ export class CostTracker {
       ts: event.ts,
       cost: incrementalCost,
       worker: event.worker,
+      bead: event.bead || undefined,
     });
 
     // Trim old history (keep last 30 minutes)
     const cutoffTs = event.ts - (30 * 60 * 1000);
     this.costHistory = this.costHistory.filter(h => h.ts > cutoffTs);
 
+    // Track per-bead costs
+    if (event.bead) {
+      this.trackBeadCost(event.bead, event.worker, tokens, incrementalCost, event.ts);
+    }
+
+    // Update time-series bucket
+    this.updateTimeSeries(event.ts, incrementalCost);
+
     // Check for budget alerts
     this.checkBudgetAlerts();
+  }
+
+  /**
+   * Track cost for a specific bead
+   */
+  private trackBeadCost(
+    beadId: string,
+    workerId: string,
+    tokens: { input: number; output: number },
+    cost: number,
+    ts: number,
+  ): void {
+    let beadCost = this.beadCosts.get(beadId);
+    if (!beadCost) {
+      beadCost = {
+        beadId,
+        costUsd: 0,
+        input: 0,
+        output: 0,
+        apiCalls: 0,
+        workers: new Set(),
+        firstTs: ts,
+        lastTs: ts,
+        durationMinutes: 0,
+      };
+      this.beadCosts.set(beadId, beadCost);
+    }
+
+    beadCost.costUsd += cost;
+    beadCost.input += tokens.input;
+    beadCost.output += tokens.output;
+    beadCost.apiCalls += 1;
+    beadCost.workers.add(workerId);
+    beadCost.lastTs = ts;
+    beadCost.durationMinutes = (ts - beadCost.firstTs) / 60000;
+  }
+
+  /**
+   * Update time-series bucket
+   */
+  private updateTimeSeries(ts: number, incrementalCost: number): void {
+    const bucketMs = this.options.timeSeriesBucketMinutes * 60 * 1000;
+    const bucketTs = Math.floor(ts / bucketMs) * bucketMs;
+
+    // Find or create the bucket
+    let bucket = this.timeSeries.find(b => b.ts === bucketTs);
+    if (!bucket) {
+      bucket = { ts: bucketTs, cost: 0, apiCalls: 0, activeWorkers: 0 };
+      this.timeSeries.push(bucket);
+    }
+
+    bucket.cost += incrementalCost;
+    bucket.apiCalls += 1;
+
+    // Count active workers in this bucket from recent cost history
+    const bucketEnd = bucketTs + bucketMs;
+    const activeWorkerSet = new Set(
+      this.costHistory
+        .filter(h => h.ts >= bucketTs && h.ts < bucketEnd)
+        .map(h => h.worker)
+    );
+    bucket.activeWorkers = activeWorkerSet.size;
+
+    // Trim old time-series data
+    const retentionMs = this.options.timeSeriesRetentionMinutes * 60 * 1000;
+    const cutoffTs = ts - retentionMs;
+    this.timeSeries = this.timeSeries.filter(b => b.ts > cutoffTs);
   }
 
   /**
@@ -320,16 +461,13 @@ export class CostTracker {
   getSummary(): CostSummary {
     let totalInput = 0;
     let totalOutput = 0;
+    let totalCostUsd = 0;
 
     for (const worker of this.workerCosts.values()) {
       totalInput += worker.input;
       totalOutput += worker.output;
+      totalCostUsd += worker.costUsd;
     }
-
-    const totalPrice = MODEL_PRICING['claude-sonnet-4-6']; // Default pricing
-    const totalCostUsd =
-      (totalInput * totalPrice.input / 1_000_000) +
-      (totalOutput * totalPrice.output / 1_000_000);
 
     const budget = this.calculateBudgetStatus(totalCostUsd);
     const burnRate = this.calculateBurnRate();
@@ -352,7 +490,51 @@ export class CostTracker {
   }
 
   /**
-   * Calculate burn rate (cost per minute)
+   * Get per-bead cost breakdown, sorted by cost descending
+   */
+  getBeadCosts(): BeadCost[] {
+    return Array.from(this.beadCosts.values())
+      .sort((a, b) => b.costUsd - a.costUsd);
+  }
+
+  /**
+   * Get cost for a specific bead
+   */
+  getBeadCost(beadId: string): BeadCost | undefined {
+    return this.beadCosts.get(beadId);
+  }
+
+  /**
+   * Get per-worker cost breakdown with bead attribution
+   */
+  getWorkerCostBreakdown(workerId: string): {
+    worker: WorkerCost;
+    beadCosts: Array<{ beadId: string; costUsd: number; percentOfWorker: number }>;
+  } | undefined {
+    const worker = this.workerCosts.get(workerId);
+    if (!worker) return undefined;
+
+    // Calculate per-bead costs for this worker from cost history
+    const beadCostMap = new Map<string, number>();
+    for (const entry of this.costHistory) {
+      if (entry.worker === workerId && entry.bead) {
+        beadCostMap.set(entry.bead, (beadCostMap.get(entry.bead) || 0) + entry.cost);
+      }
+    }
+
+    const beadCosts = Array.from(beadCostMap.entries())
+      .map(([beadId, costUsd]) => ({
+        beadId,
+        costUsd,
+        percentOfWorker: worker.costUsd > 0 ? (costUsd / worker.costUsd) * 100 : 0,
+      }))
+      .sort((a, b) => b.costUsd - a.costUsd);
+
+    return { worker, beadCosts };
+  }
+
+  /**
+   * Calculate burn rate (cost per minute) with EMA smoothing
    */
   private calculateBurnRate(): BurnRate {
     const now = this.lastEventTs || Date.now();
@@ -370,29 +552,43 @@ export class CostTracker {
     const actualWindowMs = now - oldestInWindow;
     const actualWindowMinutes = actualWindowMs / 60000;
 
-    // Cost per minute
-    const costPerMinute = actualWindowMinutes > 0
+    // Raw cost per minute
+    const rawCostPerMinute = actualWindowMinutes > 0
       ? totalCostInWindow / actualWindowMinutes
       : 0;
 
-    // Calculate total cost directly (avoid recursion with getSummary)
-    let totalInput = 0;
-    let totalOutput = 0;
-    for (const worker of this.workerCosts.values()) {
-      totalInput += worker.input;
-      totalOutput += worker.output;
+    // Apply EMA smoothing
+    const alpha = this.options.burnRateSmoothingFactor;
+    if (this.smoothedBurnRate === null) {
+      this.smoothedBurnRate = rawCostPerMinute;
+    } else {
+      this.smoothedBurnRate = alpha * rawCostPerMinute + (1 - alpha) * this.smoothedBurnRate;
     }
-    const totalPrice = MODEL_PRICING['claude-sonnet-4-6'];
-    const currentTotalCost =
-      (totalInput * totalPrice.input / 1_000_000) +
-      (totalOutput * totalPrice.output / 1_000_000);
 
-    // Calculate time to exhaustion
+    const costPerMinute = this.smoothedBurnRate;
+
+    // Record burn rate history (keep last hour)
+    this.burnRateHistory.push({
+      ts: now,
+      rawRate: rawCostPerMinute,
+      smoothedRate: costPerMinute,
+      sampleCount: recentCosts.length,
+    });
+    const burnRateRetentionMs = 60 * 60 * 1000; // 1 hour
+    this.burnRateHistory = this.burnRateHistory.filter(h => h.ts > now - burnRateRetentionMs);
+
+    // Calculate total cost directly from worker totals (avoid recursion)
+    let totalCostUsd = 0;
+    for (const worker of this.workerCosts.values()) {
+      totalCostUsd += worker.costUsd;
+    }
+
+    // Calculate time to exhaustion using smoothed rate
     let minutesToExhaustion: number | null = null;
     let timeToExhaustion: string | null = null;
 
     if (this.options.budgetLimit > 0 && costPerMinute > 0) {
-      const remaining = this.options.budgetLimit - currentTotalCost;
+      const remaining = this.options.budgetLimit - totalCostUsd;
       if (remaining > 0) {
         minutesToExhaustion = remaining / costPerMinute;
         timeToExhaustion = formatTimeToExhaustion(minutesToExhaustion);
@@ -403,11 +599,10 @@ export class CostTracker {
     }
 
     // Projected total cost at current burn rate for remainder of session
-    // Assume 60-minute session by default if we don't have enough data
     const sessionDurationMs = (this.lastEventTs || now) - (this.firstEventTs || now);
     const sessionMinutes = sessionDurationMs / 60000;
     const projectedTotalCost = sessionMinutes > 0
-      ? currentTotalCost + (costPerMinute * Math.max(0, 60 - sessionMinutes))
+      ? totalCostUsd + (costPerMinute * Math.max(0, 60 - sessionMinutes))
       : costPerMinute * 60;
 
     return {
@@ -418,6 +613,50 @@ export class CostTracker {
       windowMinutes: this.options.burnRateWindowMinutes,
       isHighBurnRate: costPerMinute > this.options.highBurnRateThreshold,
     };
+  }
+
+  /**
+   * Get the smoothed burn rate history for trend visualization
+   */
+  getBurnRateHistory(sinceMinutes: number = 60): BurnRateHistory[] {
+    const cutoffTs = (this.lastEventTs || Date.now()) - (sinceMinutes * 60 * 1000);
+    return this.burnRateHistory.filter(h => h.ts > cutoffTs);
+  }
+
+  /**
+   * Get time-series cost data for trend charts
+   */
+  getTimeSeries(sinceMinutes: number = 60): CostTimeSeriesPoint[] {
+    const cutoffTs = (this.lastEventTs || Date.now()) - (sinceMinutes * 60 * 1000);
+    return this.timeSeries.filter(b => b.ts > cutoffTs);
+  }
+
+  /**
+   * Get aggregated time-series for a coarser view (e.g., 5-minute or 15-minute buckets)
+   */
+  getAggregatedTimeSeries(
+    sinceMinutes: number = 60,
+    bucketMinutes: number = 5,
+  ): CostTimeSeriesPoint[] {
+    const rawPoints = this.getTimeSeries(sinceMinutes);
+    if (rawPoints.length === 0) return [];
+
+    const bucketMs = bucketMinutes * 60 * 1000;
+    const buckets = new Map<number, CostTimeSeriesPoint>();
+
+    for (const point of rawPoints) {
+      const bucketTs = Math.floor(point.ts / bucketMs) * bucketMs;
+      let existing = buckets.get(bucketTs);
+      if (!existing) {
+        existing = { ts: bucketTs, cost: 0, apiCalls: 0, activeWorkers: 0 };
+        buckets.set(bucketTs, existing);
+      }
+      existing.cost += point.cost;
+      existing.apiCalls += point.apiCalls;
+      existing.activeWorkers = Math.max(existing.activeWorkers, point.activeWorkers);
+    }
+
+    return Array.from(buckets.values()).sort((a, b) => a.ts - b.ts);
   }
 
   /**
@@ -616,6 +855,11 @@ export class CostTracker {
   reset(): void {
     this.workerCosts.clear();
     this.costHistory = [];
+    this.beadCosts.clear();
+    this.workerCurrentBead.clear();
+    this.timeSeries = [];
+    this.burnRateHistory = [];
+    this.smoothedBurnRate = null;
     this.alerts = [];
     this.firstEventTs = null;
     this.lastEventTs = null;

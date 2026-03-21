@@ -80,6 +80,7 @@ export class FabricTuiApp {
   private fileContextPanel!: FileContextPanel;
   private conversationTranscript!: ConversationTranscript;
   private crossReferencePanel!: CrossReferencePanel;
+  private budgetAlertPanel!: BudgetAlertPanel;
   private footerBox!: blessed.Widgets.BoxElement;
   private helpOverlay?: blessed.Widgets.BoxElement;
 
@@ -383,6 +384,21 @@ export class FabricTuiApp {
     });
     this.crossReferencePanel.hide();
 
+    // Budget Alert panel (hidden by default, 'B' key)
+    this.budgetAlertPanel = new BudgetAlertPanel({
+      parent: this.screen,
+      top: 1,
+      left: 0,
+      width: '100%',
+      bottom: 1,
+      onAcknowledge: (alertId) => {
+        const tracker = getCostTracker();
+        tracker.acknowledgeAlert(alertId);
+        this.updateBudgetPanel();
+      },
+    });
+    this.budgetAlertPanel.hide();
+
     // Footer with key hints
     this.footerBox = blessed.box({
       parent: this.screen,
@@ -403,7 +419,7 @@ export class FabricTuiApp {
    */
   private getFooterContent(): string {
     if (this.viewMode === 'default') {
-      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions  [N] Narrative  [A] Analytics  [T] Transcript  [X] XRef';
+      let content = ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [I] Git  [C] Collisions  [N] Narrative  [A] Analytics  [B] Budget  [T] Transcript  [X] XRef';
 
       // Show focus mode status
       if (this.focusModeEnabled) {
@@ -433,7 +449,7 @@ export class FabricTuiApp {
     }
 
     // Return default content for other views
-    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [N] Narrative  [A] Analytics  [T] Transcript  [X] XRef  [?] Help  [q] Quit';
+    return ' [Tab] Switch  [j/k] Scroll  [/] Search  [H] Heatmap  [D] DAG  [E] Errors  [C] Collisions  [N] Narrative  [A] Analytics  [B] Budget  [T] Transcript  [X] XRef  [?] Help  [q] Quit';
   }
 
   /**
@@ -522,6 +538,11 @@ export class FabricTuiApp {
     // Toggle worker analytics view
     this.screen.key(['A'], () => {
       this.toggleAnalyticsView();
+    });
+
+    // Toggle budget dashboard view
+    this.screen.key(['B'], () => {
+      this.toggleBudgetView();
     });
 
     // Toggle conversation transcript view
@@ -621,6 +642,8 @@ export class FabricTuiApp {
       this.toggleNarrativeView();
     } else if (cmd === 'analytics') {
       this.toggleAnalyticsView();
+    } else if (cmd === 'budget') {
+      this.toggleBudgetView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
@@ -788,6 +811,17 @@ export class FabricTuiApp {
   }
 
   /**
+   * Toggle budget dashboard view
+   */
+  private toggleBudgetView(): void {
+    if (this.viewMode === 'budget') {
+      this.setViewMode('default');
+    } else {
+      this.setViewMode('budget');
+    }
+  }
+
+  /**
    * Toggle theme between dark and light
    */
   private toggleTheme(): void {
@@ -814,9 +848,19 @@ export class FabricTuiApp {
   }
 
   /**
+   * Update budget panel with current cost data
+   */
+  private updateBudgetPanel(): void {
+    const tracker = getCostTracker();
+    const summary = tracker.getSummary();
+    this.budgetAlertPanel.setCostSummary(summary);
+    this.budgetAlertPanel.setAlerts(tracker.getAlerts());
+  }
+
+  /**
    * Set view mode
    */
-  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics'): void {
+  private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics' | 'transcript' | 'xref' | 'budget'): void {
     this.viewMode = mode;
 
     // Hide file context panel when switching views (except default)
@@ -1055,6 +1099,8 @@ export class FabricTuiApp {
       this.gitIntegration.hide();
       this.semanticNarrativePanel.hide();
       this.workerAnalyticsPanel.hide();
+      this.crossReferencePanel.hide();
+      this.budgetAlertPanel.hide();
 
       // Show conversation transcript panel
       this.conversationTranscript.show();
@@ -1077,6 +1123,7 @@ export class FabricTuiApp {
       this.semanticNarrativePanel.hide();
       this.workerAnalyticsPanel.hide();
       this.conversationTranscript.hide();
+      this.budgetAlertPanel.hide();
 
       // Show cross-reference panel
       this.crossReferencePanel.show();
@@ -1085,6 +1132,30 @@ export class FabricTuiApp {
       // Update header
       this.headerBox.setContent(' FABRIC - Cross References');
       this.footerBox.setContent(' [↑/↓] or [j/k] Navigate  [Enter] Follow  [s] Stats  [r] Refresh  [Esc] Back  [?] Help  [q] Quit');
+    } else if (mode === 'budget') {
+      // Hide other panels
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+      this.collisionAlert.hide();
+      this.gitIntegration.hide();
+      this.semanticNarrativePanel.hide();
+      this.workerAnalyticsPanel.hide();
+      this.conversationTranscript.hide();
+      this.crossReferencePanel.hide();
+
+      // Show budget dashboard panel
+      this.updateBudgetPanel();
+      this.budgetAlertPanel.show();
+      this.budgetAlertPanel.focus();
+
+      // Update header
+      this.headerBox.setContent(' FABRIC - Budget Dashboard');
+      this.footerBox.setContent(' [a] Acknowledge  [r] Refresh  [s] Settings  [Esc] Back  [?] Help  [q] Quit');
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
@@ -1099,6 +1170,7 @@ export class FabricTuiApp {
       this.fileContextPanel.hide();
       this.conversationTranscript.hide();
       this.crossReferencePanel.hide();
+      this.budgetAlertPanel.hide();
 
       // Show default panels
       this.workerGrid.getElement().show();
@@ -1547,6 +1619,13 @@ Worker Analytics:
   a       - Toggle aggregated view
   s       - Cycle sort mode
   r       - Refresh metrics
+  Esc     - Return to default view
+
+Budget Dashboard:
+  B       - Toggle budget dashboard view
+  a       - Acknowledge alert
+  r       - Refresh cost data
+  s       - Open budget settings
   Esc     - Return to default view
 
 Theme:

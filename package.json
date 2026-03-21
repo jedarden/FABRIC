@@ -16,6 +16,7 @@
     "tui": "node dist/cli.js tui",
     "web": "node dist/cli.js web",
     "clean": "rm -rf dist",
+    "deploy": "npm run build && npm run build:web",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

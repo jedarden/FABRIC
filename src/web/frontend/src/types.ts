@@ -307,3 +307,91 @@ export interface RecoveryStats {
   avgConfidence: number;
   topActionTypes: Array<{ type: RecoveryActionType; count: number }>;
 }
+
+// ============================================
+// Fleet Analytics Types
+// ============================================
+
+export interface DurationBucket {
+  label: string;
+  range: string;
+  count: number;
+}
+
+export interface ModelMetrics {
+  model: string;
+  beadsCompleted: number;
+  avgDurationMs: number;
+  medianDurationMs: number;
+  minDurationMs: number;
+  maxDurationMs: number;
+  durationBuckets: DurationBucket[];
+  shallowCount: number;
+  shallowPercent: number;
+}
+
+export interface StrandMetrics {
+  strand: string;
+  invocations: number;
+  successCount: number;
+  failCount: number;
+  successRate: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+}
+
+export interface ShallowCompletion {
+  beadId: string;
+  worker: string;
+  model: string;
+  durationMs: number;
+  timestamp: number;
+  session: string;
+}
+
+export interface BeadCompletion {
+  beadId: string;
+  worker: string;
+  model: string;
+  durationMs: number;
+  timestamp: number;
+  session: string;
+  isShallow: boolean;
+}
+
+export interface FleetTimePoint {
+  hour: string;
+  activeWorkers: number;
+  beadsCompleted: number;
+  timestamp: number;
+}
+
+export interface WorkspaceEntry {
+  workspace: string;
+  workerCount: number;
+  beadCount: number;
+}
+
+export interface ClaimRace {
+  beadId: string;
+  workers: string[];
+  claimCount: number;
+}
+
+export interface FleetAnalytics {
+  periodStart: number;
+  periodEnd: number;
+  totalEvents: number;
+  logFiles: string[];
+  modelMetrics: ModelMetrics[];
+  strandMetrics: StrandMetrics[];
+  shallowCompletions: ShallowCompletion[];
+  totalCompletions: number;
+  shallowPercent: number;
+  claimRaces: ClaimRace[];
+  fleetTimeSeries: FleetTimePoint[];
+  workerRelaunchCount: number;
+  workspaceCoverage: WorkspaceEntry[];
+  beadsPerHour: number;
+  beadCompletions: BeadCompletion[];
+}

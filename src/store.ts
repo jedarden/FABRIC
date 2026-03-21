@@ -44,6 +44,7 @@ import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
 import { CrossReferenceManager, getCrossReferenceManager } from './crossReferenceManager.js';
 import { WorkerAnalytics, getWorkerAnalytics } from './workerAnalytics.js';
+import { CostTracker } from './tui/utils/costTracking.js';
 import { SemanticNarrativeGenerator, getSemanticNarrativeManager } from './semanticNarrative.js';
 import { HistoricalStore, getHistoricalStore } from './historicalStore.js';
 
@@ -1274,6 +1275,13 @@ export class InMemoryEventStore implements EventStore {
    */
   getWorkerAnalytics(): WorkerAnalytics {
     return this.workerAnalytics;
+  }
+
+  /**
+   * Get cost tracker instance for budget/cost data
+   */
+  getCostTracker(): CostTracker {
+    return this.workerAnalytics.getCostTracker();
   }
 
   /**
