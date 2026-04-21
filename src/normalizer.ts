@@ -23,6 +23,67 @@ export type NormalizerSource =
   | 'otlp-span-end'
   | 'otlp-metric';
 
+// ── Event deduplication ───────────────────────────────────────
+
+/**
+ * LRU dedup set keyed on (session_id, worker_id, sequence).
+ *
+ * When FABRIC ingests events from both JSONL and OTLP sources,
+ * the same logical event can arrive twice. The deduplicator keeps
+ * the first arrival and silently drops duplicates, incrementing
+ * `droppedCount` for observability.
+ *
+ * Events with `sequence < 0` (legacy formats without sequence) are
+ * always passed through — they cannot be deduped.
+ */
+export class EventDeduplicator {
+  private readonly seen: Map<string, true> = new Map();
+  private readonly maxSize: number;
+  droppedCount = 0;
+
+  constructor(maxSize = 10_000) {
+    this.maxSize = maxSize;
+  }
+
+  /**
+   * Returns `true` if this is the first occurrence (keep the event),
+   * `false` if it is a duplicate (drop it).
+   */
+  check(event: NeedleEvent): boolean {
+    if (event.sequence < 0) return true;
+
+    const key = `${event.session_id}\0${event.worker_id}\0${event.sequence}`;
+    if (this.seen.has(key)) {
+      this.droppedCount++;
+      return false;
+    }
+
+    this.seen.set(key, true);
+
+    // Evict oldest entries when over capacity
+    if (this.seen.size > this.maxSize) {
+      const excess = this.seen.size - this.maxSize;
+      let count = 0;
+      for (const k of this.seen.keys()) {
+        if (count >= excess) break;
+        this.seen.delete(k);
+        count++;
+      }
+    }
+
+    return true;
+  }
+
+  reset(): void {
+    this.seen.clear();
+    this.droppedCount = 0;
+  }
+
+  get size(): number {
+    return this.seen.size;
+  }
+}
+
 // ── Internal interfaces for legacy formats ────────────────────
 
 interface NeedleWorkerObject {

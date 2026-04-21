@@ -15,6 +15,7 @@ import {
   normalizeToLogEvent,
   needleEventToLogEvent,
   NormalizerSource,
+  EventDeduplicator,
 } from './normalizer.js';
 import { NeedleEvent, NEEDLE_EVENT_SCHEMA_VERSION, LogEvent } from './types.js';
 
@@ -1152,5 +1153,170 @@ describe('cross-source parity', () => {
     // duration_ms in data is promoted to top-level
     expect(jsonlResult!.duration_ms).toBe(1000);
     expect(otlpResult!.duration_ms).toBe(1000);
+  });
+});
+
+// ── EventDeduplicator ────────────────────────────────────────────
+
+describe('EventDeduplicator', () => {
+  it('passes through the first occurrence of an event', () => {
+    const dedup = new EventDeduplicator();
+    const event = canonicalNeedleEvent();
+    expect(dedup.check(event)).toBe(true);
+  });
+
+  it('drops a duplicate event with the same (session_id, worker_id, sequence)', () => {
+    const dedup = new EventDeduplicator();
+    const event = canonicalNeedleEvent();
+    expect(dedup.check(event)).toBe(true);
+    expect(dedup.check(event)).toBe(false);
+    expect(dedup.droppedCount).toBe(1);
+  });
+
+  it('allows events with different sequences from the same worker', () => {
+    const dedup = new EventDeduplicator();
+    expect(dedup.check(canonicalNeedleEvent({ sequence: 1 }))).toBe(true);
+    expect(dedup.check(canonicalNeedleEvent({ sequence: 2 }))).toBe(true);
+    expect(dedup.check(canonicalNeedleEvent({ sequence: 3 }))).toBe(true);
+    expect(dedup.droppedCount).toBe(0);
+  });
+
+  it('allows events with different worker_ids', () => {
+    const dedup = new EventDeduplicator();
+    expect(dedup.check(canonicalNeedleEvent({ worker_id: 'w1' }))).toBe(true);
+    expect(dedup.check(canonicalNeedleEvent({ worker_id: 'w2' }))).toBe(true);
+    expect(dedup.droppedCount).toBe(0);
+  });
+
+  it('allows events with different session_ids', () => {
+    const dedup = new EventDeduplicator();
+    expect(dedup.check(canonicalNeedleEvent({ session_id: 's1' }))).toBe(true);
+    expect(dedup.check(canonicalNeedleEvent({ session_id: 's2' }))).toBe(true);
+    expect(dedup.droppedCount).toBe(0);
+  });
+
+  it('passes through events with sequence < 0 (legacy, no dedup)', () => {
+    const dedup = new EventDeduplicator();
+    const event = canonicalNeedleEvent({ sequence: -1 });
+    expect(dedup.check(event)).toBe(true);
+    expect(dedup.check(event)).toBe(true);
+    expect(dedup.droppedCount).toBe(0);
+  });
+
+  it('increments droppedCount for each duplicate', () => {
+    const dedup = new EventDeduplicator();
+    const event = canonicalNeedleEvent();
+    dedup.check(event);
+    dedup.check(event);
+    dedup.check(event);
+    dedup.check(event);
+    expect(dedup.droppedCount).toBe(3);
+  });
+
+  it('resets state on reset()', () => {
+    const dedup = new EventDeduplicator();
+    const event = canonicalNeedleEvent();
+    dedup.check(event);
+    dedup.check(event);
+    expect(dedup.droppedCount).toBe(1);
+    expect(dedup.size).toBe(1);
+
+    dedup.reset();
+    expect(dedup.droppedCount).toBe(0);
+    expect(dedup.size).toBe(0);
+
+    // Same event should be allowed again after reset
+    expect(dedup.check(event)).toBe(true);
+  });
+
+  it('evicts oldest entries when exceeding maxSize', () => {
+    const dedup = new EventDeduplicator(5);
+    // Fill with 5 entries
+    for (let i = 0; i < 5; i++) {
+      expect(dedup.check(canonicalNeedleEvent({ sequence: i }))).toBe(true);
+    }
+    expect(dedup.size).toBe(5);
+
+    // Adding a 6th should trigger eviction
+    dedup.check(canonicalNeedleEvent({ sequence: 5 }));
+    expect(dedup.size).toBe(5);
+
+    // The oldest (seq=0) should have been evicted, so re-adding it is allowed
+    expect(dedup.check(canonicalNeedleEvent({ sequence: 0 }))).toBe(true);
+  });
+
+  it('deduplicates same event arriving from JSONL and OTLP sources', () => {
+    const dedup = new EventDeduplicator();
+
+    // Same logical event via JSONL (canonical format)
+    const jsonlRaw = JSON.stringify(canonicalNeedleEvent({
+      session_id: 'sess-dedup',
+      worker_id: 'worker-dedup',
+      sequence: 42,
+    }));
+
+    // Same logical event via OTLP-log
+    const otlpRecord = {
+      timeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'worker.started' } },
+        { key: 'worker_id', value: { stringValue: 'worker-dedup' } },
+        { key: 'session_id', value: { stringValue: 'sess-dedup' } },
+        { key: 'sequence', value: { intValue: '42' } },
+      ],
+    };
+
+    // JSONL arrives first → keep
+    const jsonlNe = normalize(jsonlRaw, 'jsonl')!;
+    expect(jsonlNe).not.toBeNull();
+    expect(dedup.check(jsonlNe)).toBe(true);
+
+    // OTLP arrives second → drop (duplicate)
+    const otlpNe = normalize(otlpRecord, 'otlp-log')!;
+    expect(otlpNe).not.toBeNull();
+    expect(dedup.check(otlpNe)).toBe(false);
+    expect(dedup.droppedCount).toBe(1);
+  });
+
+  it('deduplicates OTLP arriving before JSONL (order does not matter)', () => {
+    const dedup = new EventDeduplicator();
+
+    const otlpRecord = {
+      timeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'bead.claimed' } },
+        { key: 'worker_id', value: { stringValue: 'w-reverse' } },
+        { key: 'session_id', value: { stringValue: 's-reverse' } },
+        { key: 'sequence', value: { intValue: '7' } },
+      ],
+    };
+
+    const jsonlRaw = JSON.stringify(canonicalNeedleEvent({
+      event_type: 'bead.claimed',
+      worker_id: 'w-reverse',
+      session_id: 's-reverse',
+      sequence: 7,
+    }));
+
+    // OTLP arrives first → keep
+    const otlpNe = normalize(otlpRecord, 'otlp-log')!;
+    expect(dedup.check(otlpNe)).toBe(true);
+
+    // JSONL arrives second → drop
+    const jsonlNe = normalize(jsonlRaw, 'jsonl')!;
+    expect(dedup.check(jsonlNe)).toBe(false);
+    expect(dedup.droppedCount).toBe(1);
+  });
+
+  it('reports size correctly', () => {
+    const dedup = new EventDeduplicator();
+    expect(dedup.size).toBe(0);
+    dedup.check(canonicalNeedleEvent({ sequence: 1 }));
+    expect(dedup.size).toBe(1);
+    dedup.check(canonicalNeedleEvent({ sequence: 2 }));
+    expect(dedup.size).toBe(2);
+    // Duplicate doesn't increase size
+    dedup.check(canonicalNeedleEvent({ sequence: 1 }));
+    expect(dedup.size).toBe(2);
   });
 });
