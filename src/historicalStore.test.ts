@@ -94,11 +94,13 @@ describe('HistoricalStore', () => {
     });
 
     it('should record task completion', () => {
+      const startedAt = Date.now() - 60000;
+      const endedAt = startedAt + 60000;
       const taskId = store.recordTask({
         workerId: 'worker-1',
         taskType: 'bead',
-        startedAt: Date.now() - 60000,
-        endedAt: Date.now(),
+        startedAt,
+        endedAt,
         cost: 0.05,
         tokensIn: 500,
         tokensOut: 200,
@@ -511,14 +513,14 @@ describe('HistoricalStore', () => {
       const summaries = store.getSessionWorkerSummaries({ sessionId: 'otlp-metric-sess' });
       expect(summaries).toHaveLength(1);
       const summary = summaries[0];
-      expect(summary.worker_id).toBe('needle-alpha');
-      expect(summary.tokens_in).toBe(1500);
-      expect(summary.tokens_out).toBe(600);
-      expect(summary.cost_usd).toBeCloseTo(0.084);
-      expect(summary.beads_completed).toBe(2);
-      expect(summary.beads_failed).toBe(1);
+      expect(summary.workerId).toBe('needle-alpha');
+      expect(summary.tokensIn).toBe(1500);
+      expect(summary.tokensOut).toBe(600);
+      expect(summary.costUsd).toBeCloseTo(0.084);
+      expect(summary.beadsCompleted).toBe(2);
+      expect(summary.beadsFailed).toBe(1);
       expect(summary.errors).toBe(1);
-      expect(summary.metrics_source).toBe('otlp-metric');
+      expect(summary.metricsSource).toBe('otlp-metric');
 
       // Verify getAggregatedAnalytics prefers metric-sourced data
       store.endSession({
@@ -695,9 +697,9 @@ describe('HistoricalStore', () => {
 
       const summaries = store.getSessionWorkerSummaries({ sessionId: 'no-cost-sess' });
       expect(summaries).toHaveLength(1);
-      expect(summaries[0].metrics_source).toBe('otlp-metric');
-      expect(summaries[0].tokens_in).toBe(800);
-      expect(summaries[0].cost_usd).toBe(0);
+      expect(summaries[0].metricsSource).toBe('otlp-metric');
+      expect(summaries[0].tokensIn).toBe(800);
+      expect(summaries[0].costUsd).toBe(0);
 
       store.endSession({ workerCount: 1, taskCount: 0, totalCost: 0, totalTokens: 800, metricsSource: 'otlp-metric' });
     });

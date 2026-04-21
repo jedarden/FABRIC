@@ -586,7 +586,7 @@ export class HistoricalStore {
 
     query += ' ORDER BY updated_at DESC';
 
-    return this.db.prepare(query).all(...params) as Array<{
+    const rows = this.db.prepare(query).all(...params) as Array<{
       id: number;
       session_id: string;
       worker_id: string;
@@ -599,6 +599,18 @@ export class HistoricalStore {
       metrics_source: string;
       updated_at: number;
     }>;
+
+    return rows.map(row => ({
+      sessionId: row.session_id,
+      workerId: row.worker_id,
+      tokensIn: row.tokens_in,
+      tokensOut: row.tokens_out,
+      costUsd: row.cost_usd,
+      beadsCompleted: row.beads_completed,
+      beadsFailed: row.beads_failed,
+      errors: row.errors,
+      metricsSource: row.metrics_source,
+    }));
   }
 
   /**
@@ -1001,7 +1013,7 @@ export class HistoricalStore {
     const { startTime = 0, endTime = Date.now() } = options;
 
     // Get sessions in range
-    const sessions = this.getSingsInRange(startTime, endTime);
+    const sessions = this.getSessionsInRange(startTime, endTime);
     const sessionIds = sessions.map(s => s.id);
 
     // Fetch metric-sourced worker summaries for these sessions
@@ -1210,7 +1222,7 @@ export class HistoricalStore {
   /**
    * Helper to get sessions in a time range
    */
-  private getSingsInRange(startTime: number, endTime: number): SessionRecord[] {
+  private getSessionsInRange(startTime: number, endTime: number): SessionRecord[] {
     return this.db.prepare(`
       SELECT * FROM sessions
       WHERE started_at >= ? AND ended_at <= ?
