@@ -8,6 +8,8 @@
 import {
   LogEvent,
   LogLevel,
+  NeedleEvent,
+  NEEDLE_EVENT_SCHEMA_VERSION,
   ConversationEvent,
   PromptEvent,
   ResponseEvent,
@@ -18,11 +20,104 @@ import {
 } from './types.js';
 
 /**
+ * Parse a raw JSON object into a canonical NeedleEvent.
+ *
+ * Validates the wire-format fields and asserts schema version compatibility.
+ * Returns null if the object does not match the NeedleEvent shape.
+ *
+ * @throws Error if schema_version is present but doesn't match NEEDLE_EVENT_SCHEMA_VERSION
+ */
+export function parseNeedleEvent(raw: unknown): NeedleEvent | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+
+  // Required fields
+  if (typeof obj.timestamp !== 'string') return null;
+  if (typeof obj.event_type !== 'string') return null;
+  if (typeof obj.worker_id !== 'string') return null;
+  if (typeof obj.session_id !== 'string') return null;
+  if (typeof obj.sequence !== 'number') return null;
+
+  // Schema version assertion — present in newer NEEDLE output
+  if (obj.schema_version !== undefined && obj.schema_version !== NEEDLE_EVENT_SCHEMA_VERSION) {
+    throw new Error(
+      `NeedleEvent schema mismatch: got ${obj.schema_version}, expected ${NEEDLE_EVENT_SCHEMA_VERSION}`
+    );
+  }
+
+  const event: NeedleEvent = {
+    timestamp: obj.timestamp,
+    event_type: obj.event_type,
+    worker_id: obj.worker_id,
+    session_id: obj.session_id,
+    sequence: obj.sequence,
+    data: typeof obj.data === 'object' && obj.data !== null
+      ? obj.data as Record<string, unknown>
+      : {},
+  };
+
+  if (typeof obj.bead_id === 'string') {
+    event.bead_id = obj.bead_id;
+  }
+
+  return event;
+}
+
+/**
+ * Convert a canonical NeedleEvent into the legacy LogEvent shape.
+ *
+ * This adapter preserves backward compatibility with existing UI consumers
+ * that depend on LogEvent's flat structure.
+ */
+export function needleEventToLogEvent(ne: NeedleEvent): LogEvent {
+  const ts = new Date(ne.timestamp).getTime();
+  const level = inferLogLevel(ne.event_type);
+  const event: LogEvent = {
+    ts,
+    worker: ne.worker_id,
+    level,
+    msg: ne.event_type,
+    session: ne.session_id,
+  };
+
+  if (ne.bead_id) event.bead = ne.bead_id;
+
+  const data = ne.data;
+  if (typeof data.duration_ms === 'number') event.duration_ms = data.duration_ms;
+  if (typeof data.error === 'string') event.error = data.error;
+  if (typeof data.tool === 'string') event.tool = data.tool;
+  if (typeof data.path === 'string') event.path = data.path;
+
+  for (const key of Object.keys(data)) {
+    if (!isStandardField(key) && !(key in event)) {
+      event[key] = data[key];
+    }
+  }
+
+  return event;
+}
+
+/**
+ * Check if a parsed object matches the canonical NeedleEvent wire format.
+ * Canonical format uses `timestamp`, `event_type`, `worker_id`, `session_id`, `sequence`.
+ */
+function isCanonicalNeedleFormat(obj: Record<string, unknown>): boolean {
+  return (
+    typeof obj.timestamp === 'string' &&
+    typeof obj.event_type === 'string' &&
+    typeof obj.worker_id === 'string' &&
+    typeof obj.session_id === 'string' &&
+    typeof obj.sequence === 'number'
+  );
+}
+
+/**
  * Parse a single log line
  *
- * Supports two formats:
- * 1. NEEDLE format: {ts: ISO string, event: string, worker: {...}, session: string, data: {...}}
- * 2. Legacy format: {ts: Unix ms, worker: string, level: string, msg: string}
+ * Supports three formats:
+ * 1. Canonical NeedleEvent: {timestamp, event_type, worker_id, session_id, sequence, data}
+ * 2. Legacy NEEDLE format: {ts: ISO string, event: string, worker: {...}, session: string, data: {...}}
+ * 3. Flat legacy format: {ts: Unix ms, worker: string, level: string, msg: string}
  *
  * @param line - Raw log line (JSON string)
  * @returns Parsed LogEvent or null if invalid
@@ -36,7 +131,13 @@ export function parseLogLine(line: string): LogEvent | null {
   try {
     const parsed = JSON.parse(line);
 
-    // Detect format and route to appropriate parser
+    // Canonical NeedleEvent wire format (top priority)
+    if (typeof parsed === 'object' && parsed !== null && isCanonicalNeedleFormat(parsed as Record<string, unknown>)) {
+      const ne = parseNeedleEvent(parsed);
+      if (ne) return needleEventToLogEvent(ne);
+    }
+
+    // Legacy NEEDLE format
     if (isNeedleFormat(parsed)) {
       return parseNeedleFormat(parsed);
     }
@@ -232,12 +333,19 @@ export function parseEventObject(obj: unknown): LogEvent | null {
     return null;
   }
 
-  // Check for NEEDLE format
+  // Canonical NeedleEvent wire format (top priority)
+  const rec = obj as Record<string, unknown>;
+  if (isCanonicalNeedleFormat(rec)) {
+    const ne = parseNeedleEvent(obj);
+    if (ne) return needleEventToLogEvent(ne);
+  }
+
+  // Legacy NEEDLE format
   if (isNeedleFormat(obj)) {
     return parseNeedleFormat(obj);
   }
 
-  // Try as legacy format - validate required fields
+  // Try as flat legacy format - validate required fields
   const parsed = obj as Record<string, unknown>;
   if (typeof parsed.ts !== 'number') {
     return null;

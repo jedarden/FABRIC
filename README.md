@@ -119,4 +119,5 @@ Everything stays on your machine — FABRIC is a local collector, not a third-pa
 
 ## Documentation
 
+- [NeedleEvent Schema](docs/schema.md) — canonical wire format shared with NEEDLE
 - [Implementation Plan](docs/plan.md)

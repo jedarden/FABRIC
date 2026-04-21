@@ -4,6 +4,13 @@
  * Core types for NEEDLE log parsing and worker state management.
  */
 
+/**
+ * Schema version for the NEEDLE event wire format.
+ * Bumped when the canonical NeedleEvent shape changes.
+ * Both NEEDLE and FABRIC must agree on this version.
+ */
+export const NEEDLE_EVENT_SCHEMA_VERSION = 1;
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export type WorkerStatus = 'active' | 'idle' | 'error';
@@ -93,6 +100,40 @@ export type NeedleEventType =
   | 'lock.priority_bump'
   | 'lock.priority_bump_received'
   | 'lock.expired';
+
+// ============================================
+// Canonical NeedleEvent (wire schema)
+// ============================================
+
+/**
+ * Canonical event shape emitted by NEEDLE over JSONL and OTLP.
+ * This is the contract between NEEDLE and FABRIC — versioned via NEEDLE_EVENT_SCHEMA_VERSION.
+ *
+ * Ordering: sort by (worker_id, sequence), NOT by timestamp.
+ * Wall clocks skew across hosts; sequence is the worker's monotonic counter.
+ */
+export interface NeedleEvent {
+  /** RFC3339 timestamp — display only, NOT authoritative for ordering */
+  timestamp: string;
+
+  /** Event taxonomy string, e.g. "worker.started", "bead.claimed" */
+  event_type: NeedleEventType | string;
+
+  /** Worker identifier (e.g. "tcb-alpha") */
+  worker_id: string;
+
+  /** Session identifier grouping a worker's lifetime events */
+  session_id: string;
+
+  /** Per-worker monotonic counter — authoritative for ordering */
+  sequence: number;
+
+  /** Present when event pertains to a specific bead */
+  bead_id?: string;
+
+  /** Event-specific payload */
+  data: Record<string, unknown>;
+}
 
 // ============================================
 // Conversation Event Types
