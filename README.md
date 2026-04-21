@@ -41,6 +41,12 @@ fabric tui
 
 # Web dashboard
 fabric web
+
+# Stream parsed events to stdout
+fabric logs
+
+# With OTLP live telemetry
+fabric tui --otlp-grpc :4317
 ```
 
 FABRIC reads from `~/.needle/logs/` by default.
@@ -106,6 +112,13 @@ fabric web --otlp-http 0.0.0.0:4318
 
 # Both sources merged (JSONL tail + OTLP live)
 fabric tui --source ~/.needle/logs/ --otlp-grpc :4317
+
+# Tail with OTLP and event-type filtering
+fabric tail --otlp-grpc :4317 --event-type "bead.*"
+
+# Stream logs to stdout with filtering (logs is an alias for tail)
+fabric logs --event-type "bead.*"
+fabric logs --worker tcb-a --otlp-grpc :4317
 ```
 
 | Receiver flag | Default port | Protocol |
