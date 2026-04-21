@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { LogEvent, ReplaySpeed, ReplayState } from '../types';
+import { LogEvent, ReplaySpeed, ReplayState, compareEventsBySequence } from '../types';
 import {
   exportToBase64Browser,
   importFromBase64Browser,
@@ -94,9 +94,7 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
 
   // Filter events
   const filteredEvents = React.useMemo(() => {
-    let filtered = [...events].sort((a, b) =>
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+    let filtered = [...events].sort(compareEventsBySequence);
 
     if (filterWorker) {
       filtered = filtered.filter(e => e.worker === filterWorker);
