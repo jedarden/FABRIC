@@ -14,6 +14,9 @@ import {
   DagOptions,
   DagStats,
   BeadStatus,
+  SpanNode,
+  SpanDag,
+  LogEvent,
 } from './types.js';
 
 /**
@@ -507,4 +510,106 @@ export function renderDependencyTree(
 export function refreshDependencyGraph(options: DagOptions = {}): DependencyGraph {
   const rawGraph = getBrGraphJson(options);
   return parseDependencyGraph(rawGraph, options);
+}
+
+// ── Span-based DAG (OTLP parent_span_id linkage) ──────────────
+
+/** Fields on LogEvent that are standard and should not be copied to SpanNode.attributes */
+const SPAN_RESERVED_KEYS = new Set([
+  'ts', 'worker', 'level', 'msg', 'sequence', 'session', 'bead',
+  'duration_ms', 'error', 'tool', 'path', 'provider', 'model',
+  'span_id', 'parent_span_id', 'trace_id', 'span_name',
+]);
+
+/**
+ * Build a span hierarchy DAG from a stream of LogEvents that carry
+ * `span_id` / `parent_span_id` (set by the OTLP normalizer).
+ *
+ * Each span_id produces one SpanNode. The `.started` event seeds the node
+ * (timestamp, name), and the matching `.finished` event closes it
+ * (duration, status). Parent-child edges come from `parent_span_id`.
+ */
+export function buildSpanDag(events: LogEvent[]): SpanDag {
+  const allSpans = new Map<string, SpanNode>();
+  const traces = new Map<string, SpanNode[]>();
+
+  for (const event of events) {
+    const spanId = event.span_id as string | undefined;
+    if (!spanId) continue;
+
+    let node = allSpans.get(spanId);
+    if (!node) {
+      node = {
+        span_id: spanId,
+        trace_id: (event.trace_id as string) || '',
+        parent_span_id: event.parent_span_id as string | undefined,
+        name: (event.span_name as string) || event.msg.replace(/\.(started|finished)$/, ''),
+        worker_id: event.worker,
+        bead_id: event.bead,
+        status: 'unknown',
+        children: [],
+        attributes: {},
+      };
+      allSpans.set(spanId, node);
+    }
+
+    // Update from .started / .finished events
+    const isStarted = event.msg.endsWith('.started');
+    const isFinished = event.msg.endsWith('.finished');
+
+    if (isStarted) {
+      node.start_ts = event.ts;
+      if (event.span_name) node.name = event.span_name as string;
+    } else if (isFinished) {
+      node.end_ts = event.ts;
+      node.duration_ms = event.duration_ms;
+      node.status = event.error ? 'error' : 'ok';
+    }
+
+    // Track by trace_id
+    if (node.trace_id) {
+      const traceSpans = traces.get(node.trace_id) || [];
+      if (!traceSpans.some(s => s.span_id === spanId)) {
+        traceSpans.push(node);
+      }
+      traces.set(node.trace_id, traceSpans);
+    }
+
+    // Copy non-reserved fields into attributes
+    for (const [key, value] of Object.entries(event)) {
+      if (!SPAN_RESERVED_KEYS.has(key) && !(key in node.attributes)) {
+        node.attributes[key] = value;
+      }
+    }
+  }
+
+  // Build parent-child tree
+  const roots: SpanNode[] = [];
+  for (const node of allSpans.values()) {
+    if (node.parent_span_id) {
+      const parent = allSpans.get(node.parent_span_id);
+      if (parent) {
+        parent.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return { roots, allSpans, traces };
+}
+
+/**
+ * Find spans for a specific bead ID within a SpanDag.
+ */
+export function findSpansForBead(dag: SpanDag, beadId: string): SpanNode[] {
+  const result: SpanNode[] = [];
+  for (const node of dag.allSpans.values()) {
+    if (node.bead_id === beadId) {
+      result.push(node);
+    }
+  }
+  return result;
 }

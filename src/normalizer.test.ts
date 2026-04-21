@@ -384,6 +384,143 @@ describe('normalize – otlp-log source', () => {
     expect(result!.data.rate).toBe(3.14);
     expect(result!.data.active).toBe(true);
   });
+
+  // ── namespaced OTLP attributes ──────────────────────────────────\
+
+  it('resolves namespaced attribute keys (needle.worker.id etc.)', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'bead.claimed' } },
+        { key: 'needle.worker.id', value: { stringValue: 'tcb-alpha' } },
+        { key: 'needle.session.id', value: { stringValue: 'sess-ns' } },
+        { key: 'needle.sequence', value: { intValue: '42' } },
+        { key: 'needle.bead.id', value: { stringValue: 'bd-ns' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result).not.toBeNull();
+    expect(result!.worker_id).toBe('tcb-alpha');
+    expect(result!.session_id).toBe('sess-ns');
+    expect(result!.sequence).toBe(42);
+    expect(result!.bead_id).toBe('bd-ns');
+  });
+
+  it('prefers namespaced keys over non-namespaced when both present', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'test' } },
+        { key: 'worker_id', value: { stringValue: 'plain-worker' } },
+        { key: 'needle.worker.id', value: { stringValue: 'ns-worker' } },
+        { key: 'session_id', value: { stringValue: 'plain-sess' } },
+        { key: 'needle.session.id', value: { stringValue: 'ns-sess' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result!.worker_id).toBe('ns-worker');
+    expect(result!.session_id).toBe('ns-sess');
+  });
+
+  it('falls back to non-namespaced keys when namespaced absent', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'test' } },
+        { key: 'worker_id', value: { stringValue: 'fallback-w' } },
+        { key: 'session_id', value: { stringValue: 'fallback-s' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result!.worker_id).toBe('fallback-w');
+    expect(result!.session_id).toBe('fallback-s');
+  });
+
+  it('excludes namespaced keys from data payload', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'test' } },
+        { key: 'needle.worker.id', value: { stringValue: 'w-1' } },
+        { key: 'needle.session.id', value: { stringValue: 's-1' } },
+        { key: 'needle.sequence', value: { intValue: '1' } },
+        { key: 'needle.bead.id', value: { stringValue: 'bd-1' } },
+        { key: 'extra', value: { stringValue: 'kept' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result!.data['needle.worker.id']).toBeUndefined();
+    expect(result!.data['needle.session.id']).toBeUndefined();
+    expect(result!.data['needle.sequence']).toBeUndefined();
+    expect(result!.data['needle.bead.id']).toBeUndefined();
+    expect(result!.data.extra).toBe('kept');
+  });
+
+  // ── body field mapping ──────────────────────────────────────────\
+
+  it('lifts body (kvlistValue) into data', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      body: {
+        kvlistValue: {
+          values: [
+            { key: 'version', value: { stringValue: '1.2.3' } },
+            { key: 'count', value: { intValue: '7' } },
+          ],
+        },
+      },
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'worker.started' } },
+        { key: 'worker_id', value: { stringValue: 'w-1' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result).not.toBeNull();
+    expect(result!.data.version).toBe('1.2.3');
+    expect(result!.data.count).toBe(7);
+  });
+
+  it('lifts body (plain JSON object) into data', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      body: { worker_name: 'tcb-alpha', version: '2.0' },
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'worker.started' } },
+        { key: 'worker_id', value: { stringValue: 'w-1' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result!.data.worker_name).toBe('tcb-alpha');
+    expect(result!.data.version).toBe('2.0');
+  });
+
+  it('wraps scalar body into data.value', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      body: { stringValue: 'hello world' },
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'test' } },
+        { key: 'worker_id', value: { stringValue: 'w-1' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result!.data.value).toBe('hello world');
+  });
+
+  it('merges attributes into data on top of body', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      body: { version: '1.0' },
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'test' } },
+        { key: 'worker_id', value: { stringValue: 'w-1' } },
+        { key: 'extra_attr', value: { stringValue: 'from-attrs' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result!.data.version).toBe('1.0');
+    expect(result!.data.extra_attr).toBe('from-attrs');
+  });
 });
 
 // ── OTLP-span-start source ───────────────────────────────────────
@@ -453,6 +590,87 @@ describe('normalize – otlp-span-start source', () => {
 
   it('returns null for null input', () => {
     expect(normalize(null, 'otlp-span-start')).toBeNull();
+  });
+
+  // ── span structural fields (span_id, parent_span_id, trace_id) ──
+
+  it('extracts span structural fields into data', () => {
+    const span = {
+      name: 'bead.lifecycle',
+      traceId: 'abc123',
+      spanId: 'span001',
+      parentSpanId: 'parent001',
+      startTimeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+        { key: 'session_id', value: { stringValue: 'sess-1' } },
+      ],
+    };
+    const result = normalize(span, 'otlp-span-start');
+    expect(result).not.toBeNull();
+    expect(result!.data.span_id).toBe('span001');
+    expect(result!.data.parent_span_id).toBe('parent001');
+    expect(result!.data.trace_id).toBe('abc123');
+    expect(result!.data.span_name).toBe('bead.lifecycle');
+  });
+
+  it('uses span name for event_type as {name}.started', () => {
+    const span = {
+      name: 'tool.call',
+      spanId: 'span002',
+      startTimeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+      ],
+    };
+    const result = normalize(span, 'otlp-span-start');
+    expect(result).not.toBeNull();
+    expect(result!.event_type).toBe('tool.call.started');
+  });
+
+  it('prefers span name over explicit event_type for .started', () => {
+    const span = {
+      name: 'llm.request',
+      spanId: 'span003',
+      startTimeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'bead.claimed' } },
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+      ],
+    };
+    const result = normalize(span, 'otlp-span-start');
+    expect(result!.event_type).toBe('llm.request.started');
+  });
+
+  it('handles spans without structural fields (backward compat)', () => {
+    const span = {
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'bead.claimed' } },
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+      ],
+    };
+    const result = normalize(span, 'otlp-span-start');
+    expect(result).not.toBeNull();
+    expect(result!.event_type).toBe('bead.claimed');
+    expect(result!.data.span_id).toBeUndefined();
+    expect(result!.data.parent_span_id).toBeUndefined();
+    expect(result!.data.trace_id).toBeUndefined();
+  });
+
+  it('accepts snake_case span_id / parent_span_id / trace_id', () => {
+    const span = {
+      trace_id: 'trace-ns',
+      span_id: 'span-ns',
+      parent_span_id: 'parent-ns',
+      startTimeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+      ],
+    };
+    const result = normalize(span, 'otlp-span-start');
+    expect(result!.data.span_id).toBe('span-ns');
+    expect(result!.data.parent_span_id).toBe('parent-ns');
+    expect(result!.data.trace_id).toBe('trace-ns');
   });
 });
 
@@ -550,6 +768,85 @@ describe('normalize – otlp-span-end source', () => {
 
   it('returns null for null input', () => {
     expect(normalize(null, 'otlp-span-end')).toBeNull();
+  });
+
+  // ── span structural fields (span_id, parent_span_id, trace_id) ──
+
+  it('extracts span structural fields into data on span end', () => {
+    const span = {
+      name: 'bead.lifecycle',
+      traceId: 'trace-abc',
+      spanId: 'span-end-001',
+      parentSpanId: 'parent-end-001',
+      startTimeUnixNano: '1772641054008000000',
+      endTimeUnixNano: '1772641058000000000',
+      status: { code: 'OK' },
+      attributes: [
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+        { key: 'bead_id', value: { stringValue: 'bd-end' } },
+      ],
+    };
+    const result = normalize(span, 'otlp-span-end');
+    expect(result).not.toBeNull();
+    expect(result!.data.span_id).toBe('span-end-001');
+    expect(result!.data.parent_span_id).toBe('parent-end-001');
+    expect(result!.data.trace_id).toBe('trace-abc');
+    expect(result!.data.span_name).toBe('bead.lifecycle');
+    expect(result!.data.duration_ms).toBe(3992);
+  });
+
+  it('uses span name for event_type as {name}.finished', () => {
+    const span = {
+      name: 'tool.call',
+      spanId: 'span-tool-001',
+      endTimeUnixNano: '1772641058000000000',
+      status: { code: 'OK' },
+      attributes: [
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+      ],
+    };
+    const result = normalize(span, 'otlp-span-end');
+    expect(result).not.toBeNull();
+    expect(result!.event_type).toBe('tool.call.finished');
+  });
+
+  it('uses {name}.finished even on ERROR status', () => {
+    const span = {
+      name: 'llm.request',
+      spanId: 'span-llm-err',
+      endTimeUnixNano: '1772641058000000000',
+      status: { code: 'ERROR', message: 'rate limited' },
+      attributes: [
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+      ],
+    };
+    const result = normalize(span, 'otlp-span-end');
+    expect(result!.event_type).toBe('llm.request.finished');
+    expect(result!.data.error).toBe('rate limited');
+  });
+
+  it('promotes span fields through to LogEvent via normalizeToLogEvent', () => {
+    const span = {
+      name: 'bead.lifecycle',
+      traceId: 'trace-log',
+      spanId: 'span-log-001',
+      parentSpanId: 'parent-log-001',
+      startTimeUnixNano: '1772641054008000000',
+      endTimeUnixNano: '1772641058000000000',
+      status: { code: 'OK' },
+      attributes: [
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+        { key: 'bead_id', value: { stringValue: 'bd-log' } },
+      ],
+    };
+    const logEvent = normalizeToLogEvent(span, 'otlp-span-end');
+    expect(logEvent).not.toBeNull();
+    expect(logEvent!.span_id).toBe('span-log-001');
+    expect(logEvent!.parent_span_id).toBe('parent-log-001');
+    expect(logEvent!.trace_id).toBe('trace-log');
+    expect(logEvent!.span_name).toBe('bead.lifecycle');
+    expect(logEvent!.bead).toBe('bd-log');
+    expect(logEvent!.duration_ms).toBe(3992);
   });
 });
 
