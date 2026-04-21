@@ -78,7 +78,22 @@ NEEDLE (orchestrates workers) → logs → FABRIC (displays + analyzes)
 
 NEEDLE does the work. FABRIC shows you what's happening and helps you understand it.
 
-## Status
+## Wiring NEEDLE → FABRIC
+
+NEEDLE ships with an `otlp` feature (enabled by default in `Cargo.toml`) that exports telemetry over the standard OpenTelemetry OTLP protocol. No rebuild or extra flags are needed — just set two environment variables before launching workers:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://fabric-host:4317
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+needle run ...
+```
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | FABRIC's gRPC listener (port `4317` by default) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | Use `grpc` for FABRIC's primary OTLP/gRPC receiver |
+
+Everything stays on your machine — FABRIC is a local collector, not a third-party service. Telemetry is read-only: FABRIC ingests spans/logs/metrics for display but never writes back to NEEDLE or modifies worker state.
 
 🚧 **In Development** - See [docs/plan.md](docs/plan.md) for implementation roadmap.
 
