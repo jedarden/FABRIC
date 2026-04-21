@@ -13,8 +13,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
-import { parseEventObject } from '../parser.js';
+import { normalizeToLogEvent } from '../normalizer.js';
 import { computeFleetAnalytics } from '../analytics.js';
+import { createOtlpHttpRouter } from '../otlpHttpReceiver.js';
 
 /** Maximum payload size for POST requests (64KB) */
 const MAX_PAYLOAD_SIZE = 64 * 1024;
@@ -30,6 +31,8 @@ export interface WebServerOptions {
   store: InMemoryEventStore;
   /** Optional auth token for POST endpoints. If provided, requires Bearer token in Authorization header */
   authToken?: string;
+  /** When set, creates a second HTTP listener on this port for OTLP/HTTP traffic. */
+  otlpHttpPort?: number;
 }
 
 export interface WebServer extends EventEmitter {
@@ -44,11 +47,12 @@ export interface WebServer extends EventEmitter {
  * Create the FABRIC web server
  */
 export function createWebServer(options: WebServerOptions): WebServer {
-  const { port, logPath, store, authToken } = options;
+  const { port, logPath, store, authToken, otlpHttpPort } = options;
   const emitter = new EventEmitter();
 
   let app: Express;
   let httpServer: HttpServer;
+  let otlpHttpServer: HttpServer | undefined;
   let wsServer: WebSocketServer;
   let running = false;
   const clients: Set<WebSocket> = new Set();
@@ -59,6 +63,17 @@ export function createWebServer(options: WebServerOptions): WebServer {
     app = express();
     httpServer = createServer(app);
     wsServer = new WebSocketServer({ server: httpServer });
+
+    // ── OTLP/HTTP routes (mounted before json middleware so raw body is available) ──
+    if (otlpHttpPort) {
+      const otlpRouter = createOtlpHttpRouter({
+        onEvent: (event: LogEvent) => {
+          store.add(event);
+          broadcast(event);
+        },
+      });
+      app.use(otlpRouter);
+    }
 
     // Parse JSON bodies
     app.use(express.json({ limit: MAX_PAYLOAD_SIZE.toString() }));
@@ -158,7 +173,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
         }
 
         // Parse the event object
-        const logEvent = parseEventObject(eventObj);
+        const logEvent = normalizeToLogEvent(eventObj, 'jsonl');
         if (!logEvent) {
           res.status(400).json({ error: 'Invalid event format', message: 'Failed to parse event object' });
           return;
@@ -226,7 +241,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
           }
 
           // Parse the event object
-          const logEvent = parseEventObject(eventObj);
+          const logEvent = normalizeToLogEvent(eventObj, 'jsonl');
           if (!logEvent) {
             errors.push({ index: i, error: 'Failed to parse event object' });
             continue;
@@ -614,6 +629,18 @@ export function createWebServer(options: WebServerOptions): WebServer {
       emitter.emit('start');
     });
 
+    // Second HTTP listener for OTLP/HTTP traffic (port 4318 by convention)
+    if (otlpHttpPort) {
+      otlpHttpServer = createServer(app);
+      otlpHttpServer.listen(otlpHttpPort, () => {
+        console.log(`OTLP/HTTP receiver listening on 0.0.0.0:${otlpHttpPort}`);
+      });
+      otlpHttpServer.on('error', (err) => {
+        console.error(`OTLP/HTTP listener error: ${(err as Error).message}`);
+        emitter.emit('error', err);
+      });
+    }
+
     httpServer.on('error', (err) => {
       emitter.emit('error', err);
     });
@@ -628,10 +655,21 @@ export function createWebServer(options: WebServerOptions): WebServer {
     }
     clients.clear();
 
+    const closeOtlp = () =>
+      new Promise<void>((resolve) => {
+        if (otlpHttpServer) {
+          otlpHttpServer.close(() => resolve());
+        } else {
+          resolve();
+        }
+      });
+
     wsServer.close(() => {
       httpServer.close(() => {
-        running = false;
-        emitter.emit('stop');
+        closeOtlp().then(() => {
+          running = false;
+          emitter.emit('stop');
+        });
       });
     });
   }

@@ -29,11 +29,13 @@ program
   .command('tui')
   .description('Launch terminal UI dashboard')
   .option('-f, --file <path>', 'Log file to tail', '~/.needle/logs/workers.log')
+  .option('--otlp-grpc <addr>', 'Enable OTLP/gRPC receiver (e.g. :4317 or 0.0.0.0:4317)')
   .action(async (options) => {
     const filePath = options.file.replace('~', process.env.HOME || '');
 
     try {
       const { createTuiApp } = await import('./tui/index.js');
+      const { OtlpGrpcReceiver } = await import('./otlpGrpcReceiver.js');
       const store = getStore();
       const app = createTuiApp(store, { logPath: filePath });
 
@@ -54,6 +56,18 @@ program
         console.error(`Tailer error: ${err.message}`);
       });
 
+      // Start OTLP/gRPC receiver if requested
+      let otlpReceiver: import('./otlpGrpcReceiver.js').OtlpGrpcReceiver | undefined;
+      if (options.otlpGrpc) {
+        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc });
+        otlpReceiver.on('event', (event) => {
+          store.add(event);
+          app.addEvent(event);
+        });
+        const boundAddr = await otlpReceiver.start();
+        console.error(`OTLP/gRPC receiver listening on ${boundAddr}`);
+      }
+
       // Start tailing and TUI
       tailer.start();
       app.start();
@@ -61,6 +75,7 @@ program
       // Handle graceful shutdown
       process.on('SIGINT', () => {
         tailer.stop();
+        otlpReceiver?.stop();
         app.stop();
       });
     } catch (err) {
@@ -75,10 +90,20 @@ program
   .option('-p, --port <number>', 'Port to listen on', '3000')
   .option('-f, --file <path>', 'Log file to tail', '~/.needle/logs/workers.log')
   .option('-a, --auth-token <token>', 'Auth token for POST endpoints (or use FABRIC_AUTH_TOKEN env var)')
+  .option('--otlp-grpc <addr>', 'Enable OTLP/gRPC receiver (e.g. :4317 or 0.0.0.0:4317)')
+  .option('--otlp-http <addr>', 'Enable OTLP/HTTP receiver (e.g. :4318 or 0.0.0.0:4318)')
   .action(async (options) => {
     const filePath = options.file.replace('~', process.env.HOME || '');
     const port = parseInt(options.port, 10) || 3000;
     const authToken = options.authToken || process.env.FABRIC_AUTH_TOKEN;
+    const otlpHttpAddr: string | undefined = options.otlpHttp;
+
+    // Extract port number from --otlp-http (e.g. ":4318" or "0.0.0.0:4318" → 4318)
+    let otlpHttpPort: number | undefined;
+    if (otlpHttpAddr) {
+      const match = otlpHttpAddr.match(/(\d+)$/);
+      otlpHttpPort = match ? parseInt(match[1], 10) : undefined;
+    }
 
     try {
       const store = getStore();
@@ -87,6 +112,7 @@ program
         logPath: filePath,
         store,
         authToken,
+        otlpHttpPort,
       });
 
       // Setup log tailing
@@ -106,10 +132,24 @@ program
         console.error(`Tailer error: ${err.message}`);
       });
 
+      // Start OTLP/gRPC receiver if requested
+      let otlpReceiver: import('./otlpGrpcReceiver.js').OtlpGrpcReceiver | undefined;
+      if (options.otlpGrpc) {
+        const { OtlpGrpcReceiver } = await import('./otlpGrpcReceiver.js');
+        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc });
+        otlpReceiver.on('event', (event) => {
+          store.add(event);
+          server.broadcast(event);
+        });
+        const boundAddr = await otlpReceiver.start();
+        console.error(`OTLP/gRPC receiver listening on ${boundAddr}`);
+      }
+
       // Handle graceful shutdown
       process.on('SIGINT', () => {
         console.log('\nShutting down...');
         tailer.stop();
+        otlpReceiver?.stop();
         server.stop();
         process.exit(0);
       });
