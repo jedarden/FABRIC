@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  parseNeedleEvent,
   parseLogLine,
   parseLogLines,
   formatEvent,
@@ -14,7 +15,7 @@ import {
   parseConversationContent,
   formatConversationEvent,
 } from './parser.js';
-import { LogEvent, LogLevel, ConversationEvent } from './types.js';
+import { LogEvent, LogLevel, ConversationEvent, NeedleEvent, NeedleEventType, NEEDLE_EVENT_SCHEMA_VERSION } from './types.js';
 
 describe('parseLogLine', () => {
   describe('valid inputs', () => {
@@ -2315,6 +2316,294 @@ describe('parseLogLine - NEEDLE format', () => {
 
       expect(legacyResult?.worker).toBe('w-legacy');
       expect(legacyResult?.msg).toBe('Legacy message');
+    });
+  });
+});
+
+// ============================================
+// parseNeedleEvent Tests (bd-6q2)
+// ============================================
+
+describe('parseNeedleEvent', () => {
+  describe('canonical format', () => {
+    it('should parse a canonical NeedleEvent preserving all fields', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-04-08T20:10:43.353624Z',
+        event_type: 'worker.started',
+        worker_id: 'echo',
+        session_id: '66745068',
+        sequence: 0,
+        data: { version: '0.1.0', worker_name: 'echo' },
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.timestamp).toBe('2026-04-08T20:10:43.353624Z');
+      expect(result!.event_type).toBe('worker.started');
+      expect(result!.worker_id).toBe('echo');
+      expect(result!.session_id).toBe('66745068');
+      expect(result!.sequence).toBe(0);
+      expect(result!.data).toEqual({ version: '0.1.0', worker_name: 'echo' });
+    });
+
+    it('should preserve bead_id when present', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-04-08T20:11:00.000Z',
+        event_type: 'bead.completed',
+        worker_id: 'echo',
+        session_id: '66745068',
+        sequence: 5,
+        bead_id: 'bd-abc123',
+        data: { duration_ms: 15000 },
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.bead_id).toBe('bd-abc123');
+    });
+
+    it('should return undefined bead_id when absent', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-04-08T20:10:43.000Z',
+        event_type: 'worker.idle',
+        worker_id: 'echo',
+        session_id: '66745068',
+        sequence: 1,
+        data: {},
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.bead_id).toBeUndefined();
+    });
+
+    it('should preserve deeply nested data fields', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-04-08T20:10:43.000Z',
+        event_type: 'bead.claimed',
+        worker_id: 'echo',
+        session_id: '66745068',
+        sequence: 2,
+        data: {
+          nested: { deep: { value: 42, arr: [1, 2, 3] } },
+          metadata: { tags: ['a', 'b'] },
+        },
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.data.nested).toEqual({ deep: { value: 42, arr: [1, 2, 3] } });
+      expect(result!.data.metadata).toEqual({ tags: ['a', 'b'] });
+    });
+
+    it('should default data to empty object when missing', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-04-08T20:10:43.000Z',
+        event_type: 'worker.started',
+        worker_id: 'echo',
+        session_id: '66745068',
+        sequence: 0,
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.data).toEqual({});
+    });
+
+    it('should accept schema_version matching current version', () => {
+      const line = JSON.stringify({
+        schema_version: NEEDLE_EVENT_SCHEMA_VERSION,
+        timestamp: '2026-04-08T20:10:43.000Z',
+        event_type: 'worker.started',
+        worker_id: 'echo',
+        session_id: '66745068',
+        sequence: 0,
+        data: {},
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.event_type).toBe('worker.started');
+    });
+
+    it('should throw on schema_version mismatch', () => {
+      const line = JSON.stringify({
+        schema_version: 999,
+        timestamp: '2026-04-08T20:10:43.000Z',
+        event_type: 'worker.started',
+        worker_id: 'echo',
+        session_id: '66745068',
+        sequence: 0,
+        data: {},
+      });
+
+      expect(() => parseNeedleEvent(line)).toThrow(/schema mismatch/);
+    });
+  });
+
+  describe('session_id, sequence, and data round-trip', () => {
+    it('should preserve session_id through parseNeedleEvent → needleEventToLogEvent round-trip', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-04-08T20:10:43.353624Z',
+        event_type: 'bead.claimed',
+        worker_id: 'echo',
+        session_id: '66745068',
+        sequence: 3,
+        bead_id: 'bd-xyz',
+        data: { workspace: '/home/coder/NEEDLE' },
+      });
+
+      const ne = parseNeedleEvent(line);
+      expect(ne).not.toBeNull();
+      expect(ne!.session_id).toBe('66745068');
+      expect(ne!.sequence).toBe(3);
+
+      // Round-trip through LogEvent adapter
+      const le = parseLogLine(line);
+      expect(le).not.toBeNull();
+      expect(le!.session).toBe('66745068');
+      expect(le!.bead).toBe('bd-xyz');
+    });
+
+    it('should preserve arbitrary data payload keys', () => {
+      const line = JSON.stringify({
+        timestamp: '2026-04-08T20:10:43.000Z',
+        event_type: 'effort.recorded',
+        worker_id: 'echo',
+        session_id: 'abc123',
+        sequence: 10,
+        bead_id: 'bd-test',
+        data: {
+          duration_ms: 28854,
+          cost_usd: 0.037,
+          model: 'glm-4.7',
+          tokens_in: 1200,
+          tokens_out: 800,
+        },
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.data.duration_ms).toBe(28854);
+      expect(result!.data.cost_usd).toBe(0.037);
+      expect(result!.data.model).toBe('glm-4.7');
+      expect(result!.data.tokens_in).toBe(1200);
+      expect(result!.data.tokens_out).toBe(800);
+    });
+  });
+
+  describe('covers all NeedleEventType values', () => {
+    const allEventTypes: NeedleEventType[] = [
+      'worker.started', 'worker.idle', 'worker.stopped', 'worker.draining',
+      'bead.claimed', 'bead.prompt_built', 'bead.agent_started', 'bead.agent_completed',
+      'bead.completed', 'bead.failed', 'bead.released', 'bead.claim_retry', 'bead.claim_exhausted',
+      'bead.mitosis.check', 'bead.mitosis.started', 'bead.mitosis.child_created',
+      'bead.mitosis.complete', 'bead.mitosis.failed', 'bead.mitosis.skipped',
+      'strand.started', 'strand.completed', 'strand.fallthrough', 'strand.skipped',
+      'hook.started', 'hook.completed', 'hook.failed',
+      'heartbeat.emitted', 'heartbeat.stuck_detected', 'heartbeat.recovery',
+      'mend.orphan_released', 'mend.heartbeat_cleaned', 'mend.logs_pruned', 'mend.completed',
+      'unravel.alternatives_created', 'unravel.alternative_created',
+      'unravel.analysis_started', 'unravel.analysis_completed',
+      'weave.bead_created', 'weave.analysis_started', 'weave.analysis_completed',
+      'pulse.bead_created', 'pulse.scan_started', 'pulse.scan_completed',
+      'pulse.issue_detected', 'pulse.detector_started', 'pulse.detector_completed',
+      'error.claim_failed', 'error.agent_crash', 'error.timeout', 'error.release_failed',
+      'effort.recorded', 'budget.warning', 'budget.exceeded', 'budget.per_bead_exceeded',
+      'file.checkout', 'file.conflict', 'file.release', 'file.stale',
+      'lock.priority_bump', 'lock.priority_bump_received', 'lock.expired',
+    ];
+
+    it('should parse every NeedleEventType without returning null', () => {
+      for (const eventType of allEventTypes) {
+        const line = JSON.stringify({
+          timestamp: '2026-04-08T20:10:43.000Z',
+          event_type: eventType,
+          worker_id: 'test-worker',
+          session_id: 'test-session',
+          sequence: 1,
+          data: {},
+        });
+
+        const result = parseNeedleEvent(line);
+
+        expect(result).not.toBeNull();
+        expect(result!.event_type).toBe(eventType);
+      }
+    });
+  });
+
+  describe('legacy NEEDLE format', () => {
+    it('should parse legacy NEEDLE format into NeedleEvent', () => {
+      const line = JSON.stringify({
+        ts: '2026-03-04T16:17:34.008Z',
+        event: 'worker.started',
+        session: 'forge-glm-test',
+        worker: {
+          runner: 'claude',
+          provider: 'code',
+          model: 'glm-4.7',
+          identifier: 'test',
+        },
+        data: { pid: 2789549, workspace: '/home/coder/forge' },
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.event_type).toBe('worker.started');
+      expect(result!.worker_id).toBe('claude-code-glm-4.7-test');
+      expect(result!.session_id).toBe('forge-glm-test');
+      expect(result!.timestamp).toBe('2026-03-04T16:17:34.008Z');
+      expect(result!.data.pid).toBe(2789549);
+      expect(result!.data.workspace).toBe('/home/coder/forge');
+    });
+
+    it('should parse flat legacy format into NeedleEvent', () => {
+      const line = JSON.stringify({
+        ts: 1709337600000,
+        worker: 'w-abc123',
+        level: 'info',
+        msg: 'Test message',
+      });
+
+      const result = parseNeedleEvent(line);
+
+      expect(result).not.toBeNull();
+      expect(result!.event_type).toBe('Test message');
+      expect(result!.worker_id).toBe('w-abc123');
+      expect(result!.session_id).toBe('');
+      expect(result!.data.level).toBe('info');
+    });
+  });
+
+  describe('invalid inputs', () => {
+    it('should return null for empty string', () => {
+      expect(parseNeedleEvent('')).toBeNull();
+    });
+
+    it('should return null for whitespace-only string', () => {
+      expect(parseNeedleEvent('   \n\t  ')).toBeNull();
+    });
+
+    it('should return null for non-JSON string', () => {
+      expect(parseNeedleEvent('not valid json')).toBeNull();
+    });
+
+    it('should return null for malformed JSON', () => {
+      expect(parseNeedleEvent('{"ts": 123,')).toBeNull();
+    });
+
+    it('should return null for object missing required canonical fields', () => {
+      const line = JSON.stringify({ timestamp: '2026-04-08T20:10:43.000Z' });
+      expect(parseNeedleEvent(line)).toBeNull();
     });
   });
 });
