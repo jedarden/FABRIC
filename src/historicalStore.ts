@@ -504,18 +504,23 @@ export class HistoricalStore {
       this.startSession();
     }
 
+    // Source priority: otlp-metric (0) > otlp-span (1) > log-derived (2).
+    // Only overwrite existing row when the incoming source has equal or higher priority.
+    const incomingRank = summary.metricsSource === 'otlp-metric' ? 0
+      : summary.metricsSource === 'otlp-span' ? 1 : 2;
+
     this.db.prepare(`
       INSERT INTO session_worker_summaries
         (session_id, worker_id, tokens_in, tokens_out, cost_usd, beads_completed, beads_failed, errors, metrics_source, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id, worker_id) DO UPDATE SET
-        tokens_in = excluded.tokens_in,
-        tokens_out = excluded.tokens_out,
-        cost_usd = excluded.cost_usd,
-        beads_completed = excluded.beads_completed,
-        beads_failed = excluded.beads_failed,
-        errors = excluded.errors,
-        metrics_source = excluded.metrics_source,
+        tokens_in      = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.tokens_in      ELSE tokens_in END,
+        tokens_out     = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.tokens_out     ELSE tokens_out END,
+        cost_usd       = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.cost_usd       ELSE cost_usd END,
+        beads_completed = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.beads_completed ELSE beads_completed END,
+        beads_failed   = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.beads_failed   ELSE beads_failed END,
+        errors         = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.errors         ELSE errors END,
+        metrics_source = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.metrics_source ELSE metrics_source END,
         updated_at = excluded.updated_at
     `).run(
       this.currentSessionId,
@@ -655,7 +660,26 @@ export class HistoricalStore {
     query += ` ORDER BY CASE source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END, timestamp DESC LIMIT ?`;
     params.push(options.limit || 1000);
 
-    return this.db.prepare(query).all(...params) as any[];
+    const rows = this.db.prepare(query).all(...params) as Array<{
+      id: number;
+      worker_id: string;
+      metric_name: string;
+      value: number;
+      timestamp: number;
+      source: string;
+      bead_id: string | null;
+      session_id: string | null;
+    }>;
+
+    return rows.map(row => ({
+      workerId: row.worker_id,
+      metricName: row.metric_name,
+      value: row.value,
+      timestamp: row.timestamp,
+      source: row.source,
+      beadId: row.bead_id,
+      sessionId: row.session_id,
+    }));
   }
 
   /**

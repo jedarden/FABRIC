@@ -210,6 +210,17 @@ estimates when both are present for the same worker + session.
 | `needle.bead.failed` | Sum | count | `session_worker_summaries.beads_failed` |
 | `needle.worker.errors` | Sum | count | `session_worker_summaries.errors` |
 
+### Accepted Aliases
+
+NEEDLE's telemetry module (`OtlpMetricSink`) emits some instruments under
+slightly different names. FABRIC resolves these to the canonical names above
+via the `INSTRUMENT_ALIASES` map in `src/workerAnalytics.ts`:
+
+| NEEDLE Emitted Name | Canonical Name |
+|---|---|
+| `needle.worker.beads.completed` | `needle.bead.completed` |
+| `needle.worker.beads.failed` | `needle.bead.failed` |
+
 ### Attribute Requirements
 
 Every metric data point **must** carry these OTLP attributes (namespaced form

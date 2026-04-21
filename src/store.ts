@@ -284,22 +284,25 @@ export class InMemoryEventStore implements EventStore {
       });
     }
 
-    // Upsert per-worker session summaries from the accumulator snapshots
+    // Upsert per-worker session summaries from the accumulator snapshots.
+    // Only write rows for workers that have actual OTLP metric snapshots —
+    // the upsert will protect any existing metric-sourced rows from
+    // lower-priority log-derived overwrites.
     const hasMetricData = accumulator.hasMetricData();
     if (hasMetricData) {
-      // Get all workers that have metric snapshots
       const allWorkerMetrics = this.workerAnalytics.getAllWorkerMetrics({ timeWindow: 'all' });
       for (const wm of allWorkerMetrics) {
         const metricSnap = accumulator.getSnapshot(wm.workerId);
+        if (!metricSnap) continue;
         this.historicalStore.upsertSessionWorkerSummary({
           workerId: wm.workerId,
-          tokensIn: metricSnap?.tokensIn ?? Math.floor(wm.totalTokens * 0.7),
-          tokensOut: metricSnap?.tokensOut ?? Math.floor(wm.totalTokens * 0.3),
-          costUsd: metricSnap?.costUsd ?? wm.totalCostUsd,
-          beadsCompleted: metricSnap?.beadsCompleted ?? wm.beadsCompleted,
-          beadsFailed: metricSnap?.beadsFailed ?? 0,
-          errors: metricSnap?.errors ?? wm.errorCount,
-          metricsSource: metricSnap ? 'otlp-metric' : 'log-derived',
+          tokensIn: metricSnap.tokensIn,
+          tokensOut: metricSnap.tokensOut,
+          costUsd: metricSnap.costUsd,
+          beadsCompleted: metricSnap.beadsCompleted,
+          beadsFailed: metricSnap.beadsFailed,
+          errors: metricSnap.errors,
+          metricsSource: 'otlp-metric',
         });
       }
     }
@@ -349,19 +352,34 @@ export class InMemoryEventStore implements EventStore {
         const workerEvents = this.events.filter(e => e.bead === beadId);
         const workerId = workerEvents[0]?.worker || 'unknown';
 
-        // Get cost info for this task
-        const costSummary = this.workerAnalytics.getAllWorkerMetrics({ workerIds: [workerId] });
-        const workerCost = costSummary[0]?.totalCostUsd || 0;
-        const workerTokens = costSummary[0]?.totalTokens || 0;
+        // Prefer OTLP metric snapshot over log-derived estimates
+        const accumulator = this.workerAnalytics.getMetricAccumulator();
+        const metricSnap = accumulator.getSnapshot(workerId);
+
+        let tokensIn: number;
+        let tokensOut: number;
+        let cost: number;
+
+        if (metricSnap) {
+          tokensIn = metricSnap.tokensIn;
+          tokensOut = metricSnap.tokensOut;
+          cost = metricSnap.costUsd;
+        } else {
+          const costSummary = this.workerAnalytics.getAllWorkerMetrics({ workerIds: [workerId] });
+          cost = costSummary[0]?.totalCostUsd || 0;
+          const workerTokens = costSummary[0]?.totalTokens || 0;
+          tokensIn = Math.floor(workerTokens * 0.7);
+          tokensOut = Math.floor(workerTokens * 0.3);
+        }
 
         this.historicalStore.recordTask({
           workerId,
           taskType: 'bead',
           startedAt: startTime,
           endedAt: completionEvent.ts,
-          cost: workerCost,
-          tokensIn: Math.floor(workerTokens * 0.7), // Estimate
-          tokensOut: Math.floor(workerTokens * 0.3), // Estimate
+          cost,
+          tokensIn,
+          tokensOut,
           success: completionEvent.level !== 'error',
           retryCount: 0,
         });
@@ -574,11 +592,25 @@ export class InMemoryEventStore implements EventStore {
       if (startTime) {
         const durationMs = event.ts - startTime;
 
-        // Get cost info for this worker
-        const workerMetrics = this.workerAnalytics.getWorkerMetrics(event.worker);
-        const cost = workerMetrics?.costPerBead || 0;
-        const tokensIn = Math.floor((workerMetrics?.totalTokens || 0) * 0.7);
-        const tokensOut = Math.floor((workerMetrics?.totalTokens || 0) * 0.3);
+        // Prefer OTLP metric snapshot over log-derived estimates
+        const accumulator = this.workerAnalytics.getMetricAccumulator();
+        const metricSnap = accumulator.getSnapshot(event.worker);
+
+        let tokensIn: number;
+        let tokensOut: number;
+        let cost: number;
+
+        if (metricSnap) {
+          tokensIn = metricSnap.tokensIn;
+          tokensOut = metricSnap.tokensOut;
+          cost = metricSnap.costUsd;
+        } else {
+          // Fallback: log-derived estimate with 70/30 split
+          const workerMetrics = this.workerAnalytics.getWorkerMetrics(event.worker);
+          cost = workerMetrics?.costPerBead || 0;
+          tokensIn = Math.floor((workerMetrics?.totalTokens || 0) * 0.7);
+          tokensOut = Math.floor((workerMetrics?.totalTokens || 0) * 0.3);
+        }
 
         this.historicalStore.recordTask({
           workerId: event.worker,

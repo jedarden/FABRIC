@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { WorkerAnalytics } from './workerAnalytics.js';
-import { MetricAccumulator, INSTRUMENT_NAMES } from './workerAnalytics.js';
+import { MetricAccumulator, INSTRUMENT_NAMES, resolveInstrumentName } from './workerAnalytics.js';
 import { LogEvent } from './types.js';
 import { CostTracker } from './tui/utils/costTracking.js';
 
@@ -732,5 +732,45 @@ describe('MetricAccumulator', () => {
     };
     accumulator.processEvent(event);
     expect(accumulator.getSnapshot('w-1')!.tokensIn).toBe(42);
+  });
+
+  describe('alias resolution (NEEDLE naming convention)', () => {
+    it('resolves needle.worker.beads.completed to needle.bead.completed', () => {
+      accumulator.processEvent(makeMetricEvent('w-1', 'needle.worker.beads.completed', 1));
+      accumulator.processEvent(makeMetricEvent('w-1', 'needle.worker.beads.completed', 1));
+
+      const snap = accumulator.getSnapshot('w-1');
+      expect(snap!.beadsCompleted).toBe(2);
+    });
+
+    it('resolves needle.worker.beads.failed to needle.bead.failed', () => {
+      accumulator.processEvent(makeMetricEvent('w-1', 'needle.worker.beads.failed', 1));
+
+      const snap = accumulator.getSnapshot('w-1');
+      expect(snap!.beadsFailed).toBe(1);
+    });
+
+    it('drains alias-resolved samples with canonical name', () => {
+      accumulator.processEvent(makeMetricEvent('w-1', 'needle.worker.beads.completed', 1));
+
+      const samples = accumulator.drainSamples();
+      expect(samples).toHaveLength(1);
+      expect(samples[0].metricName).toBe('needle.bead.completed');
+    });
+
+    it('coaccumulates alias and canonical names for the same instrument', () => {
+      // NEEDLE emits alias form
+      accumulator.processEvent(makeMetricEvent('w-1', 'needle.worker.beads.completed', 2));
+      // Direct canonical form
+      accumulator.processEvent(makeMetricEvent('w-1', 'needle.bead.completed', 3));
+
+      const snap = accumulator.getSnapshot('w-1');
+      expect(snap!.beadsCompleted).toBe(5);
+    });
+
+    it('passes through unknown names unchanged', () => {
+      expect(resolveInstrumentName('needle.worker.tokens.in')).toBe('needle.worker.tokens.in');
+      expect(resolveInstrumentName('custom.metric')).toBe('custom.metric');
+    });
   });
 });

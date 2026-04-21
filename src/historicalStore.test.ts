@@ -703,5 +703,61 @@ describe('HistoricalStore', () => {
 
       store.endSession({ workerCount: 1, taskCount: 0, totalCost: 0, totalTokens: 800, metricsSource: 'otlp-metric' });
     });
+
+    it('should protect otlp-metric rows from log-derived overwrites', () => {
+      store.startSession('priority-sess');
+
+      // Write the authoritative metric-sourced row first
+      store.upsertSessionWorkerSummary({
+        workerId: 'needle-zeta',
+        tokensIn: 2000,
+        tokensOut: 800,
+        costUsd: 0.12,
+        beadsCompleted: 6,
+        beadsFailed: 0,
+        errors: 0,
+        metricsSource: 'otlp-metric',
+      });
+
+      // Attempt to overwrite with lower-priority log-derived data
+      store.upsertSessionWorkerSummary({
+        workerId: 'needle-zeta',
+        tokensIn: 500,
+        tokensOut: 200,
+        costUsd: 0.05,
+        beadsCompleted: 2,
+        beadsFailed: 1,
+        errors: 1,
+        metricsSource: 'log-derived',
+      });
+
+      const summaries = store.getSessionWorkerSummaries({ sessionId: 'priority-sess' });
+      expect(summaries).toHaveLength(1);
+      const s = summaries[0];
+      // Metric-sourced values must survive the log-derived overwrite
+      expect(s.metricsSource).toBe('otlp-metric');
+      expect(s.tokensIn).toBe(2000);
+      expect(s.tokensOut).toBe(800);
+      expect(s.costUsd).toBeCloseTo(0.12);
+      expect(s.beadsCompleted).toBe(6);
+
+      // A second metric-sourced write should still update (equal priority)
+      store.upsertSessionWorkerSummary({
+        workerId: 'needle-zeta',
+        tokensIn: 2500,
+        tokensOut: 1000,
+        costUsd: 0.15,
+        beadsCompleted: 8,
+        beadsFailed: 0,
+        errors: 0,
+        metricsSource: 'otlp-metric',
+      });
+
+      const updated = store.getSessionWorkerSummaries({ sessionId: 'priority-sess' });
+      expect(updated[0].tokensIn).toBe(2500);
+      expect(updated[0].beadsCompleted).toBe(8);
+
+      store.endSession({ workerCount: 1, taskCount: 8, totalCost: 0.15, totalTokens: 3500, metricsSource: 'otlp-metric' });
+    });
   });
 });

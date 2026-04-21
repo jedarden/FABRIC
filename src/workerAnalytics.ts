@@ -38,6 +38,21 @@ export const INSTRUMENT_NAMES = {
 
 const ALL_INSTRUMENTS = new Set(Object.values(INSTRUMENT_NAMES));
 
+/**
+ * Alias map: NEEDLE's OTLP emitter uses `needle.worker.beads.*` (plural)
+ * while the canonical schema uses `needle.bead.*` (singular). Both forms
+ * are accepted and resolved to the canonical name before accumulation.
+ */
+const INSTRUMENT_ALIASES: Record<string, string> = {
+  'needle.worker.beads.completed': INSTRUMENT_NAMES.BEAD_COMPLETED,
+  'needle.worker.beads.failed':    INSTRUMENT_NAMES.BEAD_FAILED,
+};
+
+/** Resolve an incoming metric name to its canonical instrument name. */
+export function resolveInstrumentName(name: string): string {
+  return INSTRUMENT_ALIASES[name] || name;
+}
+
 // ── MetricAccumulator ────────────────────────────────────────────
 
 export interface MetricSample {
@@ -85,8 +100,11 @@ export class MetricAccumulator {
     const msg = event.msg || '';
     if (!msg.startsWith('metric.')) return;
 
-    const metricName = (event.metric_name as string) || msg.slice(7);
-    if (!metricName) return;
+    const rawName = (event.metric_name as string) || msg.slice(7);
+    if (!rawName) return;
+
+    // Resolve NEEDLE's naming convention to canonical instrument name
+    const metricName = resolveInstrumentName(rawName);
 
     const value = typeof event.value === 'number' ? event.value
       : typeof event.metric_value === 'number' ? event.metric_value as number
