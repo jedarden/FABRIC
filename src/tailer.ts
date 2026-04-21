@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { LogEvent } from './types.js';
-import { parseLogLine } from './parser.js';
+import { normalizeToLogEvent } from './normalizer.js';
 
 export interface TailerOptions {
   /** Path to log file or directory */
@@ -180,7 +180,7 @@ export class LogTailer extends EventEmitter {
     this.emit('line', line);
 
     if (this.parseJson) {
-      const event = parseLogLine(line);
+      const event = normalizeToLogEvent(line, 'jsonl');
       if (event) {
         this.emit('event', event);
       }
