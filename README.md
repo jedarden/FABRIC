@@ -90,8 +90,28 @@ needle run ...
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | FABRIC's gRPC listener (port `4317` by default) |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | Use `grpc` for FABRIC's primary OTLP/gRPC receiver |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | FABRIC's OTLP listener address |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` (port **4317**) or `http/protobuf` (port **4318**) |
+
+### Starting the FABRIC receiver
+
+FABRIC must be started with an OTLP listener for live telemetry to flow. The `--otlp-grpc` and `--otlp-http` flags enable the receiver:
+
+```bash
+# gRPC receiver (recommended — lower latency, NEEDLE default)
+fabric tui --otlp-grpc 0.0.0.0:4317
+
+# HTTP receiver (alternative)
+fabric web --otlp-http 0.0.0.0:4318
+
+# Both sources merged (JSONL tail + OTLP live)
+fabric tui --source ~/.needle/logs/ --otlp-grpc :4317
+```
+
+| Receiver flag | Default port | Protocol |
+|---------------|-------------|----------|
+| `--otlp-grpc` | `4317` | OTLP/gRPC ( tonic) |
+| `--otlp-http` | `4318` | OTLP/HTTP (protobuf + JSON) |
 
 Everything stays on your machine — FABRIC is a local collector, not a third-party service. Telemetry is read-only: FABRIC ingests spans/logs/metrics for display but never writes back to NEEDLE or modifies worker state.
 
