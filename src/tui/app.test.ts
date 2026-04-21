@@ -110,6 +110,7 @@ vi.mock('./components/WorkerDetail.js', () => {
       show = vi.fn();
       hide = vi.fn();
       focus = vi.fn();
+      isVisible = vi.fn(() => false);
       getElement = vi.fn(() => ({ hide: vi.fn(), show: vi.fn(), screen: { render: vi.fn() } }));
     },
   };
@@ -333,13 +334,13 @@ describe('FabricTuiApp', () => {
     it('should bind heatmap view key (H)', () => {
       const mockScreen = getMockScreen();
 
-      expect(mockScreen.key).toHaveBeenCalledWith(['H'], expect.any(Function));
+      expect(mockScreen.key).toHaveBeenCalledWith(['H', 'h'], expect.any(Function));
     });
 
     it('should bind DAG view key (D)', () => {
       const mockScreen = getMockScreen();
 
-      expect(mockScreen.key).toHaveBeenCalledWith(['D'], expect.any(Function));
+      expect(mockScreen.key).toHaveBeenCalledWith(['D', 'd'], expect.any(Function));
     });
 
     it('should bind escape key', () => {

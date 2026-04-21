@@ -16,10 +16,49 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type WorkerStatus = 'active' | 'idle' | 'error';
 
 /**
- * NEEDLE worker status values as emitted in heartbeat files and worker.* events.
- * FABRIC maps these to the simpler WorkerStatus for display.
+ * NEEDLE worker state machine — first-class states emitted by
+ * worker.state_transition events. These are the canonical states
+ * that replace the coarse WorkerStatus in the UI.
+ *
+ * BOOTING → SELECTING → CLAIMING → WORKING → CLOSING → STOPPED
  */
-export type NeedleWorkerStatus = 'idle' | 'executing' | 'draining' | 'starting';
+export type NeedleState =
+  | 'BOOTING'
+  | 'SELECTING'
+  | 'CLAIMING'
+  | 'WORKING'
+  | 'CLOSING'
+  | 'STOPPED';
+
+/**
+ * All valid state transitions in the NEEDLE worker state machine.
+ * A worker in BOOTING can only go to SELECTING, etc.
+ */
+export const VALID_TRANSITIONS: Record<NeedleState, NeedleState[]> = {
+  BOOTING:   ['SELECTING'],
+  SELECTING: ['CLAIMING', 'STOPPED'],
+  CLAIMING:  ['WORKING', 'SELECTING'],
+  WORKING:   ['CLOSING', 'SELECTING'],
+  CLOSING:   ['SELECTING', 'STOPPED'],
+  STOPPED:   ['BOOTING'],
+};
+
+/**
+ * Map a NeedleState to the coarser WorkerStatus for backward compatibility.
+ */
+export function needleStateToStatus(state: NeedleState): WorkerStatus {
+  switch (state) {
+    case 'BOOTING':
+    case 'SELECTING':
+    case 'CLAIMING':
+    case 'WORKING':
+      return 'active';
+    case 'CLOSING':
+      return 'active';
+    case 'STOPPED':
+      return 'idle';
+  }
+}
 
 /**
  * All event types emitted by NEEDLE's telemetry pipeline.
@@ -31,6 +70,7 @@ export type NeedleEventType =
   | 'worker.idle'
   | 'worker.stopped'
   | 'worker.draining'
+  | 'worker.state_transition'
   // Bead lifecycle
   | 'bead.claimed'
   | 'bead.prompt_built'
@@ -358,11 +398,14 @@ export interface ConversationParseOptions {
 // ============================================
 
 export interface LogEvent {
-  /** Unix timestamp in milliseconds */
+  /** Unix timestamp in milliseconds — display only, NOT authoritative for ordering */
   ts: number;
 
   /** Worker identifier (e.g., 'w-abc123') */
   worker: string;
+
+  /** Per-worker monotonic counter — authoritative for ordering (from NeedleEvent.sequence) */
+  sequence?: number;
 
   /** Log level */
   level: LogLevel;
@@ -398,12 +441,37 @@ export interface LogEvent {
   [key: string]: unknown;
 }
 
+/**
+ * Compare two LogEvents by (worker, sequence), falling back to ts.
+ *
+ * Sequence is the authoritative ordering key within a worker (monotonic counter
+ * from NEEDLE). Timestamp is used only as a display fallback for legacy events
+ * that lack a sequence number.
+ */
+export function compareEventsBySequence(a: LogEvent, b: LogEvent): number {
+  const seqA = a.sequence != null && a.sequence >= 0 ? a.sequence : null;
+  const seqB = b.sequence != null && b.sequence >= 0 ? b.sequence : null;
+
+  if (seqA !== null && seqB !== null) {
+    if (a.worker !== b.worker) return a.worker.localeCompare(b.worker);
+    return seqA - seqB;
+  }
+
+  return a.ts - b.ts;
+}
+
 export interface WorkerInfo {
   /** Worker identifier */
   id: string;
 
-  /** Current status */
+  /** Current status (coarse — derived from needleState) */
   status: WorkerStatus;
+
+  /** Current NEEDLE state machine state (fine-grained) */
+  needleState?: NeedleState;
+
+  /** Timestamp of the last state transition (ms since epoch) */
+  lastStateTransition?: number;
 
   /** Last event received */
   lastEvent?: LogEvent;
@@ -434,6 +502,12 @@ export interface WorkerInfo {
 
   /** Total number of events received for this worker */
   eventCount: number;
+
+  /** Whether the worker appears stuck (gap-based detection) */
+  stuck?: boolean;
+
+  /** Human-readable reason the worker is stuck */
+  stuckReason?: string;
 }
 
 export interface EventFilter {
@@ -566,6 +640,9 @@ export interface EventStore {
 
   /** Query events with optional filter */
   query(filter?: EventFilter): LogEvent[];
+
+  /** Query events sorted by (worker, sequence), falling back to ts */
+  queryOrdered(filter?: EventFilter): LogEvent[];
 
   /** Get worker info */
   getWorker(workerId: string): WorkerInfo | undefined;
@@ -1090,6 +1167,70 @@ export interface DagStats {
 
   /** Beads on critical path */
   criticalPathBeads: number;
+}
+
+// ============================================
+// Span-based DAG Types (OTLP span hierarchy)
+// ============================================
+
+/**
+ * A node in the span DAG, built from paired .started/.finished NeedleEvents
+ * derived from OTLP spans. Parent-child relationships come from
+ * parent_span_id rather than bead dependencies.
+ */
+export interface SpanNode {
+  /** OTLP span ID */
+  span_id: string;
+
+  /** OTLP trace ID */
+  trace_id: string;
+
+  /** Parent span ID (undefined for root spans) */
+  parent_span_id?: string;
+
+  /** Span name (e.g. "bead.lifecycle", "tool.call", "llm.request") */
+  name: string;
+
+  /** Worker that emitted this span */
+  worker_id: string;
+
+  /** Associated bead ID (if this is a bead lifecycle span) */
+  bead_id?: string;
+
+  /** Start timestamp (ms from .started event) */
+  start_ts?: number;
+
+  /** End timestamp (ms from .finished event) */
+  end_ts?: number;
+
+  /** Duration in ms */
+  duration_ms?: number;
+
+  /** Span completion status */
+  status: 'ok' | 'error' | 'unknown';
+
+  /** Child spans (populated during tree construction) */
+  children: SpanNode[];
+
+  /** Remaining span attributes */
+  attributes: Record<string, unknown>;
+}
+
+/**
+ * A span hierarchy DAG built from OTLP span events.
+ * Unlike the bead DependencyGraph (which uses br graph --json),
+ * the SpanDag is built from the live event stream using parent_span_id
+ * for parent-child linkage.
+ */
+export interface SpanDag {
+  /** Root spans (no parent_span_id or orphaned) */
+  roots: SpanNode[];
+
+  /** All spans indexed by span_id */
+  allSpans: Map<string, SpanNode>;
+
+  /** Spans grouped by trace_id */
+  traces: Map<string, SpanNode[]>;
 }
 
 // ============================================

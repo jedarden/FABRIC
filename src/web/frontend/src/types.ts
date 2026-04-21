@@ -1,5 +1,13 @@
 // FABRIC Web Frontend Types
 
+export type NeedleState =
+  | 'BOOTING'
+  | 'SELECTING'
+  | 'CLAIMING'
+  | 'WORKING'
+  | 'CLOSING'
+  | 'STOPPED';
+
 export interface LogEvent {
   timestamp: string;
   level: 'debug' | 'info' | 'warn' | 'error';
@@ -8,6 +16,25 @@ export interface LogEvent {
   message: string;
   raw: string;
   bead?: string; // Bead/task identifier for Focus Mode
+  sequence?: number; // Per-worker monotonic counter — authoritative for ordering
+  ts?: number; // Unix timestamp in ms (display only)
+}
+
+/**
+ * Compare two LogEvents by (worker, sequence), falling back to ts/timestamp.
+ */
+export function compareEventsBySequence(a: LogEvent, b: LogEvent): number {
+  const seqA = a.sequence != null && a.sequence >= 0 ? a.sequence : null;
+  const seqB = b.sequence != null && b.sequence >= 0 ? b.sequence : null;
+
+  if (seqA !== null && seqB !== null) {
+    if (a.worker !== b.worker) return a.worker.localeCompare(b.worker);
+    return seqA - seqB;
+  }
+
+  const tsA = a.ts ?? new Date(a.timestamp).getTime();
+  const tsB = b.ts ?? new Date(b.timestamp).getTime();
+  return tsA - tsB;
 }
 
 export interface WorkerInfo {
@@ -15,10 +42,13 @@ export interface WorkerInfo {
   lastSeen: string;
   eventCount: number;
   status: 'active' | 'idle' | 'error';
+  needleState?: NeedleState;
   currentTool?: string;
   recentEvents: LogEvent[];
   hasCollision?: boolean;
   activeFiles?: string[];
+  stuck?: boolean;
+  stuckReason?: string;
 }
 
 export interface FileCollision {
@@ -238,6 +268,31 @@ export interface DagOptions {
 }
 
 export type DagViewMode = 'tree' | 'blockers' | 'ready' | 'stats';
+
+// ============================================
+// Span DAG Types (OTLP span hierarchy)
+// ============================================
+
+export interface SpanNode {
+  span_id: string;
+  trace_id: string;
+  parent_span_id: string | null;
+  name: string;
+  worker_id: string;
+  bead_id: string | null;
+  start_ts: number | null;
+  end_ts: number | null;
+  duration_ms: number | null;
+  status: 'ok' | 'error' | 'unknown';
+  attributes: Record<string, unknown>;
+  children: SpanNode[];
+}
+
+export interface SpanDagResponse {
+  roots: SpanNode[];
+  totalSpans: number;
+  traces: Array<{ trace_id: string; span_count: number }>;
+}
 
 // ============================================
 // Recovery Playbook Types

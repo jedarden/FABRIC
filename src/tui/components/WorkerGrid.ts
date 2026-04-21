@@ -6,7 +6,7 @@
 
 import blessed from 'blessed';
 import { WorkerInfo } from '../../types.js';
-import { colors, getStatusColor } from '../utils/colors.js';
+import { colors, getStatusColor, getNeedleStateColor, getNeedleStateIcon } from '../utils/colors.js';
 
 export interface WorkerGridOptions {
   /** Parent screen */
@@ -84,14 +84,31 @@ export class WorkerGrid {
   }
 
   /**
-   * Get status icon for worker
+   * Get status icon for worker — prefers NeedleState when available
    */
   private getStatusIcon(worker: WorkerInfo): string {
+    if (worker.needleState) return getNeedleStateIcon(worker.needleState);
     switch (worker.status) {
       case 'active': return '●';
       case 'idle': return '○';
       case 'error': return '✗';
     }
+  }
+
+  /**
+   * Get display label for worker state
+   */
+  private getStateLabel(worker: WorkerInfo): string {
+    if (worker.needleState) return worker.needleState;
+    return worker.status;
+  }
+
+  /**
+   * Get display color for worker state
+   */
+  private getStateColor(worker: WorkerInfo): string {
+    if (worker.needleState) return getNeedleStateColor(worker.needleState);
+    return getStatusColor(worker.status);
   }
 
   /**
@@ -105,16 +122,28 @@ export class WorkerGrid {
   }
 
   /**
+   * Get stuck indicator for worker
+   */
+  private getStuckIndicator(worker: WorkerInfo): string {
+    if (worker.stuck) {
+      return '{red-fg}⚡STUCK{/}';
+    }
+    return '';
+  }
+
+  /**
    * Format worker line for display
    */
   private formatWorkerLine(worker: WorkerInfo, isSelected: boolean): string {
     const icon = this.getStatusIcon(worker);
-    const color = getStatusColor(worker.status);
+    const color = this.getStateColor(worker);
+    const stateLabel = this.getStateLabel(worker);
     const workerId = worker.id.slice(0, 12);
     const currentTask = worker.lastEvent?.bead || '-';
     const taskDesc = (worker.lastEvent?.msg || '').slice(0, 25);
     const duration = this.formatDuration(worker.lastEvent?.ts);
     const collisionIndicator = this.getCollisionIndicator(worker);
+    const stuckIndicator = this.getStuckIndicator(worker);
 
     const selectedMarker = isSelected ? '>' : ' ';
     const isPinned = this.pinnedWorkerId === worker.id;
@@ -125,7 +154,7 @@ export class WorkerGrid {
     const dimPrefix = shouldDim ? '{gray-fg}' : '';
     const dimSuffix = shouldDim ? '{/}' : '';
 
-    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/} {bold}${workerId}{/} ${pinIndicator} {gray-fg}${currentTask}{/} ${taskDesc} {blue-fg}${duration}{/} ${collisionIndicator}${dimSuffix}`;
+    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/} {bold}${workerId}{/} ${pinIndicator} {${color}-fg}${stateLabel}{/} ${stuckIndicator} {gray-fg}${currentTask}{/} ${taskDesc} {blue-fg}${duration}{/} ${collisionIndicator}${dimSuffix}`;
   }
 
   /**

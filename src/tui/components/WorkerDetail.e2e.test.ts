@@ -128,7 +128,7 @@ describe('E2E: WorkerDetail Panel', () => {
 
       const content = getRenderedContent();
       expect(content).toContain('{light-green-fg}{bold}● w-active-1{/}');
-      expect(content).toContain('Status:');
+      expect(content).toContain('State:');
       expect(content).toContain('{light-green-fg}ACTIVE{/}');
     });
 

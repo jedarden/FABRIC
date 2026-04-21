@@ -6,7 +6,7 @@
 
 import blessed from 'blessed';
 import { WorkerInfo, LogEvent } from '../../types.js';
-import { colors, getStatusColor, getLevelColor } from '../utils/colors.js';
+import { colors, getStatusColor, getLevelColor, getNeedleStateColor, getNeedleStateIcon } from '../utils/colors.js';
 
 export interface WorkerDetailOptions {
   /** Parent screen */
@@ -103,15 +103,23 @@ export class WorkerDetail {
     const w = this.worker;
     const lines: string[] = [];
 
-    // Header with status
-    const statusColor = getStatusColor(w.status);
-    const statusIcon = w.status === 'active' ? '●' : w.status === 'idle' ? '○' : '✗';
-    lines.push(`{${statusColor}-fg}{bold}${statusIcon} ${w.id}{/}`);
+    // Header with status — prefer NeedleState when available
+    const stateLabel = w.needleState ?? w.status.toUpperCase();
+    const stateColor = w.needleState
+      ? getNeedleStateColor(w.needleState)
+      : getStatusColor(w.status);
+    const stateIcon = w.needleState
+      ? getNeedleStateIcon(w.needleState)
+      : (w.status === 'active' ? '●' : w.status === 'idle' ? '○' : '✗');
+    lines.push(`{${stateColor}-fg}{bold}${stateIcon} ${w.id}{/}`);
     lines.push('{gray-fg}─────────────────────────────────────{/}');
     lines.push('');
 
     // Status info
-    lines.push(`{bold}Status:{/} {${statusColor}-fg}${w.status.toUpperCase()}{/}`);
+    lines.push(`{bold}State:{/} {${stateColor}-fg}${stateLabel}{/}`);
+    if (w.stuck) {
+      lines.push(`{red-fg}{bold}STUCK:{/} ${w.stuckReason ?? 'unknown'}{/}`);
+    }
     lines.push(`{bold}Uptime:{/} ${this.formatUptime(w.firstSeen)}`);
     lines.push(`{bold}Beads Completed:{/} {green-fg}${w.beadsCompleted}{/}`);
     lines.push('');

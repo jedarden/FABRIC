@@ -15,6 +15,7 @@
  */
 
 import { getColors, getThemeManager, ThemeName, ThemeColors } from './theme.js';
+import type { NeedleState } from '../../types.js';
 
 // Re-export theme types and functions for convenience
 export type { ThemeName, ThemeColors } from './theme.js';
@@ -37,6 +38,35 @@ export type ColorName = keyof ThemeColors;
  */
 export function getStatusColor(status: 'active' | 'idle' | 'error'): string {
   return getColors()[status];
+}
+
+/**
+ * Get color for a NeedleState value.
+ */
+export function getNeedleStateColor(state: NeedleState): string {
+  const c = getColors();
+  switch (state) {
+    case 'BOOTING':   return c.info;
+    case 'SELECTING': return c.warn;
+    case 'CLAIMING':  return 'magenta';
+    case 'WORKING':   return c.active;
+    case 'CLOSING':   return c.warn;
+    case 'STOPPED':   return c.idle;
+  }
+}
+
+/**
+ * Get display icon for a NeedleState value.
+ */
+export function getNeedleStateIcon(state: NeedleState): string {
+  switch (state) {
+    case 'BOOTING':   return '⏳';
+    case 'SELECTING': return '🔍';
+    case 'CLAIMING':  return '🎯';
+    case 'WORKING':   return '●';
+    case 'CLOSING':   return '⏹';
+    case 'STOPPED':   return '○';
+  }
 }
 
 /**

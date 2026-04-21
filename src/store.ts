@@ -10,6 +10,9 @@ import {
   LogEvent,
   WorkerInfo,
   WorkerStatus,
+  NeedleState,
+  needleStateToStatus,
+  VALID_TRANSITIONS,
   EventFilter,
   EventStore,
   FileCollision,
@@ -38,7 +41,9 @@ import {
   FileAnomaly,
   AnomalyDetectionOptions,
   AnomalyStats,
+  compareEventsBySequence,
 } from './types.js';
+import { isWorkerStuck } from './tui/utils/stuckDetection.js';
 import { detectAnomalies, getAnomalyStats } from './tui/utils/fileAnomalyDetection.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
@@ -82,6 +87,7 @@ interface FileModificationTracker {
 
 export class InMemoryEventStore implements EventStore {
   private events: LogEvent[] = [];
+  private sequenceIndex: Map<string, LogEvent> = new Map(); // key: `${worker}:${sequence}`
   private workers: Map<string, WorkerInfo> = new Map();
   private collisions: Map<string, FileCollision> = new Map();
   private beadCollisions: Map<string, BeadCollision> = new Map();
@@ -117,6 +123,12 @@ export class InMemoryEventStore implements EventStore {
    */
   add(event: LogEvent): void {
     this.events.push(event);
+
+    // Populate secondary index keyed on (worker, sequence)
+    if (event.sequence != null && event.sequence >= 0) {
+      this.sequenceIndex.set(`${event.worker}:${event.sequence}`, event);
+    }
+
     this.updateWorkerInfo(event);
     this.detectCollision(event);
     this.detectBeadCollision(event);
@@ -136,8 +148,11 @@ export class InMemoryEventStore implements EventStore {
     // Process event for cross-references (immediate)
     this.crossReferenceManager.processEvent(event);
 
-    // Process event for worker analytics
+    // Process event for worker analytics (also feeds MetricAccumulator)
     this.workerAnalytics.processEvent(event);
+
+    // Drain OTLP metric samples to SQLite for persistence
+    this.flushMetricSamples();
 
     // Process event for semantic narrative (real-time)
     this.semanticNarrativeManager.processEvent(event);
@@ -189,6 +204,14 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
+   * Query events sorted by (worker, sequence), falling back to ts.
+   * This is the authoritative ordering — use instead of timestamp-based sort.
+   */
+  queryOrdered(filter?: EventFilter): LogEvent[] {
+    return this.query(filter).sort(compareEventsBySequence);
+  }
+
+  /**
    * Get worker info
    */
   getWorker(workerId: string): WorkerInfo | undefined {
@@ -226,6 +249,7 @@ export class InMemoryEventStore implements EventStore {
     this.persistSession();
 
     this.events = [];
+    this.sequenceIndex.clear();
     this.workers.clear();
     this.collisions.clear();
     this.beadCollisions.clear();
@@ -242,6 +266,58 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
+   * Flush accumulated OTLP metric samples from the MetricAccumulator
+   * into the metric_samples SQLite table, upsert per-worker session
+   * summaries, and update the live session with the latest aggregates.
+   */
+  private flushMetricSamples(): void {
+    const accumulator = this.workerAnalytics.getMetricAccumulator();
+    const samples = accumulator.drainSamples();
+    for (const s of samples) {
+      this.historicalStore.recordMetricSample({
+        workerId: s.workerId,
+        metricName: s.metricName,
+        value: s.value,
+        timestamp: s.timestamp,
+        source: 'otlp-metric',
+        beadId: s.beadId,
+      });
+    }
+
+    // Upsert per-worker session summaries from the accumulator snapshots
+    const hasMetricData = accumulator.hasMetricData();
+    if (hasMetricData) {
+      // Get all workers that have metric snapshots
+      const allWorkerMetrics = this.workerAnalytics.getAllWorkerMetrics({ timeWindow: 'all' });
+      for (const wm of allWorkerMetrics) {
+        const metricSnap = accumulator.getSnapshot(wm.workerId);
+        this.historicalStore.upsertSessionWorkerSummary({
+          workerId: wm.workerId,
+          tokensIn: metricSnap?.tokensIn ?? Math.floor(wm.totalTokens * 0.7),
+          tokensOut: metricSnap?.tokensOut ?? Math.floor(wm.totalTokens * 0.3),
+          costUsd: metricSnap?.costUsd ?? wm.totalCostUsd,
+          beadsCompleted: metricSnap?.beadsCompleted ?? wm.beadsCompleted,
+          beadsFailed: metricSnap?.beadsFailed ?? 0,
+          errors: metricSnap?.errors ?? wm.errorCount,
+          metricsSource: metricSnap && metricSnap.costUsd > 0 ? 'otlp-metric' : 'log-derived',
+        });
+      }
+    }
+
+    // Update the live session row with current metric-derived aggregates
+    if (samples.length > 0 || hasMetricData) {
+      const analytics = this.workerAnalytics.getAggregatedAnalytics({ timeWindow: 'all' });
+      this.historicalStore.updateLiveSession({
+        workerCount: this.workers.size,
+        taskCount: analytics.totalBeadsCompleted,
+        totalCost: analytics.totalCostUsd,
+        totalTokens: analytics.totalTokens,
+        metricsSource: hasMetricData ? 'otlp-metric' : 'log-derived',
+      });
+    }
+  }
+
+  /**
    * Persist current session to historical store
    */
   private persistSession(): void {
@@ -251,11 +327,13 @@ export class InMemoryEventStore implements EventStore {
     const analytics = this.workerAnalytics.getAggregatedAnalytics({ timeWindow: 'all' });
 
     // End the historical session
+    const hasMetricData = this.workerAnalytics.getMetricAccumulator().hasMetricData();
     this.historicalStore.endSession({
       workerCount: this.workers.size,
       taskCount: analytics.totalBeadsCompleted,
       totalCost: analytics.totalCostUsd,
       totalTokens: analytics.totalTokens,
+      metricsSource: hasMetricData ? 'otlp-metric' : 'log-derived',
     });
 
     // Record any completed tasks that haven't been recorded yet
@@ -410,31 +488,42 @@ export class InMemoryEventStore implements EventStore {
       }
     }
 
-    // Update status based on NEEDLE event type (event.msg holds the event type string)
+    // Handle worker.state_transition events (authoritative state machine)
     const needleEvent = event.msg;
-    if (event.level === 'error') {
-      worker.status = 'error';
-    } else if (
-      needleEvent === 'bead.completed' ||
-      needleEvent === 'worker.idle' ||
-      needleEvent === 'worker.stopped' ||
-      needleEvent === 'worker.draining'
-    ) {
-      worker.status = 'idle';
-      if (needleEvent === 'bead.completed' && event.bead) {
-        worker.beadsCompleted++;
+    if (needleEvent === 'worker.state_transition') {
+      const from = event.from as string | undefined;
+      const to = event.to as string | undefined;
+      if (to && this.isValidNeedleState(to)) {
+        worker.needleState = to as NeedleState;
+        worker.lastStateTransition = event.ts;
+        worker.status = event.level === 'error' ? 'error' : needleStateToStatus(to as NeedleState);
       }
-      if (needleEvent === 'bead.completed') {
-        worker.activeFiles = [];
-        worker.activeBead = undefined;
+    } else {
+      // Fallback: infer state from legacy event types when no state_transition events arrive
+      if (event.level === 'error') {
+        worker.status = 'error';
+      } else if (
+        needleEvent === 'bead.completed' ||
+        needleEvent === 'worker.idle' ||
+        needleEvent === 'worker.stopped' ||
+        needleEvent === 'worker.draining'
+      ) {
+        worker.status = 'idle';
+        if (needleEvent === 'bead.completed' && event.bead) {
+          worker.beadsCompleted++;
+        }
+        if (needleEvent === 'bead.completed') {
+          worker.activeFiles = [];
+          worker.activeBead = undefined;
+        }
+      } else if (
+        needleEvent === 'worker.started' ||
+        needleEvent === 'bead.claimed' ||
+        needleEvent === 'bead.agent_started' ||
+        needleEvent === 'execution.started'
+      ) {
+        worker.status = 'active';
       }
-    } else if (
-      needleEvent === 'worker.started' ||
-      needleEvent === 'bead.claimed' ||
-      needleEvent === 'bead.agent_started' ||
-      needleEvent === 'execution.started'
-    ) {
-      worker.status = 'active';
     }
 
     // Update last event
@@ -445,6 +534,18 @@ export class InMemoryEventStore implements EventStore {
     const hasBeadCollision = this.getWorkerBeadCollisions(worker.id).length > 0;
     const hasTaskCollision = this.getWorkerTaskCollisions(worker.id).length > 0;
     worker.hasCollision = hasFileCollision || hasBeadCollision || hasTaskCollision;
+
+    // Run gap-based stuck detection
+    const stuckPattern = isWorkerStuck(worker, this.events);
+    worker.stuck = stuckPattern != null;
+    worker.stuckReason = stuckPattern?.reason ?? undefined;
+  }
+
+  /**
+   * Check if a string is a valid NeedleState value.
+   */
+  private isValidNeedleState(value: string): value is NeedleState {
+    return ['BOOTING', 'SELECTING', 'CLAIMING', 'WORKING', 'CLOSING', 'STOPPED'].includes(value);
   }
 
   /**

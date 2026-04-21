@@ -1,5 +1,23 @@
 import React from 'react';
-import { WorkerInfo } from '../types';
+import { WorkerInfo, NeedleState } from '../types';
+
+const NEEDLE_STATE_LABELS: Record<NeedleState, string> = {
+  BOOTING: 'BOOTING',
+  SELECTING: 'SELECTING',
+  CLAIMING: 'CLAIMING',
+  WORKING: 'WORKING',
+  CLOSING: 'CLOSING',
+  STOPPED: 'STOPPED',
+};
+
+const NEEDLE_STATE_COLORS: Record<NeedleState, string> = {
+  BOOTING: '#5bc0de',
+  SELECTING: '#f0ad4e',
+  CLAIMING: '#9b59b6',
+  WORKING: '#5cb85c',
+  CLOSING: '#f0ad4e',
+  STOPPED: '#777',
+};
 
 interface WorkerGridProps {
   workers: WorkerInfo[];
@@ -85,8 +103,13 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
                       {isPinned ? '📌' : '📍'}
                     </button>
                   )}
-                  <span className={`worker-status ${worker.status}`}>
-                    {worker.status}
+                  <span
+                    className={`worker-status ${worker.status}${worker.stuck ? ' stuck' : ''}`}
+                    style={worker.needleState ? { backgroundColor: NEEDLE_STATE_COLORS[worker.needleState] } : undefined}
+                    title={worker.stuck ? worker.stuckReason : undefined}
+                  >
+                    {worker.stuck && '⚡'}
+                    {worker.needleState ? NEEDLE_STATE_LABELS[worker.needleState] : worker.status}
                   </span>
                 </div>
               </div>

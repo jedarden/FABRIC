@@ -1582,6 +1582,88 @@ describe('InMemoryEventStore', () => {
   });
 });
 
+describe('sequence-based ordering', () => {
+  let store: InMemoryEventStore;
+
+  beforeEach(() => {
+    store = new InMemoryEventStore();
+  });
+
+  it('queryOrdered returns events sorted by (worker, sequence), not timestamp', () => {
+    // Inject events with out-of-order timestamps but monotonic sequences per worker.
+    // Worker A: sequence 0->2 with timestamps 300, 100, 200 (out of order)
+    // Worker B: sequence 0->1 with timestamps 50, 150
+    const events: LogEvent[] = [
+      { ts: 300, worker: 'w-a', sequence: 0, level: 'info', msg: 'A-seq0' },
+      { ts: 50,  worker: 'w-b', sequence: 0, level: 'info', msg: 'B-seq0' },
+      { ts: 100, worker: 'w-a', sequence: 1, level: 'info', msg: 'A-seq1' },
+      { ts: 150, worker: 'w-b', sequence: 1, level: 'info', msg: 'B-seq1' },
+      { ts: 200, worker: 'w-a', sequence: 2, level: 'info', msg: 'A-seq2' },
+    ];
+
+    for (const e of events) store.add(e);
+
+    const ordered = store.queryOrdered();
+
+    // Expected order: all w-a events (seq 0,1,2) then all w-b events (seq 0,1)
+    // because (worker, sequence) sort groups by worker first.
+    expect(ordered.map(e => e.msg)).toEqual([
+      'A-seq0', 'A-seq1', 'A-seq2',
+      'B-seq0', 'B-seq1',
+    ]);
+
+    // Verify timestamps are NOT in order (proving sequence-based, not time-based sort)
+    const timestamps = ordered.map(e => e.ts);
+    expect(timestamps).not.toEqual([...timestamps].sort((a, b) => a - b));
+  });
+
+  it('queryOrdered falls back to ts for events without sequence', () => {
+    const events: LogEvent[] = [
+      { ts: 300, worker: 'w-a', level: 'info', msg: 'no-seq-300' },
+      { ts: 100, worker: 'w-a', level: 'info', msg: 'no-seq-100' },
+      { ts: 200, worker: 'w-a', level: 'info', msg: 'no-seq-200' },
+    ];
+
+    for (const e of events) store.add(e);
+
+    const ordered = store.queryOrdered();
+    expect(ordered.map(e => e.msg)).toEqual([
+      'no-seq-100', 'no-seq-200', 'no-seq-300',
+    ]);
+  });
+
+  it('sequence index stores events keyed by (worker, sequence)', () => {
+    const event: LogEvent = { ts: Date.now(), worker: 'w-idx', sequence: 42, level: 'info', msg: 'idx-test' };
+    store.add(event);
+
+    // queryOrdered should return the event correctly
+    const ordered = store.queryOrdered();
+    expect(ordered).toHaveLength(1);
+    expect(ordered[0].worker).toBe('w-idx');
+    expect(ordered[0].sequence).toBe(42);
+  });
+
+  it('handles mixed workers with interleaved sequences', () => {
+    // Simulate multi-host OTLP ingestion: two workers with overlapping timestamps
+    // but independent monotonic sequences.
+    const events: LogEvent[] = [
+      { ts: 100, worker: 'host-1', sequence: 0, level: 'info', msg: 'h1-0' },
+      { ts: 110, worker: 'host-2', sequence: 0, level: 'info', msg: 'h2-0' },
+      { ts: 200, worker: 'host-1', sequence: 1, level: 'info', msg: 'h1-1' },
+      { ts: 150, worker: 'host-2', sequence: 1, level: 'info', msg: 'h2-1' },
+      { ts: 300, worker: 'host-1', sequence: 2, level: 'info', msg: 'h1-2' },
+    ];
+
+    for (const e of events) store.add(e);
+
+    const ordered = store.queryOrdered();
+    expect(ordered.map(e => e.msg)).toEqual([
+      'h1-0', 'h1-1', 'h1-2',
+      'h2-0', 'h2-1',
+    ]);
+  });
+});
+
 describe('getStore and resetStore', () => {
   beforeEach(() => {
     resetStore();

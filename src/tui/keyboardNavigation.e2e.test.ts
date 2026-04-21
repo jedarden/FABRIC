@@ -105,6 +105,7 @@ vi.mock('./components/WorkerDetail.js', () => ({
     show = vi.fn();
     hide = vi.fn();
     focus = vi.fn();
+    isVisible = vi.fn(() => false);
     getElement = vi.fn(() => ({ hide: vi.fn(), show: vi.fn(), screen: { render: vi.fn() } }));
   },
 }));
