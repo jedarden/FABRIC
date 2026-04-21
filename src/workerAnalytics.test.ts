@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { WorkerAnalytics } from './workerAnalytics.js';
+import { MetricAccumulator, INSTRUMENT_NAMES } from './workerAnalytics.js';
 import { LogEvent } from './types.js';
 import { CostTracker } from './tui/utils/costTracking.js';
 
@@ -570,5 +571,166 @@ describe('WorkerAnalytics', () => {
       const metrics = analytics.getWorkerMetrics('w-1');
       expect(metrics).toBeUndefined();
     });
+  });
+});
+
+describe('MetricAccumulator', () => {
+  let accumulator: MetricAccumulator;
+  const baseTime = Date.now();
+
+  beforeEach(() => {
+    accumulator = new MetricAccumulator();
+  });
+
+  function makeMetricEvent(worker: string, metricName: string, value: number, ts?: number): LogEvent {
+    return {
+      ts: ts ?? baseTime,
+      worker,
+      level: 'info',
+      msg: `metric.${metricName}`,
+      metric_name: metricName,
+      value,
+    };
+  }
+
+  it('accumulates token-in counts', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_IN, 100));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_IN, 50));
+
+    const snap = accumulator.getSnapshot('w-1');
+    expect(snap).not.toBeNull();
+    expect(snap!.tokensIn).toBe(150);
+  });
+
+  it('accumulates token-out counts', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_OUT, 200));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_OUT, 75));
+
+    const snap = accumulator.getSnapshot('w-1');
+    expect(snap!.tokensOut).toBe(275);
+  });
+
+  it('accumulates cost USD', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.COST_USD, 0.05));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.COST_USD, 0.03));
+
+    const snap = accumulator.getSnapshot('w-1');
+    expect(snap!.costUsd).toBeCloseTo(0.08);
+  });
+
+  it('tracks bead completions', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_COMPLETED, 1));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_COMPLETED, 1));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_COMPLETED, 1));
+
+    const snap = accumulator.getSnapshot('w-1');
+    expect(snap!.beadsCompleted).toBe(3);
+  });
+
+  it('tracks bead failures', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_FAILED, 1));
+
+    const snap = accumulator.getSnapshot('w-1');
+    expect(snap!.beadsFailed).toBe(1);
+  });
+
+  it('tracks worker errors', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.WORKER_ERRORS, 2));
+
+    const snap = accumulator.getSnapshot('w-1');
+    expect(snap!.errors).toBe(2);
+  });
+
+  it('records bead duration samples', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_DURATION, 5000));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_DURATION, 3200));
+
+    const snap = accumulator.getSnapshot('w-1');
+    expect(snap!.durations).toEqual([5000, 3200]);
+  });
+
+  it('isolates workers', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_IN, 100));
+    accumulator.processEvent(makeMetricEvent('w-2', INSTRUMENT_NAMES.TOKENS_IN, 200));
+
+    expect(accumulator.getSnapshot('w-1')!.tokensIn).toBe(100);
+    expect(accumulator.getSnapshot('w-2')!.tokensIn).toBe(200);
+  });
+
+  it('drains samples and clears buffer', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_IN, 100));
+    accumulator.processEvent(makeMetricEvent('w-2', INSTRUMENT_NAMES.COST_USD, 0.05));
+
+    const samples = accumulator.drainSamples();
+    expect(samples).toHaveLength(2);
+    expect(samples[0].metricName).toBe(INSTRUMENT_NAMES.TOKENS_IN);
+    expect(samples[1].metricName).toBe(INSTRUMENT_NAMES.COST_USD);
+
+    // Second drain should be empty
+    expect(accumulator.drainSamples()).toHaveLength(0);
+  });
+
+  it('hasMetricData returns false before any metric event', () => {
+    expect(accumulator.hasMetricData()).toBe(false);
+  });
+
+  it('hasMetricData returns true after processing a metric', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_IN, 100));
+    expect(accumulator.hasMetricData()).toBe(true);
+  });
+
+  it('ignores non-metric events', () => {
+    const event: LogEvent = {
+      ts: baseTime,
+      worker: 'w-1',
+      level: 'info',
+      msg: 'bead.completed',
+    };
+    accumulator.processEvent(event);
+    expect(accumulator.hasMetricData()).toBe(false);
+    expect(accumulator.getSnapshot('w-1')).toBeNull();
+  });
+
+  it('resets all state', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_IN, 100));
+    accumulator.reset();
+
+    expect(accumulator.hasMetricData()).toBe(false);
+    expect(accumulator.getSnapshot('w-1')).toBeNull();
+    expect(accumulator.drainSamples()).toHaveLength(0);
+  });
+
+  it('returns full snapshot with all fields', () => {
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_IN, 1000));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.TOKENS_OUT, 500));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.COST_USD, 0.12));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_COMPLETED, 3));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_FAILED, 1));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.WORKER_ERRORS, 2));
+    accumulator.processEvent(makeMetricEvent('w-1', INSTRUMENT_NAMES.BEAD_DURATION, 4000));
+
+    const snap = accumulator.getSnapshot('w-1');
+    expect(snap).toEqual({
+      tokensIn: 1000,
+      tokensOut: 500,
+      costUsd: 0.12,
+      beadsCompleted: 3,
+      beadsFailed: 1,
+      errors: 2,
+      durations: [4000],
+    });
+  });
+
+  it('uses metric_value fallback when value is missing', () => {
+    const event: LogEvent = {
+      ts: baseTime,
+      worker: 'w-1',
+      level: 'info',
+      msg: `metric.${INSTRUMENT_NAMES.TOKENS_IN}`,
+      metric_name: INSTRUMENT_NAMES.TOKENS_IN,
+      metric_value: 42,
+    };
+    accumulator.processEvent(event);
+    expect(accumulator.getSnapshot('w-1')!.tokensIn).toBe(42);
   });
 });

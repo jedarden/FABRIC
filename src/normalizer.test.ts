@@ -903,6 +903,26 @@ describe('normalize – otlp-metric source', () => {
     expect(result!.data.value).toBe(0.05);
   });
 
+  it('extracts value from histogram data point (sum field)', () => {
+    const metric = {
+      name: 'needle.bead.duration',
+      timeUnixNano: '1772641054008000000',
+      sum: 5230,
+      count: '1',
+      min: 5230,
+      max: 5230,
+      attributes: [
+        { key: 'worker_id', value: { stringValue: 'tcb-alpha' } },
+        { key: 'session_id', value: { stringValue: 'sess-1' } },
+      ],
+    };
+    const result = normalize(metric, 'otlp-metric');
+    expect(result).not.toBeNull();
+    expect(result!.event_type).toBe('metric.needle.bead.duration');
+    expect(result!.data.value).toBe(5230);
+    expect(result!.worker_id).toBe('tcb-alpha');
+  });
+
   it('defaults event_type to metric.unknown when name is missing', () => {
     const metric = {
       timeUnixNano: '1772641054008000000',

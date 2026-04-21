@@ -625,6 +625,8 @@ function normalizeOtlpMetric(raw: unknown): NeedleEvent | null {
   if (metricPoint.asDouble !== undefined) data.value = metricPoint.asDouble;
   else if (metricPoint.asInt !== undefined) data.value = metricPoint.asInt;
   else if (typeof metricPoint.value === 'number') data.value = metricPoint.value;
+  // Histogram data points carry sum/count instead of asDouble/asInt
+  else if (typeof metricPoint.sum === 'number') data.value = metricPoint.sum;
 
   const ne: NeedleEvent = {
     timestamp,

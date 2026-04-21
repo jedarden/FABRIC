@@ -14,6 +14,8 @@ import {
   TaskMetricsRecord,
   ErrorHistoryRecord,
 } from './historicalStore.js';
+import { MetricAccumulator, INSTRUMENT_NAMES } from './workerAnalytics.js';
+import { normalizeToLogEvent } from './normalizer.js';
 
 // Test database path
 const TEST_DB_DIR = path.join(os.tmpdir(), 'fabric-test-' + Date.now());
@@ -437,6 +439,195 @@ describe('HistoricalStore', () => {
       expect(dbPath).toContain('.needle');
       expect(dbPath).toContain('fabric.db');
       defaultStore.close();
+    });
+  });
+
+  describe('OTLP Metric Persistence', () => {
+    it('should record metric samples and upsert session worker summaries from OTLP metrics', () => {
+      store.startSession('otlp-metric-sess');
+
+      const accumulator = new MetricAccumulator();
+
+      // Simulate OTLP metric events flowing through the normalizer → accumulator → store
+      const metrics = [
+        { name: INSTRUMENT_NAMES.TOKENS_IN, value: 1500, worker: 'needle-alpha' },
+        { name: INSTRUMENT_NAMES.TOKENS_OUT, value: 600, worker: 'needle-alpha' },
+        { name: INSTRUMENT_NAMES.COST_USD, value: 0.084, worker: 'needle-alpha' },
+        { name: INSTRUMENT_NAMES.BEAD_COMPLETED, value: 2, worker: 'needle-alpha' },
+        { name: INSTRUMENT_NAMES.BEAD_FAILED, value: 1, worker: 'needle-alpha' },
+        { name: INSTRUMENT_NAMES.WORKER_ERRORS, value: 1, worker: 'needle-alpha' },
+        { name: INSTRUMENT_NAMES.BEAD_DURATION, value: 4500, worker: 'needle-alpha' },
+      ];
+
+      for (const m of metrics) {
+        // Simulate what extractDataPoints + normalizer produces
+        const rawPoint = {
+          name: m.name,
+          timeUnixNano: String(Date.now() * 1_000_000),
+          asDouble: m.value,
+          attributes: [
+            { key: 'worker_id', value: { stringValue: m.worker } },
+            { key: 'session_id', value: { stringValue: 'otlp-metric-sess' } },
+          ],
+        };
+        const logEvent = normalizeToLogEvent(rawPoint, 'otlp-metric');
+        expect(logEvent).not.toBeNull();
+        accumulator.processEvent(logEvent!);
+      }
+
+      // Drain and persist samples (mirrors store.ts flushMetricSamples)
+      const samples = accumulator.drainSamples();
+      for (const s of samples) {
+        store.recordMetricSample({
+          workerId: s.workerId,
+          metricName: s.metricName,
+          value: s.value,
+          timestamp: s.timestamp,
+          source: 'otlp-metric',
+          beadId: s.beadId,
+        });
+      }
+
+      // Upsert session worker summary from accumulator snapshot
+      const snap = accumulator.getSnapshot('needle-alpha');
+      expect(snap).not.toBeNull();
+      store.upsertSessionWorkerSummary({
+        workerId: 'needle-alpha',
+        tokensIn: snap!.tokensIn,
+        tokensOut: snap!.tokensOut,
+        costUsd: snap!.costUsd,
+        beadsCompleted: snap!.beadsCompleted,
+        beadsFailed: snap!.beadsFailed,
+        errors: snap!.errors,
+        metricsSource: 'otlp-metric',
+      });
+
+      // Verify metric_samples were persisted
+      const metricRows = store.getMetricSamples({ workerId: 'needle-alpha' });
+      expect(metricRows).toHaveLength(7);
+      expect(metricRows.every(r => r.source === 'otlp-metric')).toBe(true);
+
+      // Verify session_worker_summaries were persisted with correct values
+      const summaries = store.getSessionWorkerSummaries({ sessionId: 'otlp-metric-sess' });
+      expect(summaries).toHaveLength(1);
+      const summary = summaries[0];
+      expect(summary.worker_id).toBe('needle-alpha');
+      expect(summary.tokens_in).toBe(1500);
+      expect(summary.tokens_out).toBe(600);
+      expect(summary.cost_usd).toBeCloseTo(0.084);
+      expect(summary.beads_completed).toBe(2);
+      expect(summary.beads_failed).toBe(1);
+      expect(summary.errors).toBe(1);
+      expect(summary.metrics_source).toBe('otlp-metric');
+
+      // Verify getAggregatedAnalytics prefers metric-sourced data
+      store.endSession({
+        workerCount: 1,
+        taskCount: 3,
+        totalCost: 0.084,
+        totalTokens: 2100,
+        metricsSource: 'otlp-metric',
+      });
+    });
+
+    it('should handle histogram metric data points via sum field', () => {
+      store.startSession('histogram-sess');
+
+      // Simulate a histogram data point — no asDouble/asInt, only sum/count
+      const rawPoint = {
+        name: INSTRUMENT_NAMES.BEAD_DURATION,
+        timeUnixNano: String(Date.now() * 1_000_000),
+        sum: 12345,
+        count: '1',
+        attributes: [
+          { key: 'worker_id', value: { stringValue: 'needle-beta' } },
+          { key: 'session_id', value: { stringValue: 'histogram-sess' } },
+        ],
+      };
+
+      const logEvent = normalizeToLogEvent(rawPoint, 'otlp-metric');
+      expect(logEvent).not.toBeNull();
+      expect(logEvent!.value).toBe(12345);
+
+      const accumulator = new MetricAccumulator();
+      accumulator.processEvent(logEvent!);
+
+      const snap = accumulator.getSnapshot('needle-beta');
+      expect(snap).not.toBeNull();
+      expect(snap!.durations).toEqual([12345]);
+
+      // Persist
+      const samples = accumulator.drainSamples();
+      for (const s of samples) {
+        store.recordMetricSample({
+          workerId: s.workerId,
+          metricName: s.metricName,
+          value: s.value,
+          timestamp: s.timestamp,
+          source: 'otlp-metric',
+        });
+      }
+
+      const metricRows = store.getMetricSamples({ metricName: INSTRUMENT_NAMES.BEAD_DURATION });
+      expect(metricRows).toHaveLength(1);
+      expect(metricRows[0].value).toBe(12345);
+      expect(metricRows[0].source).toBe('otlp-metric');
+
+      store.endSession({ workerCount: 1, taskCount: 0, totalCost: 0, totalTokens: 0 });
+    });
+
+    it('should prefer otlp-metric summaries over log-derived task_metrics in aggregated analytics', () => {
+      const now = Date.now();
+
+      // Session with both log-derived task_metrics AND otlp-metric summaries
+      store.startSession('mixed-sess');
+
+      // Log-derived task (coarse estimates)
+      store.recordTask({
+        workerId: 'needle-gamma',
+        taskType: 'bead',
+        startedAt: now - 10000,
+        endedAt: now - 5000,
+        cost: 0.1,
+        tokensIn: 700,
+        tokensOut: 300,
+        success: true,
+        retryCount: 0,
+      });
+
+      // OTLP-metric summary (authoritative)
+      store.upsertSessionWorkerSummary({
+        workerId: 'needle-gamma',
+        tokensIn: 1200,
+        tokensOut: 450,
+        costUsd: 0.092,
+        beadsCompleted: 5,
+        beadsFailed: 0,
+        errors: 0,
+        metricsSource: 'otlp-metric',
+      });
+
+      store.endSession({
+        workerCount: 1,
+        taskCount: 5,
+        totalCost: 0.092,
+        totalTokens: 1650,
+        metricsSource: 'otlp-metric',
+      });
+
+      // Query aggregated analytics — metric-sourced data should win
+      const analytics = store.getAggregatedAnalytics({
+        startTime: now - 60000,
+        endTime: now + 60000,
+      });
+
+      // The worker should appear with metric-sourced values
+      const gammaPerf = analytics.topPerformers.find(p => p.workerId === 'needle-gamma');
+      expect(gammaPerf).toBeDefined();
+      // OTLP metric data: 5 completed, 0.092 cost, 1650 tokens
+      expect(gammaPerf!.beadsCompleted).toBe(5);
+      expect(gammaPerf!.totalCostUsd).toBeCloseTo(0.092);
+      expect(gammaPerf!.totalTokens).toBe(1650);
     });
   });
 });
