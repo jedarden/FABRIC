@@ -106,9 +106,9 @@ describe('Web Server API Endpoints', () => {
     });
 
     it('should include worker status', async () => {
-      store.add(createEvent({ worker: 'w-active', msg: 'Starting work' }));
+      store.add(createEvent({ worker: 'w-active', msg: 'bead.claimed' }));
       store.add(createEvent({ worker: 'w-error', level: 'error', msg: 'Something failed' }));
-      store.add(createEvent({ worker: 'w-idle', msg: 'Task completed' }));
+      store.add(createEvent({ worker: 'w-idle', msg: 'bead.completed' }));
 
       const response = await fetchApi('/api/workers');
       const data = await response.json() as any;
@@ -144,8 +144,8 @@ describe('Web Server API Endpoints', () => {
     });
 
     it('should track completed beads', async () => {
-      store.add(createEvent({ worker: 'w-test', msg: 'Task completed', bead: 'bd-1' }));
-      store.add(createEvent({ worker: 'w-test', msg: 'Task completed', bead: 'bd-2' }));
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.completed', bead: 'bd-1' }));
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.completed', bead: 'bd-2' }));
 
       const response = await fetchApi('/api/workers/w-test');
       const data = await response.json() as any;

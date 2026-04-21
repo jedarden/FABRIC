@@ -75,7 +75,7 @@ describe('WorkerDetail', () => {
         <WorkerDetail worker={worker} onClose={mockOnClose} />
       );
 
-      expect(screen.getByText('active')).toBeInTheDocument();
+      expect(screen.getByText('ACTIVE')).toBeInTheDocument();
       expect(container.querySelector('.worker-status.active')).toBeInTheDocument();
       expect(container.querySelector('.worker-status-icon.active')).toBeInTheDocument();
     });
@@ -87,7 +87,7 @@ describe('WorkerDetail', () => {
         <WorkerDetail worker={worker} onClose={mockOnClose} />
       );
 
-      expect(screen.getByText('idle')).toBeInTheDocument();
+      expect(screen.getByText('IDLE')).toBeInTheDocument();
       expect(container.querySelector('.worker-status.idle')).toBeInTheDocument();
       expect(container.querySelector('.worker-status-icon.idle')).toBeInTheDocument();
     });
@@ -99,7 +99,7 @@ describe('WorkerDetail', () => {
         <WorkerDetail worker={worker} onClose={mockOnClose} />
       );
 
-      expect(screen.getByText('error')).toBeInTheDocument();
+      expect(screen.getByText('ERROR')).toBeInTheDocument();
       expect(container.querySelector('.worker-status.error')).toBeInTheDocument();
       expect(container.querySelector('.worker-status-icon.error')).toBeInTheDocument();
     });
@@ -495,7 +495,7 @@ describe('WorkerDetail', () => {
 
       expect(screen.getByText('minimal-worker')).toBeInTheDocument();
       expect(screen.getByText('0')).toBeInTheDocument();
-      expect(screen.getByText('idle')).toBeInTheDocument();
+      expect(screen.getByText('IDLE')).toBeInTheDocument();
     });
 
     it('should handle empty active files array with collision flag', () => {
