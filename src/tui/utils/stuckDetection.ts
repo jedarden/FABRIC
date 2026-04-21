@@ -9,7 +9,7 @@ import { LogEvent, WorkerInfo } from '../../types.js';
 
 export interface StuckPattern {
   /** Type of stuck pattern detected */
-  type: 'repeated_tool' | 'no_progress' | 'circular_edit' | 'long_running';
+  type: 'repeated_tool' | 'no_progress' | 'circular_edit' | 'long_running' | 'state_gap';
 
   /** Human-readable description */
   reason: string;
@@ -36,6 +36,11 @@ export interface StuckDetectionOptions {
 
   /** Threshold for long-running tasks (ms), default 10 minutes */
   longRunningThresholdMs?: number;
+
+  /** Threshold for state-transition gap (ms), default 5 minutes.
+   *  Fires when a worker with a needleState has not transitioned
+   *  within this window while in an active state (WORKING, etc.). */
+  stateTransitionGapMs?: number;
 }
 
 const DEFAULT_OPTIONS: Required<StuckDetectionOptions> = {
@@ -43,6 +48,7 @@ const DEFAULT_OPTIONS: Required<StuckDetectionOptions> = {
   repeatedToolThreshold: 5,
   noProgressThresholdMs: 2 * 60 * 1000, // 2 minutes
   longRunningThresholdMs: 10 * 60 * 1000, // 10 minutes
+  stateTransitionGapMs: 5 * 60 * 1000, // 5 minutes
 };
 
 /**
@@ -68,6 +74,7 @@ export function isWorkerStuck(
 
   // Check patterns in order of severity
   const patterns = [
+    detectStateTransitionGap(worker, opts),
     detectRepeatedToolCalls(recentEvents, opts),
     detectNoProgress(worker, recentEvents, opts),
     detectCircularEdits(recentEvents, opts),
@@ -94,6 +101,47 @@ export function getStuckReason(
 ): string | null {
   const pattern = isWorkerStuck(worker, events, options);
   return pattern?.reason ?? null;
+}
+
+/**
+ * Detect state-transition gap — worker stuck in an active state without
+ * transitioning. Uses lastStateTransition from WorkerInfo (set by the store
+ * when processing worker.state_transition events).
+ */
+function detectStateTransitionGap(
+  worker: WorkerInfo,
+  opts: Required<StuckDetectionOptions>
+): StuckPattern | null {
+  if (!worker.needleState || !worker.lastStateTransition) {
+    return null;
+  }
+
+  // Only active states are relevant — STOPPED workers are fine.
+  const activeStates = ['BOOTING', 'SELECTING', 'CLAIMING', 'WORKING', 'CLOSING'] as const;
+  if (!activeStates.includes(worker.needleState as typeof activeStates[number])) {
+    return null;
+  }
+
+  const now = Date.now();
+  const gapMs = now - worker.lastStateTransition;
+
+  if (gapMs > opts.stateTransitionGapMs) {
+    const minutes = Math.floor(gapMs / 60000);
+    const isCritical = gapMs > opts.stateTransitionGapMs * 2;
+
+    return {
+      type: 'state_gap',
+      reason: `No state transition for ${minutes}m while in ${worker.needleState}`,
+      severity: isCritical ? 'critical' : 'warning',
+      evidence: [
+        `State: ${worker.needleState} since ${new Date(worker.lastStateTransition).toISOString()}`,
+        `Gap: ${minutes}m (threshold: ${Math.floor(opts.stateTransitionGapMs / 60000)}m)`,
+      ],
+      suggestion: 'Worker may be stuck — check if the agent is waiting on an external resource or deadlocked',
+    };
+  }
+
+  return null;
 }
 
 /**

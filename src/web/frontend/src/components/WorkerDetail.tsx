@@ -1,5 +1,23 @@
 import React from 'react';
-import { WorkerInfo, LogEvent } from '../types';
+import { WorkerInfo, LogEvent, NeedleState } from '../types';
+
+const NEEDLE_STATE_ICONS: Record<NeedleState, string> = {
+  BOOTING: '⏳',
+  SELECTING: '🔍',
+  CLAIMING: '🎯',
+  WORKING: '●',
+  CLOSING: '⏹',
+  STOPPED: '○',
+};
+
+const NEEDLE_STATE_COLORS: Record<NeedleState, string> = {
+  BOOTING: '#5bc0de',
+  SELECTING: '#f0ad4e',
+  CLAIMING: '#9b59b6',
+  WORKING: '#5cb85c',
+  CLOSING: '#f0ad4e',
+  STOPPED: '#777',
+};
 
 interface WorkerDetailProps {
   /** The worker to display details for */
@@ -12,16 +30,6 @@ interface WorkerDetailProps {
   allWorkerEvents?: LogEvent[];
 }
 
-/**
- * WorkerDetail Component
- *
- * Displays detailed information about a selected worker including:
- * - Worker ID and status
- * - Activity statistics (event count, current tool)
- * - Timing information (last seen, uptime)
- * - Recent events list
- * - Collision information if applicable
- */
 const WorkerDetail: React.FC<WorkerDetailProps> = ({
   worker,
   onClose,
@@ -42,18 +50,14 @@ const WorkerDetail: React.FC<WorkerDetailProps> = ({
     return new Date(timestamp).toLocaleTimeString();
   };
 
-  const getStatusIcon = (): string => {
-    switch (worker.status) {
-      case 'active':
-        return '●';
-      case 'idle':
-        return '○';
-      case 'error':
-        return '✗';
-      default:
-        return '?';
-    }
-  };
+  const stateIcon = worker.needleState
+    ? NEEDLE_STATE_ICONS[worker.needleState]
+    : worker.status === 'active' ? '●' : worker.status === 'idle' ? '○' : '✗';
+  const stateLabel = worker.needleState ?? worker.status.toUpperCase();
+  const stateColor = worker.needleState
+    ? NEEDLE_STATE_COLORS[worker.needleState]
+    : undefined;
+  const stateCssClass = worker.needleState ? undefined : worker.status;
 
   const eventsToShow = allWorkerEvents || worker.recentEvents || [];
 
@@ -62,8 +66,11 @@ const WorkerDetail: React.FC<WorkerDetailProps> = ({
       {/* Header with close button */}
       <div className="worker-detail-header">
         <h2>
-          <span className={`worker-status-icon ${worker.status}`}>
-            {getStatusIcon()}
+          <span
+            className={`worker-status-icon ${stateCssClass ?? ''}`}
+            style={stateColor ? { color: stateColor } : undefined}
+          >
+            {stateIcon}
           </span>
           {worker.id}
         </h2>
@@ -103,8 +110,11 @@ const WorkerDetail: React.FC<WorkerDetailProps> = ({
         <h3>Status</h3>
         <div className="detail-row">
           <span className="detail-label">State</span>
-          <span className={`detail-value worker-status ${worker.status}`}>
-            {worker.status}
+          <span
+            className={`detail-value worker-status ${stateCssClass ?? ''}`}
+            style={stateColor ? { color: stateColor } : undefined}
+          >
+            {stateLabel}
           </span>
         </div>
         <div className="detail-row">
