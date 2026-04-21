@@ -177,6 +177,61 @@ Format: `category.action`. Categories group related lifecycle phases.
 | `lock.priority_bump_received` | Received priority bump notification | `path`, `from_worker` |
 | `lock.expired` | Lock expired | `path` |
 
+## OTLP Metric Instruments
+
+When NEEDLE workers emit OTLP **Metric** payloads (Sum, Histogram, Gauge), FABRIC
+normalizes each data point into a `metric.{name}` event (see normalizer). The
+canonical instrument names below define the mapping to analytics DB columns in
+`fabric.db`.
+
+FABRIC's Analytics Writer **prefers** OTLP metric values over log-derived
+estimates when both are present for the same worker + session.
+
+### Token & Cost Instruments
+
+| Instrument Name | Type | Unit | DB Column(s) |
+|---|---|---|---|
+| `needle.worker.tokens.in` | Sum | tokens | `task_metrics.tokens_in`, `session_worker_summaries.tokens_in` |
+| `needle.worker.tokens.out` | Sum | tokens | `task_metrics.tokens_out`, `session_worker_summaries.tokens_out` |
+| `needle.worker.cost.usd` | Sum | USD | `task_metrics.cost`, `session_worker_summaries.cost_usd` |
+
+### Duration Instruments
+
+| Instrument Name | Type | Unit | DB Column(s) |
+|---|---|---|---|
+| `needle.bead.duration` | Histogram | ms | `task_metrics.duration_ms` |
+| `needle.worker.uptime` | Gauge | ms | — (informational) |
+
+### Counting Instruments
+
+| Instrument Name | Type | Unit | DB Column(s) |
+|---|---|---|---|
+| `needle.bead.completed` | Sum | count | `session_worker_summaries.beads_completed` |
+| `needle.bead.failed` | Sum | count | `session_worker_summaries.beads_failed` |
+| `needle.worker.errors` | Sum | count | `session_worker_summaries.errors` |
+
+### Attribute Requirements
+
+Every metric data point **must** carry these OTLP attributes (namespaced form
+preferred, plain form accepted as fallback):
+
+| Attribute | Required | Purpose |
+|---|---|---|
+| `needle.worker.id` / `worker_id` | yes | Worker identity |
+| `needle.session.id` / `session_id` | yes | Session grouping |
+| `needle.bead.id` / `bead_id` | for bead-scoped metrics | Task correlation |
+
+### Resolution Order
+
+When querying `fabric.db`, FABRIC resolves conflicting values in this order:
+
+1. **`otlp-metric`** — row sourced from an OTLP metric instrument (authoritative)
+2. **`otlp-span`** — duration derived from span start/end times
+3. **`log-derived`** — estimated from log message parsing (fallback)
+
+The `metrics_source` column on `sessions` and `session_worker_summaries` records
+which source was used.
+
 ## TypeScript Reference
 
 The canonical TypeScript definitions live in `src/types.ts`:

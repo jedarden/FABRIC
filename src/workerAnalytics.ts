@@ -23,6 +23,175 @@ import {
 import { CostTracker } from './tui/utils/costTracking.js';
 import { getHistoricalStore, HistoricalStore, WorkerComparisonMetrics } from './historicalStore.js';
 
+// ── Canonical OTLP metric instrument names ───────────────────────
+
+export const INSTRUMENT_NAMES = {
+  TOKENS_IN:       'needle.worker.tokens.in',
+  TOKENS_OUT:      'needle.worker.tokens.out',
+  COST_USD:        'needle.worker.cost.usd',
+  BEAD_DURATION:   'needle.bead.duration',
+  BEAD_COMPLETED:  'needle.bead.completed',
+  BEAD_FAILED:     'needle.bead.failed',
+  WORKER_ERRORS:   'needle.worker.errors',
+  WORKER_UPTIME:   'needle.worker.uptime',
+} as const;
+
+const ALL_INSTRUMENTS = new Set(Object.values(INSTRUMENT_NAMES));
+
+// ── MetricAccumulator ────────────────────────────────────────────
+
+export interface MetricSample {
+  workerId: string;
+  metricName: string;
+  value: number;
+  timestamp: number;
+  beadId?: string;
+}
+
+export interface WorkerMetricSnapshot {
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
+  beadsCompleted: number;
+  beadsFailed: number;
+  errors: number;
+  durations: number[];
+}
+
+/**
+ * Accumulates OTLP metric data points, keyed by (worker, instrument).
+ * drainSamples() is called periodically by the store to flush to SQLite.
+ */
+export class MetricAccumulator {
+  private samples: MetricSample[] = [];
+  private hasData = false;
+
+  /** Per-worker running totals for cumulative instruments */
+  private workerTotals = new Map<string, Map<string, number>>();
+
+  /** Per-worker bead duration samples */
+  private workerDurations = new Map<string, number[]>();
+
+  /** Per-worker bead completion/failure counts */
+  private workerBeadCompleted = new Map<string, number>();
+  private workerBeadFailed = new Map<string, number>();
+  private workerErrors = new Map<string, number>();
+
+  /**
+   * Ingest a LogEvent that was produced by normalizing an OTLP metric.
+   * event.msg is "metric.<name>" and event.value / event.metric_name carry the payload.
+   */
+  processEvent(event: LogEvent): void {
+    const msg = event.msg || '';
+    if (!msg.startsWith('metric.')) return;
+
+    const metricName = (event.metric_name as string) || msg.slice(7);
+    if (!metricName) return;
+
+    const value = typeof event.value === 'number' ? event.value
+      : typeof event.metric_value === 'number' ? event.metric_value as number
+      : undefined;
+    if (value === undefined) return;
+
+    this.hasData = true;
+
+    const sample: MetricSample = {
+      workerId: event.worker,
+      metricName,
+      value,
+      timestamp: event.ts,
+    };
+    if (event.bead) sample.beadId = event.bead;
+
+    this.samples.push(sample);
+
+    // Update per-worker running totals
+    if (!this.workerTotals.has(event.worker)) {
+      this.workerTotals.set(event.worker, new Map());
+    }
+    const totals = this.workerTotals.get(event.worker)!;
+
+    switch (metricName) {
+      case INSTRUMENT_NAMES.TOKENS_IN:
+      case INSTRUMENT_NAMES.TOKENS_OUT:
+      case INSTRUMENT_NAMES.COST_USD:
+        totals.set(metricName, (totals.get(metricName) || 0) + value);
+        break;
+      case INSTRUMENT_NAMES.BEAD_DURATION: {
+        let durations = this.workerDurations.get(event.worker);
+        if (!durations) {
+          durations = [];
+          this.workerDurations.set(event.worker, durations);
+        }
+        durations.push(value);
+        break;
+      }
+      case INSTRUMENT_NAMES.BEAD_COMPLETED:
+        this.workerBeadCompleted.set(event.worker,
+          (this.workerBeadCompleted.get(event.worker) || 0) + value);
+        break;
+      case INSTRUMENT_NAMES.BEAD_FAILED:
+        this.workerBeadFailed.set(event.worker,
+          (this.workerBeadFailed.get(event.worker) || 0) + value);
+        break;
+      case INSTRUMENT_NAMES.WORKER_ERRORS:
+        this.workerErrors.set(event.worker,
+          (this.workerErrors.get(event.worker) || 0) + value);
+        break;
+    }
+  }
+
+  /**
+   * Drain buffered samples for SQLite persistence.
+   * Returns the samples and clears the buffer.
+   */
+  drainSamples(): MetricSample[] {
+    const drained = this.samples;
+    this.samples = [];
+    return drained;
+  }
+
+  /**
+   * Whether any OTLP metric data has been received.
+   */
+  hasMetricData(): boolean {
+    return this.hasData;
+  }
+
+  /**
+   * Get a snapshot of accumulated metric values for a specific worker.
+   * Returns null if no metric data exists for this worker.
+   */
+  getSnapshot(workerId: string): WorkerMetricSnapshot | null {
+    const totals = this.workerTotals.get(workerId);
+    if (!totals && !this.workerDurations.has(workerId)
+        && !this.workerBeadCompleted.has(workerId)) {
+      return null;
+    }
+
+    return {
+      tokensIn: totals?.get(INSTRUMENT_NAMES.TOKENS_IN) || 0,
+      tokensOut: totals?.get(INSTRUMENT_NAMES.TOKENS_OUT) || 0,
+      costUsd: totals?.get(INSTRUMENT_NAMES.COST_USD) || 0,
+      beadsCompleted: this.workerBeadCompleted.get(workerId) || 0,
+      beadsFailed: this.workerBeadFailed.get(workerId) || 0,
+      errors: this.workerErrors.get(workerId) || 0,
+      durations: this.workerDurations.get(workerId) || [],
+    };
+  }
+
+  /** Reset all accumulated data. */
+  reset(): void {
+    this.samples = [];
+    this.hasData = false;
+    this.workerTotals.clear();
+    this.workerDurations.clear();
+    this.workerBeadCompleted.clear();
+    this.workerBeadFailed.clear();
+    this.workerErrors.clear();
+  }
+}
+
 const DEFAULT_OPTIONS: Required<WorkerAnalyticsOptions> = {
   timeWindow: 'all',
   startTime: 0,
@@ -72,10 +241,12 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
   private costTracker: CostTracker;
   private timeSeriesInterval: number;
   private lastSnapshotTime: number = 0;
+  private metricAccumulator: MetricAccumulator;
 
   constructor(costTracker?: CostTracker, timeSeriesInterval: number = 3600000) {
     this.costTracker = costTracker || new CostTracker();
     this.timeSeriesInterval = timeSeriesInterval;
+    this.metricAccumulator = new MetricAccumulator();
   }
 
   /**
@@ -114,6 +285,11 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     if (workerCost) {
       worker.totalCostUsd = workerCost.costUsd;
       worker.totalTokens = workerCost.total;
+    }
+
+    // Feed OTLP metric events to the accumulator
+    if (event.msg?.startsWith('metric.')) {
+      this.metricAccumulator.processEvent(event);
     }
 
     // Periodic time-series snapshot
@@ -336,6 +512,7 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
   clear(): void {
     this.workers.clear();
     this.costTracker.reset();
+    this.metricAccumulator.reset();
     this.lastSnapshotTime = 0;
   }
 
@@ -344,6 +521,13 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
    */
   getCostTracker(): CostTracker {
     return this.costTracker;
+  }
+
+  /**
+   * Get the MetricAccumulator for OTLP metric data
+   */
+  getMetricAccumulator(): MetricAccumulator {
+    return this.metricAccumulator;
   }
 
   /**

@@ -629,5 +629,77 @@ describe('HistoricalStore', () => {
       expect(gammaPerf!.totalCostUsd).toBeCloseTo(0.092);
       expect(gammaPerf!.totalTokens).toBe(1650);
     });
+
+    it('should prefer otlp-metric source over log-derived in getLatestWorkerMetrics', () => {
+      store.startSession('source-pref-sess');
+
+      // Write a log-derived sample first
+      store.recordMetricSample({
+        workerId: 'needle-delta',
+        metricName: INSTRUMENT_NAMES.TOKENS_IN,
+        value: 500,
+        timestamp: Date.now() - 1000,
+        source: 'log-derived',
+      });
+
+      // Write an OTLP-metric sample for the same instrument
+      store.recordMetricSample({
+        workerId: 'needle-delta',
+        metricName: INSTRUMENT_NAMES.TOKENS_IN,
+        value: 1200,
+        timestamp: Date.now(),
+        source: 'otlp-metric',
+      });
+
+      const latest = store.getLatestWorkerMetrics('needle-delta');
+      expect(latest[INSTRUMENT_NAMES.TOKENS_IN]).toBeDefined();
+      expect(latest[INSTRUMENT_NAMES.TOKENS_IN].value).toBe(1200);
+      expect(latest[INSTRUMENT_NAMES.TOKENS_IN].source).toBe('otlp-metric');
+
+      store.endSession({ workerCount: 1, taskCount: 0, totalCost: 0, totalTokens: 0 });
+    });
+
+    it('should mark metricsSource as otlp-metric even without cost data', () => {
+      store.startSession('no-cost-sess');
+
+      const accumulator = new MetricAccumulator();
+
+      // Only send token metrics — no cost
+      const logEvent1 = normalizeToLogEvent({
+        name: INSTRUMENT_NAMES.TOKENS_IN,
+        timeUnixNano: String(Date.now() * 1_000_000),
+        asDouble: 800,
+        attributes: [
+          { key: 'worker_id', value: { stringValue: 'needle-epsilon' } },
+          { key: 'session_id', value: { stringValue: 'no-cost-sess' } },
+        ],
+      }, 'otlp-metric');
+      accumulator.processEvent(logEvent1!);
+
+      const snap = accumulator.getSnapshot('needle-epsilon');
+      expect(snap).not.toBeNull();
+      // costUsd should be 0 but source should still be otlp-metric
+      expect(snap!.costUsd).toBe(0);
+      expect(snap!.tokensIn).toBe(800);
+
+      store.upsertSessionWorkerSummary({
+        workerId: 'needle-epsilon',
+        tokensIn: snap!.tokensIn,
+        tokensOut: snap!.tokensOut,
+        costUsd: snap!.costUsd,
+        beadsCompleted: snap!.beadsCompleted,
+        beadsFailed: snap!.beadsFailed,
+        errors: snap!.errors,
+        metricsSource: snap ? 'otlp-metric' : 'log-derived',
+      });
+
+      const summaries = store.getSessionWorkerSummaries({ sessionId: 'no-cost-sess' });
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].metrics_source).toBe('otlp-metric');
+      expect(summaries[0].tokens_in).toBe(800);
+      expect(summaries[0].cost_usd).toBe(0);
+
+      store.endSession({ workerCount: 1, taskCount: 0, totalCost: 0, totalTokens: 800, metricsSource: 'otlp-metric' });
+    });
   });
 });

@@ -299,7 +299,7 @@ export class InMemoryEventStore implements EventStore {
           beadsCompleted: metricSnap?.beadsCompleted ?? wm.beadsCompleted,
           beadsFailed: metricSnap?.beadsFailed ?? 0,
           errors: metricSnap?.errors ?? wm.errorCount,
-          metricsSource: metricSnap && metricSnap.costUsd > 0 ? 'otlp-metric' : 'log-derived',
+          metricsSource: metricSnap ? 'otlp-metric' : 'log-derived',
         });
       }
     }

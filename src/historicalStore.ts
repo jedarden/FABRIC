@@ -32,6 +32,7 @@ export interface SessionRecord {
   task_count: number;
   total_cost: number;
   total_tokens: number;
+  metrics_source?: string;
 }
 
 /**
@@ -125,7 +126,7 @@ export interface LearnedRecoveryEntry {
 // Database Schema
 // ============================================
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const CREATE_SESSIONS_TABLE = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -190,6 +191,49 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 `;
 
+const CREATE_METRIC_SAMPLES_TABLE = `
+CREATE TABLE IF NOT EXISTS metric_samples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  worker_id TEXT NOT NULL,
+  metric_name TEXT NOT NULL,
+  value REAL NOT NULL,
+  timestamp INTEGER NOT NULL,
+  source TEXT NOT NULL DEFAULT 'otlp-metric',
+  bead_id TEXT,
+  session_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_metric_samples_worker ON metric_samples(worker_id);
+CREATE INDEX IF NOT EXISTS idx_metric_samples_name ON metric_samples(metric_name);
+CREATE INDEX IF NOT EXISTS idx_metric_samples_timestamp ON metric_samples(timestamp);
+`;
+
+const CREATE_SESSION_WORKER_SUMMARIES_TABLE = `
+CREATE TABLE IF NOT EXISTS session_worker_summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  worker_id TEXT NOT NULL,
+  tokens_in INTEGER NOT NULL DEFAULT 0,
+  tokens_out INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  beads_completed INTEGER NOT NULL DEFAULT 0,
+  beads_failed INTEGER NOT NULL DEFAULT 0,
+  errors INTEGER NOT NULL DEFAULT 0,
+  metrics_source TEXT NOT NULL DEFAULT 'log-derived',
+  updated_at INTEGER NOT NULL,
+  UNIQUE(session_id, worker_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sws_session ON session_worker_summaries(session_id);
+CREATE INDEX IF NOT EXISTS idx_sws_worker ON session_worker_summaries(worker_id);
+CREATE INDEX IF NOT EXISTS idx_sws_source ON session_worker_summaries(metrics_source);
+`;
+
+// Schema v2 migration: add metrics_source column to sessions if missing
+const MIGRATE_V2_ADD_METRICS_SOURCE = `
+ALTER TABLE sessions ADD COLUMN metrics_source TEXT NOT NULL DEFAULT 'log-derived';
+`;
+
 // ============================================
 // Historical Store Class
 // ============================================
@@ -239,13 +283,27 @@ export class HistoricalStore {
     const versionRow = this.db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined;
     const currentVersion = versionRow?.version || 0;
 
-    if (currentVersion < SCHEMA_VERSION) {
-      // Run schema migrations
+    if (currentVersion < 1) {
+      // Initial schema (v1)
       this.db.exec(CREATE_SESSIONS_TABLE);
       this.db.exec(CREATE_TASK_METRICS_TABLE);
       this.db.exec(CREATE_ERROR_HISTORY_TABLE);
+    }
 
-      // Update version
+    if (currentVersion < 2) {
+      // v2: metric_samples, session_worker_summaries, metrics_source on sessions
+      this.db.exec(CREATE_METRIC_SAMPLES_TABLE);
+      this.db.exec(CREATE_SESSION_WORKER_SUMMARIES_TABLE);
+      // Add metrics_source column to sessions (may already exist if v1 ran fresh)
+      try {
+        this.db.exec(MIGRATE_V2_ADD_METRICS_SOURCE);
+      } catch {
+        // Column already exists — safe to ignore
+      }
+    }
+
+    // Update version
+    if (currentVersion < SCHEMA_VERSION) {
       this.db.prepare('INSERT OR REPLACE INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
     }
   }
@@ -276,14 +334,16 @@ export class HistoricalStore {
     taskCount: number;
     totalCost: number;
     totalTokens: number;
+    metricsSource?: string;
   }): void {
     if (!this.currentSessionId) return;
 
     const endTime = Date.now();
+    const source = metrics.metricsSource || 'log-derived';
 
     this.db.prepare(`
       UPDATE sessions
-      SET ended_at = ?, worker_count = ?, task_count = ?, total_cost = ?, total_tokens = ?
+      SET ended_at = ?, worker_count = ?, task_count = ?, total_cost = ?, total_tokens = ?, metrics_source = ?
       WHERE id = ?
     `).run(
       endTime,
@@ -291,6 +351,7 @@ export class HistoricalStore {
       metrics.taskCount,
       metrics.totalCost,
       metrics.totalTokens,
+      source,
       this.currentSessionId
     );
 
@@ -390,6 +451,225 @@ export class HistoricalStore {
       SET resolution = ?, resolution_successful = ?
       WHERE id = ?
     `).run(resolution, successful ? 1 : 0, errorId);
+  }
+
+  // ============================================
+  // OTLP Metric Persistence
+  // ============================================
+
+  /**
+   * Record a raw metric sample from OTLP ingestion.
+   */
+  recordMetricSample(sample: {
+    workerId: string;
+    metricName: string;
+    value: number;
+    timestamp: number;
+    source: string;
+    beadId?: string;
+  }): void {
+    if (!this.currentSessionId) {
+      this.startSession();
+    }
+
+    this.db.prepare(`
+      INSERT INTO metric_samples (worker_id, metric_name, value, timestamp, source, bead_id, session_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      sample.workerId,
+      sample.metricName,
+      sample.value,
+      sample.timestamp,
+      sample.source,
+      sample.beadId || null,
+      this.currentSessionId,
+    );
+  }
+
+  /**
+   * Upsert per-worker session summary from metric accumulator snapshots.
+   * When metric-sourced data is available it overwrites log-derived estimates.
+   */
+  upsertSessionWorkerSummary(summary: {
+    workerId: string;
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+    beadsCompleted: number;
+    beadsFailed: number;
+    errors: number;
+    metricsSource: string;
+  }): void {
+    if (!this.currentSessionId) {
+      this.startSession();
+    }
+
+    this.db.prepare(`
+      INSERT INTO session_worker_summaries
+        (session_id, worker_id, tokens_in, tokens_out, cost_usd, beads_completed, beads_failed, errors, metrics_source, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id, worker_id) DO UPDATE SET
+        tokens_in = excluded.tokens_in,
+        tokens_out = excluded.tokens_out,
+        cost_usd = excluded.cost_usd,
+        beads_completed = excluded.beads_completed,
+        beads_failed = excluded.beads_failed,
+        errors = excluded.errors,
+        metrics_source = excluded.metrics_source,
+        updated_at = excluded.updated_at
+    `).run(
+      this.currentSessionId,
+      summary.workerId,
+      summary.tokensIn,
+      summary.tokensOut,
+      summary.costUsd,
+      summary.beadsCompleted,
+      summary.beadsFailed,
+      summary.errors,
+      summary.metricsSource,
+      Date.now(),
+    );
+  }
+
+  /**
+   * Update the live (current) session row with aggregated metrics.
+   */
+  updateLiveSession(metrics: {
+    workerCount: number;
+    taskCount: number;
+    totalCost: number;
+    totalTokens: number;
+    metricsSource: string;
+  }): void {
+    if (!this.currentSessionId) return;
+
+    this.db.prepare(`
+      UPDATE sessions
+      SET worker_count = ?, task_count = ?, total_cost = ?, total_tokens = ?, metrics_source = ?, ended_at = ?
+      WHERE id = ?
+    `).run(
+      metrics.workerCount,
+      metrics.taskCount,
+      metrics.totalCost,
+      metrics.totalTokens,
+      metrics.metricsSource,
+      Date.now(),
+      this.currentSessionId,
+    );
+  }
+
+  /**
+   * Get session worker summaries, preferring metric-sourced rows.
+   */
+  getSessionWorkerSummaries(options: { sessionId?: string; workerId?: string } = {}): Array<{
+    sessionId: string;
+    workerId: string;
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+    beadsCompleted: number;
+    beadsFailed: number;
+    errors: number;
+    metricsSource: string;
+  }> {
+    let query = 'SELECT * FROM session_worker_summaries WHERE 1=1';
+    const params: (string | number)[] = [];
+
+    if (options.sessionId) {
+      query += ' AND session_id = ?';
+      params.push(options.sessionId);
+    }
+    if (options.workerId) {
+      query += ' AND worker_id = ?';
+      params.push(options.workerId);
+    }
+
+    query += ' ORDER BY updated_at DESC';
+
+    return this.db.prepare(query).all(...params) as Array<{
+      id: number;
+      session_id: string;
+      worker_id: string;
+      tokens_in: number;
+      tokens_out: number;
+      cost_usd: number;
+      beads_completed: number;
+      beads_failed: number;
+      errors: number;
+      metrics_source: string;
+      updated_at: number;
+    }>;
+  }
+
+  /**
+   * Query metric samples for a given time range / worker / instrument.
+   * Returns metric-sourced rows first, then log-derived rows.
+   */
+  getMetricSamples(options: {
+    workerId?: string;
+    metricName?: string;
+    startTime?: number;
+    endTime?: number;
+    limit?: number;
+  } = {}): Array<{
+    workerId: string;
+    metricName: string;
+    value: number;
+    timestamp: number;
+    source: string;
+    beadId: string | null;
+    sessionId: string | null;
+  }> {
+    let query = 'SELECT * FROM metric_samples WHERE 1=1';
+    const params: (string | number)[] = [];
+
+    if (options.workerId) {
+      query += ' AND worker_id = ?';
+      params.push(options.workerId);
+    }
+    if (options.metricName) {
+      query += ' AND metric_name = ?';
+      params.push(options.metricName);
+    }
+    if (options.startTime) {
+      query += ' AND timestamp >= ?';
+      params.push(options.startTime);
+    }
+    if (options.endTime) {
+      query += ' AND timestamp <= ?';
+      params.push(options.endTime);
+    }
+
+    query += ` ORDER BY CASE source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END, timestamp DESC LIMIT ?`;
+    params.push(options.limit || 1000);
+
+    return this.db.prepare(query).all(...params) as any[];
+  }
+
+  /**
+   * Get the latest aggregated values for each instrument for a worker.
+   * Prefers OTLP-metric-sourced data over log-derived.
+   */
+  getLatestWorkerMetrics(workerId: string): Record<string, { value: number; source: string; timestamp: number }> {
+    const rows = this.db.prepare(`
+      SELECT metric_name, value, source, timestamp
+      FROM metric_samples
+      WHERE worker_id = ?
+      ORDER BY CASE source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END, timestamp DESC
+    `).all(workerId) as Array<{ metric_name: string; value: number; source: string; timestamp: number }>;
+
+    // Keep the first occurrence per metric_name (which is the preferred source)
+    const result: Record<string, { value: number; source: string; timestamp: number }> = {};
+    for (const row of rows) {
+      if (!(row.metric_name in result)) {
+        result[row.metric_name] = {
+          value: row.value,
+          source: row.source,
+          timestamp: row.timestamp,
+        };
+      }
+    }
+    return result;
   }
 
   // ============================================
@@ -722,8 +1002,49 @@ export class HistoricalStore {
 
     // Get sessions in range
     const sessions = this.getSingsInRange(startTime, endTime);
+    const sessionIds = sessions.map(s => s.id);
 
-    // Get task metrics in range
+    // Fetch metric-sourced worker summaries for these sessions
+    // These are preferred over log-derived task_metrics when available
+    const metricWorkerMap = new Map<string, {
+      tokensIn: number;
+      tokensOut: number;
+      costUsd: number;
+      beadsCompleted: number;
+      beadsFailed: number;
+      errors: number;
+    }>();
+
+    if (sessionIds.length > 0) {
+      const summaries = this.db.prepare(`
+        SELECT worker_id, tokens_in, tokens_out, cost_usd, beads_completed, beads_failed, errors, metrics_source
+        FROM session_worker_summaries
+        WHERE session_id IN (${sessionIds.map(() => '?').join(',')})
+          AND metrics_source = 'otlp-metric'
+      `).all(...sessionIds) as Array<{
+        worker_id: string;
+        tokens_in: number;
+        tokens_out: number;
+        cost_usd: number;
+        beads_completed: number;
+        beads_failed: number;
+        errors: number;
+        metrics_source: string;
+      }>;
+
+      for (const s of summaries) {
+        metricWorkerMap.set(s.worker_id, {
+          tokensIn: s.tokens_in,
+          tokensOut: s.tokens_out,
+          costUsd: s.cost_usd,
+          beadsCompleted: s.beads_completed,
+          beadsFailed: s.beads_failed,
+          errors: s.errors,
+        });
+      }
+    }
+
+    // Get task metrics in range (fallback / log-derived)
     const tasks = this.db.prepare(`
       SELECT * FROM task_metrics
       WHERE started_at >= ? AND ended_at <= ?
@@ -736,6 +1057,7 @@ export class HistoricalStore {
       cost: number;
       tokens: number;
       completionTimes: number[];
+      hasMetricSource: boolean;
     }>();
 
     let totalBeadsCompleted = 0;
@@ -754,6 +1076,7 @@ export class HistoricalStore {
           cost: 0,
           tokens: 0,
           completionTimes: [],
+          hasMetricSource: metricWorkerMap.has(task.worker_id),
         };
         workerMap.set(task.worker_id, worker);
       }
@@ -773,6 +1096,48 @@ export class HistoricalStore {
       totalTokens += task.tokens_in + task.tokens_out;
       worker.cost += task.cost;
       worker.tokens += task.tokens_in + task.tokens_out;
+    }
+
+    // For workers with metric-sourced summaries, override the log-derived values
+    for (const [workerId, metricData] of metricWorkerMap) {
+      const worker = workerMap.get(workerId);
+      if (worker) {
+        // Replace log-derived estimates with metric-sourced values
+        worker.tasksCompleted = metricData.beadsCompleted;
+        worker.errors = metricData.errors;
+        worker.cost = metricData.costUsd;
+        worker.tokens = metricData.tokensIn + metricData.tokensOut;
+        worker.hasMetricSource = true;
+      } else {
+        // Worker has metric data but no task_metrics entries yet
+        workerMap.set(workerId, {
+          tasksCompleted: metricData.beadsCompleted,
+          errors: metricData.errors,
+          cost: metricData.costUsd,
+          tokens: metricData.tokensIn + metricData.tokensOut,
+          completionTimes: [],
+          hasMetricSource: true,
+        });
+      }
+    }
+
+    // Recalculate totals from the (possibly overridden) worker map
+    totalBeadsCompleted = 0;
+    totalErrors = 0;
+    totalCostUsd = 0;
+    totalTokens = 0;
+    totalCompletionTime = 0;
+    successCount = 0;
+
+    for (const worker of workerMap.values()) {
+      totalBeadsCompleted += worker.tasksCompleted;
+      totalErrors += worker.errors;
+      totalCostUsd += worker.cost;
+      totalTokens += worker.tokens;
+      successCount += worker.tasksCompleted;
+      for (const d of worker.completionTimes) {
+        totalCompletionTime += d;
+      }
     }
 
     const totalTimeMs = endTime - startTime;
@@ -898,6 +1263,8 @@ export class HistoricalStore {
    * Clear all historical data
    */
   clear(): void {
+    this.db.exec('DELETE FROM metric_samples');
+    this.db.exec('DELETE FROM session_worker_summaries');
     this.db.exec('DELETE FROM error_history');
     this.db.exec('DELETE FROM task_metrics');
     this.db.exec('DELETE FROM sessions');
