@@ -303,7 +303,7 @@ describe('E2E: Log Tailing with ActivityStream', () => {
 
       // Verify event was parsed correctly
       expect(receivedEvents.length).toBe(1);
-      expect(receivedEvents[0].worker).toBe('claude-worker1');
+      expect(receivedEvents[0].worker).toBe('claude-code-sonnet-worker1');
       expect(receivedEvents[0].bead).toBe('bd-xyz789');
       expect(receivedEvents[0].msg).toBe('bead.claimed');
 

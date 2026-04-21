@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { LogEvent } from './types.js';
-import { normalizeToLogEvent } from './normalizer.js';
+import { normalizeToLogEvent, EventDeduplicator } from './normalizer.js';
 
 export interface TailerOptions {
   /** Path to log file or directory */
@@ -22,6 +22,9 @@ export interface TailerOptions {
 
   /** Number of existing lines to read on start */
   lines?: number;
+
+  /** Shared deduplicator for cross-source dedup (JSONL + OTLP). */
+  deduplicator?: EventDeduplicator;
 }
 
 export interface TailerEvents {
@@ -36,6 +39,7 @@ export class LogTailer extends EventEmitter {
   private parseJson: boolean;
   private follow: boolean;
   private lines: number;
+  private deduplicator?: EventDeduplicator;
   private watcher?: fs.FSWatcher;
   private position: number = 0;
   private buffer: string = '';
@@ -47,6 +51,7 @@ export class LogTailer extends EventEmitter {
     this.parseJson = options.parseJson ?? true;
     this.follow = options.follow ?? true;
     this.lines = options.lines ?? 0;
+    this.deduplicator = options.deduplicator;
   }
 
   /**
@@ -180,7 +185,7 @@ export class LogTailer extends EventEmitter {
     this.emit('line', line);
 
     if (this.parseJson) {
-      const event = normalizeToLogEvent(line, 'jsonl');
+      const event = normalizeToLogEvent(line, 'jsonl', this.deduplicator);
       if (event) {
         this.emit('event', event);
       }

@@ -46,7 +46,7 @@ describe('Stuck Detection', () => {
 
   describe('state-transition gap detection', () => {
     it('detects worker stuck in WORKING with no state transition for too long', () => {
-      const gapMs = 10 * 60 * 1000; // 10 minutes
+      const gapMs = 7 * 60 * 1000; // 7 minutes (< 2×5min threshold)
       const worker = makeWorker({
         needleState: 'WORKING',
         lastStateTransition: Date.now() - gapMs,
@@ -61,7 +61,7 @@ describe('Stuck Detection', () => {
       expect(pattern!.type).toBe('state_gap');
       expect(pattern!.severity).toBe('warning');
       expect(pattern!.reason).toContain('WORKING');
-      expect(pattern!.reason).toContain('10m');
+      expect(pattern!.reason).toContain('7m');
     });
 
     it('escalates to critical at 2x the gap threshold', () => {

@@ -124,6 +124,8 @@ vi.mock('./components/CommandPalette.js', () => {
       hide = vi.fn();
       isVisible = vi.fn(() => false);
       addSuggestion = vi.fn();
+      addSuggestions = vi.fn();
+      clearSuggestions = vi.fn();
     },
   };
 });

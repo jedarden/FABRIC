@@ -380,7 +380,7 @@ export class FabricTuiApp {
       top: 1,
       left: 0,
       width: '100%',
-      bottom: 1,
+      height: 1,
     });
     this.crossReferencePanel.hide();
 
@@ -390,7 +390,7 @@ export class FabricTuiApp {
       top: 1,
       left: 0,
       width: '100%',
-      bottom: 1,
+      height: 1,
       onAcknowledge: (alertId) => {
         const tracker = getCostTracker();
         tracker.acknowledgeAlert(alertId);

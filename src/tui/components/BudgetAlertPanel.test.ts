@@ -67,17 +67,17 @@ import { CostSummary, BudgetAlert } from '../utils/costTracking.js';
 function createMockCostSummary(overrides: Partial<CostSummary> = {}): CostSummary {
   return {
     totalCostUsd: 1.50,
-    inputTokens: 100000,
-    outputTokens: 50000,
+    total: { input: 100000, output: 50000, total: 150000 },
     byWorker: new Map([
-      ['w-1', { workerId: 'w-1', costUsd: 0.75, total: 100000, apiCalls: 10, currentBead: 'bd-1' }],
-      ['w-2', { workerId: 'w-2', costUsd: 0.75, total: 50000, apiCalls: 5, currentBead: 'bd-2' }],
+      ['w-1', { workerId: 'w-1', costUsd: 0.75, input: 70000, output: 30000, total: 100000, apiCalls: 10, currentBead: 'bd-1' }],
+      ['w-2', { workerId: 'w-2', costUsd: 0.75, input: 30000, output: 20000, total: 50000, apiCalls: 5, currentBead: 'bd-2' }],
     ]),
     budget: {
       limit: 10,
-      used: 1.50,
+      spent: 1.50,
       remaining: 8.50,
       percentUsed: 15,
+      isOverBudget: false,
       warningLevel: 'none',
     },
     burnRate: {
@@ -85,7 +85,10 @@ function createMockCostSummary(overrides: Partial<CostSummary> = {}): CostSummar
       windowMinutes: 5,
       isHighBurnRate: false,
       projectedTotalCost: 5.00,
+      minutesToExhaustion: 170,
+      timeToExhaustion: '2h 50m',
     },
+    timeRange: { start: Date.now() - 300000, end: Date.now() },
     ...overrides,
   };
 }
@@ -95,12 +98,13 @@ function createMockAlert(overrides: Partial<BudgetAlert> = {}): BudgetAlert {
   return {
     id: 'alert-1',
     type: 'warning',
+    message: 'Budget alert',
     timestamp: Date.now(),
     spent: 8.00,
     limit: 10.00,
     burnRate: 0.10,
     topConsumers: [
-      { workerId: 'w-1', costUsd: 4.00, currentBead: 'bd-1', insight: 'High API usage' },
+      { workerId: 'w-1', costUsd: 4.00, percentOfTotal: 50, currentBead: 'bd-1', insight: 'High API usage' },
     ],
     acknowledged: false,
     ...overrides,
@@ -141,8 +145,8 @@ describe('BudgetAlertPanel', () => {
       left: 0,
       width: 60,
       height: 20,
-      onAcknowledge: mockOnAcknowledge,
-      onOpenSettings: mockOnOpenSettings,
+      onAcknowledge: mockOnAcknowledge as (alertId: string) => void,
+      onOpenSettings: mockOnOpenSettings as () => void,
     });
   });
 
@@ -185,6 +189,8 @@ describe('BudgetAlertPanel', () => {
           windowMinutes: 5,
           isHighBurnRate: true,
           projectedTotalCost: 50.00,
+          minutesToExhaustion: 17,
+          timeToExhaustion: '17 minutes',
         },
       });
       panel.setCostSummary(summary);
@@ -196,9 +202,10 @@ describe('BudgetAlertPanel', () => {
       const summary = createMockCostSummary({
         budget: {
           limit: 10,
-          used: 8.50,
+          spent: 8.50,
           remaining: 1.50,
           percentUsed: 85,
+          isOverBudget: false,
           warningLevel: 'warning',
         },
       });
@@ -211,9 +218,10 @@ describe('BudgetAlertPanel', () => {
       const summary = createMockCostSummary({
         budget: {
           limit: 10,
-          used: 9.50,
+          spent: 9.50,
           remaining: 0.50,
           percentUsed: 95,
+          isOverBudget: false,
           warningLevel: 'critical',
         },
       });
@@ -226,9 +234,10 @@ describe('BudgetAlertPanel', () => {
       const summary = createMockCostSummary({
         budget: {
           limit: 0,
-          used: 1.50,
+          spent: 1.50,
           remaining: 0,
           percentUsed: 0,
+          isOverBudget: false,
           warningLevel: 'none',
         },
       });
@@ -272,8 +281,8 @@ describe('BudgetAlertPanel', () => {
       const alerts = [
         createMockAlert({
           topConsumers: [
-            { workerId: 'w-1', costUsd: 4.00, currentBead: 'bd-1', insight: 'High usage' },
-            { workerId: 'w-2', costUsd: 2.00, currentBead: undefined, insight: undefined },
+            { workerId: 'w-1', costUsd: 4.00, percentOfTotal: 50, currentBead: 'bd-1', insight: 'High usage' },
+            { workerId: 'w-2', costUsd: 2.00, percentOfTotal: 25, currentBead: undefined, insight: undefined },
           ],
         }),
       ];
@@ -360,6 +369,7 @@ describe('BudgetAlertPanel', () => {
           windowMinutes: 5,
           isHighBurnRate: true,
           projectedTotalCost: 10.00,
+          minutesToExhaustion: 30,
           timeToExhaustion: '30 minutes',
         },
       });
@@ -412,7 +422,7 @@ describe('BudgetAlertPanel', () => {
     it('should handle workers without current bead', () => {
       const summary = createMockCostSummary({
         byWorker: new Map([
-          ['w-1', { workerId: 'w-1', costUsd: 0.75, total: 100000, apiCalls: 10, currentBead: undefined }],
+          ['w-1', { workerId: 'w-1', costUsd: 0.75, input: 70000, output: 30000, total: 100000, apiCalls: 10, currentBead: undefined }],
         ]),
       });
       panel.setCostSummary(summary);
@@ -428,6 +438,8 @@ describe('BudgetAlertPanel', () => {
           windowMinutes: 5,
           isHighBurnRate: false,
           projectedTotalCost: 0,
+          minutesToExhaustion: null,
+          timeToExhaustion: null,
         },
       });
       panel.setCostSummary(summary);
@@ -440,9 +452,10 @@ describe('BudgetAlertPanel', () => {
         totalCostUsd: 1000.00,
         budget: {
           limit: 1000,
-          used: 1000,
+          spent: 1000,
           remaining: 0,
           percentUsed: 100,
+          isOverBudget: true,
           warningLevel: 'critical',
         },
       });

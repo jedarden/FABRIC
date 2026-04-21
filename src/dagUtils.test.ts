@@ -13,35 +13,37 @@ import { LogEvent } from './types.js';
 // ── Helpers ──────────────────────────────────────────────────────
 
 function spanStartedEvent(overrides: Partial<LogEvent> & { span_id: string }): LogEvent {
+  const { span_id, trace_id, parent_span_id, span_name, bead, ...rest } = overrides;
   return {
     ts: 1000,
     worker: 'tcb-alpha',
     level: 'info',
     msg: 'bead.lifecycle.started',
-    span_id: overrides.span_id,
-    trace_id: overrides.trace_id ?? 'trace-1',
-    parent_span_id: overrides.parent_span_id,
-    span_name: overrides.span_name ?? 'bead.lifecycle',
-    bead: overrides.bead,
+    span_id,
+    trace_id: trace_id ?? 'trace-1',
+    parent_span_id,
+    span_name: span_name ?? 'bead.lifecycle',
+    bead,
     session: 'sess-1',
-    ...overrides,
+    ...rest,
   };
 }
 
 function spanFinishedEvent(overrides: Partial<LogEvent> & { span_id: string }): LogEvent {
+  const { span_id, trace_id, parent_span_id, span_name, bead, duration_ms, ...rest } = overrides;
   return {
     ts: 2000,
     worker: 'tcb-alpha',
     level: 'info',
     msg: 'bead.lifecycle.finished',
-    span_id: overrides.span_id,
-    trace_id: overrides.trace_id ?? 'trace-1',
-    parent_span_id: overrides.parent_span_id,
-    span_name: overrides.span_name ?? 'bead.lifecycle',
-    bead: overrides.bead,
-    duration_ms: overrides.duration_ms ?? 1000,
+    span_id,
+    trace_id: trace_id ?? 'trace-1',
+    parent_span_id,
+    span_name: span_name ?? 'bead.lifecycle',
+    bead,
+    duration_ms: duration_ms ?? 1000,
     session: 'sess-1',
-    ...overrides,
+    ...rest,
   };
 }
 

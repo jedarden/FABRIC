@@ -373,7 +373,7 @@ describe('WorkerDetail', () => {
     it('should handle worker with collision', () => {
       const worker = createMockWorker({
         hasCollision: true,
-        collisionTypes: ['file', 'directory'],
+        collisionTypes: ['file', 'task'],
       });
       expect(() => workerDetail.setWorker(worker)).not.toThrow();
     });

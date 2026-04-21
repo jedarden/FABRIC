@@ -1053,12 +1053,12 @@ describe('TUI Regression Tests', () => {
 
       // Header should contain FABRIC branding
       const headerCall = boxCalls.find((call: unknown[]) =>
-        call?.[0]?.content?.includes('FABRIC')
+        typeof call?.[0] === 'object' && call[0] !== null && 'content' in call[0] && typeof (call[0] as Record<string, unknown>).content === 'string' && ((call[0] as Record<string, unknown>).content as string).includes('FABRIC')
       );
 
       // Header format should be consistent
       if (headerCall) {
-        const headerContent = headerCall[0].content;
+        const headerContent = (headerCall[0] as Record<string, unknown>).content as string;
         expect(headerContent).toMatch(/FABRIC/);
       }
     });
@@ -1069,11 +1069,11 @@ describe('TUI Regression Tests', () => {
 
       // Footer should contain key hints
       const footerCall = boxCalls.find((call: unknown[]) =>
-        call?.[0]?.bottom === 0
+        typeof call?.[0] === 'object' && call[0] !== null && 'bottom' in call[0] && (call[0] as Record<string, unknown>).bottom === 0
       );
 
       if (footerCall) {
-        const footerOptions = footerCall[0];
+        const footerOptions = footerCall[0] as Record<string, unknown>;
         expect(footerOptions.bottom).toBe(0);
       }
     });

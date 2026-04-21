@@ -27,6 +27,7 @@ import { formatRecoveryForConsole, getRecoverySummary } from './RecoveryPanel.js
 // Helper to create mock RecoveryAction
 function createMockAction(overrides: Partial<RecoveryAction> = {}): RecoveryAction {
   return {
+    id: 'action-1',
     type: 'retry' as RecoveryActionType,
     title: 'Retry operation',
     priority: 'normal' as RecoveryPriority,
@@ -40,6 +41,7 @@ function createMockAction(overrides: Partial<RecoveryAction> = {}): RecoveryActi
 function createMockSuggestion(overrides: Partial<RecoverySuggestion> = {}): RecoverySuggestion {
   return {
     id: 'suggestion-1',
+    errorGroupId: 'error-group-1',
     title: 'Network Error',
     category: 'network' as ErrorCategory,
     errorSummary: 'Connection refused to host',
@@ -47,6 +49,7 @@ function createMockSuggestion(overrides: Partial<RecoverySuggestion> = {}): Reco
     isActive: true,
     affectedWorkers: ['w-1', 'w-2'],
     actions: [createMockAction()],
+    generatedAt: Date.now(),
     ...overrides,
   };
 }

@@ -15,6 +15,7 @@ import { LogTailer, tailLogFile } from './tailer.js';
 import { formatEvent } from './parser.js';
 import { getStore } from './store.js';
 import { createWebServer } from './web/index.js';
+import { EventDeduplicator } from './normalizer.js';
 import * as fs from 'fs';
 import type { LogLevel, EventFilter, LogEvent } from './types.js';
 
@@ -44,13 +45,14 @@ function globMatch(pattern: string, value: string): boolean {
 async function startOtlpHttpListener(
   addr: string,
   onEvent: (event: import('./types.js').LogEvent) => void,
+  deduplicator?: EventDeduplicator,
 ): Promise<import('http').Server> {
   const { default: express } = await import('express');
   const { createOtlpHttpRouter } = await import('./otlpHttpReceiver.js');
   const { createServer } = await import('http');
 
   const app = express();
-  app.use(createOtlpHttpRouter({ onEvent }));
+  app.use(createOtlpHttpRouter({ onEvent, deduplicator }));
 
   const match = addr.match(/^(?:([\d.]+):)?(\d+)$/);
   const host = match?.[1] || '0.0.0.0';
@@ -91,12 +93,17 @@ program
       const store = getStore();
       const app = createTuiApp(store, { logPath: filePath });
 
+      // Shared deduplicator for cross-source dedup when OTLP is active
+      const needsDedup = !!(options.otlpGrpc || options.otlpHttp);
+      const deduplicator = needsDedup ? new EventDeduplicator() : undefined;
+
       // Setup log tailing
       const tailer = new LogTailer({
         path: filePath,
         parseJson: true,
         follow: true,
         lines: 50, // Load last 50 lines on start
+        deduplicator,
       });
 
       tailer.on('event', (event) => {
@@ -111,7 +118,7 @@ program
       // Start OTLP/gRPC receiver if requested
       let otlpReceiver: import('./otlpGrpcReceiver.js').OtlpGrpcReceiver | undefined;
       if (options.otlpGrpc) {
-        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc });
+        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc, deduplicator });
         otlpReceiver.on('event', (event) => {
           store.add(event);
           app.addEvent(event);
@@ -126,7 +133,7 @@ program
         otlpHttpServer = await startOtlpHttpListener(options.otlpHttp, (event) => {
           store.add(event);
           app.addEvent(event);
-        });
+        }, deduplicator);
       }
 
       // Start tailing and TUI
@@ -172,6 +179,10 @@ program
       otlpHttpPort = match ? parseInt(match[1], 10) : undefined;
     }
 
+    // Shared deduplicator for cross-source dedup when OTLP is active
+    const needsDedup = !!(options.otlpGrpc || options.otlpHttp);
+    const deduplicator = needsDedup ? new EventDeduplicator() : undefined;
+
     try {
       const store = getStore();
       const server = createWebServer({
@@ -188,6 +199,7 @@ program
         parseJson: true,
         follow: true,
         lines: 100, // Load last 100 lines on start
+        deduplicator,
       });
 
       tailer.on('event', (event) => {
@@ -203,7 +215,7 @@ program
       let otlpReceiver: import('./otlpGrpcReceiver.js').OtlpGrpcReceiver | undefined;
       if (options.otlpGrpc) {
         const { OtlpGrpcReceiver } = await import('./otlpGrpcReceiver.js');
-        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc });
+        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc, deduplicator });
         otlpReceiver.on('event', (event) => {
           store.add(event);
           server.broadcast(event);
@@ -270,12 +282,17 @@ program
       process.exit(1);
     }
 
+    // Shared deduplicator for cross-source dedup when OTLP is active
+    const needsDedup = !!(options.otlpGrpc || options.otlpHttp);
+    const deduplicator = needsDedup ? new EventDeduplicator() : undefined;
+
     try {
       const tailer = new LogTailer({
         path: filePath,
         parseJson: true,
         follow,
         lines,
+        deduplicator,
       });
 
       const store = getStore();
@@ -315,7 +332,7 @@ program
       let otlpReceiver: import('./otlpGrpcReceiver.js').OtlpGrpcReceiver | undefined;
       if (options.otlpGrpc) {
         const { OtlpGrpcReceiver } = await import('./otlpGrpcReceiver.js');
-        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc });
+        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc, deduplicator });
         otlpReceiver.on('event', handleEvent);
         const boundAddr = await otlpReceiver.start();
         console.error(`OTLP/gRPC receiver listening on ${boundAddr}`);
@@ -324,7 +341,7 @@ program
       // Start OTLP/HTTP receiver if requested
       let otlpHttpServer: import('http').Server | undefined;
       if (options.otlpHttp) {
-        otlpHttpServer = await startOtlpHttpListener(options.otlpHttp, handleEvent);
+        otlpHttpServer = await startOtlpHttpListener(options.otlpHttp, handleEvent, deduplicator);
       }
 
       // Handle graceful shutdown

@@ -14,7 +14,7 @@
 
 import { Router, Request, Response } from 'express';
 import { loadProtoRoot, enrichRecord, extractDataPoints } from './otlpGrpcReceiver.js';
-import { normalizeToLogEvent, NormalizerSource } from './normalizer.js';
+import { normalizeToLogEvent, NormalizerSource, EventDeduplicator } from './normalizer.js';
 import { LogEvent } from './types.js';
 
 const DECODE_OPTS = { longs: String, enums: String, bytes: String, defaults: true, oneofs: true };
@@ -68,14 +68,16 @@ export interface OtlpHttpOptions {
   onEvent: (event: LogEvent) => void;
   /** Max raw body size in bytes (default 5 MB). */
   maxBodyBytes?: number;
+  /** Shared deduplicator for cross-source dedup (JSONL + OTLP). */
+  deduplicator?: EventDeduplicator;
 }
 
 export function createOtlpHttpRouter(options: OtlpHttpOptions): Router {
-  const { onEvent, maxBodyBytes = 5 * 1024 * 1024 } = options;
+  const { onEvent, maxBodyBytes = 5 * 1024 * 1024, deduplicator } = options;
   const router = Router();
 
   function pushNormalized(record: unknown, source: NormalizerSource): void {
-    const event = normalizeToLogEvent(record, source);
+    const event = normalizeToLogEvent(record, source, deduplicator);
     if (event) onEvent(event);
   }
 

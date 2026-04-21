@@ -520,6 +520,9 @@ export interface EventFilter {
   /** Filter by bead ID */
   bead?: string;
 
+  /** Filter by event type (glob pattern, e.g. "bead.*") */
+  eventType?: string;
+
   /** Filter by file path */
   path?: string;
 

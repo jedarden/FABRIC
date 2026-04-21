@@ -134,13 +134,19 @@ export function normalize(
 /**
  * Convenience: normalize and then convert to the legacy LogEvent shape
  * used by the existing store / TUI / web consumers.
+ *
+ * When a `deduplicator` is provided, the NeedleEvent is checked against it
+ * before conversion. Duplicates return null (caller should skip).
  */
 export function normalizeToLogEvent(
   raw: string | unknown,
   source: NormalizerSource,
+  deduplicator?: EventDeduplicator,
 ): LogEvent | null {
   const ne = normalize(raw, source);
-  return ne ? needleEventToLogEvent(ne) : null;
+  if (!ne) return null;
+  if (deduplicator && !deduplicator.check(ne)) return null;
+  return needleEventToLogEvent(ne);
 }
 
 // ── JSONL source ──────────────────────────────────────────────

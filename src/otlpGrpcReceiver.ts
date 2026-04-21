@@ -15,7 +15,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protobuf from 'protobufjs';
 import { fileURLToPath } from 'url';
 import * as path from 'path';
-import { normalizeToLogEvent, NormalizerSource } from './normalizer.js';
+import { normalizeToLogEvent, NormalizerSource, EventDeduplicator } from './normalizer.js';
 import { LogEvent } from './types.js';
 import { EventEmitter } from 'events';
 
@@ -104,15 +104,20 @@ function makeMethod(
 export interface OtlpGrpcReceiverOptions {
   /** Bind address, e.g. "0.0.0.0:4317" or ":4317". Default ":4317". */
   address?: string;
+
+  /** Shared deduplicator for cross-source dedup (JSONL + OTLP). */
+  deduplicator?: EventDeduplicator;
 }
 
 export class OtlpGrpcReceiver extends EventEmitter {
   private address: string;
+  private deduplicator?: EventDeduplicator;
   private server: grpc.Server | null = null;
 
   constructor(options: OtlpGrpcReceiverOptions = {}) {
     super();
     this.address = options.address || ':4317';
+    this.deduplicator = options.deduplicator;
   }
 
   /**
@@ -250,7 +255,7 @@ export class OtlpGrpcReceiver extends EventEmitter {
   // ── Private helpers ──
 
   private pushNormalized(record: unknown, source: NormalizerSource): void {
-    const event = normalizeToLogEvent(record, source);
+    const event = normalizeToLogEvent(record, source, this.deduplicator);
     if (event) {
       this.emit('event', event);
     }
