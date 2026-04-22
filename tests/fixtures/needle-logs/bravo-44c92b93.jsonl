@@ -1,0 +1,4 @@
+{"timestamp":"2026-04-22T10:00:01.000Z","event_type":"worker.started","worker_id":"bravo-44c92b93","session_id":"session-bravo-002","sequence":1,"data":{"pid":20202,"workspace":"/home/coder/NEEDLE","agent":"claude-anthropic-opus"}}
+{"timestamp":"2026-04-22T10:00:06.000Z","event_type":"bead.claimed","worker_id":"bravo-44c92b93","session_id":"session-bravo-002","sequence":2,"bead_id":"bd-c3d4","data":{"actor":"fabric-test","attempt":1}}
+{"timestamp":"2026-04-22T10:00:12.000Z","event_type":"bead.completed","worker_id":"bravo-44c92b93","session_id":"session-bravo-002","sequence":3,"bead_id":"bd-c3d4","data":{"duration_ms":6000,"output_file":"/tmp/needle-bd-c3d4.log"}}
+{"timestamp":"2026-04-22T10:00:13.000Z","event_type":"effort.recorded","worker_id":"bravo-44c92b93","session_id":"session-bravo-002","sequence":4,"bead_id":"bd-c3d4","data":{"duration_ms":6000}}

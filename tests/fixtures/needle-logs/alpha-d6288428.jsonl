@@ -1,0 +1,4 @@
+{"timestamp":"2026-04-22T10:00:00.000Z","event_type":"worker.started","worker_id":"alpha-d6288428","session_id":"session-alpha-001","sequence":1,"data":{"pid":10101,"workspace":"/home/coder/NEEDLE","agent":"claude-anthropic-sonnet"}}
+{"timestamp":"2026-04-22T10:00:05.000Z","event_type":"bead.claimed","worker_id":"alpha-d6288428","session_id":"session-alpha-001","sequence":2,"bead_id":"bd-a1b2","data":{"actor":"fabric-test","attempt":1}}
+{"timestamp":"2026-04-22T10:00:10.000Z","event_type":"bead.completed","worker_id":"alpha-d6288428","session_id":"session-alpha-001","sequence":3,"bead_id":"bd-a1b2","data":{"duration_ms":5000,"output_file":"/tmp/needle-bd-a1b2.log"}}
+{"timestamp":"2026-04-22T10:00:11.000Z","event_type":"worker.idle","worker_id":"alpha-d6288428","session_id":"session-alpha-001","sequence":4,"data":{"consecutive_empty":1,"idle_seconds":0}}

@@ -5,9 +5,14 @@
  * Uses real log samples from ~/.needle/logs/ to ensure compatibility.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parseLogLine, parseLogLines } from './parser.js';
 import { LogEvent } from './types.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { fileURLToPath } from 'url';
+import { DirectoryTailer } from './directoryTailer.js';
 
 describe('NEEDLE-FABRIC Integration', () => {
   describe('worker.started events', () => {
@@ -598,5 +603,84 @@ describe('NEEDLE-FABRIC Integration', () => {
       expect(events[5].output_file).toBe('/tmp/needle-dispatch-bd-2ok0-FHwgcG7A.log');
       expect(events[6].duration_ms).toBe(28854);
     });
+  });
+});
+
+describe('FABRIC ↔ NEEDLE directory source integration', () => {
+  let tempDir: string;
+  let tailer: DirectoryTailer;
+
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const fixturesDir = path.resolve(__dirname, '../tests/fixtures/needle-logs');
+
+  function makeNeedleEvent(worker_id: string, session_id: string, sequence: number, event_type: string, data: Record<string, unknown> = {}) {
+    return JSON.stringify({
+      timestamp: new Date().toISOString(),
+      event_type,
+      worker_id,
+      session_id,
+      sequence,
+      ...('bead_id' in data ? { bead_id: data.bead_id } : {}),
+      data,
+    });
+  }
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-needle-integ-'));
+    const entries = fs.readdirSync(fixturesDir);
+    for (const entry of entries) {
+      if (entry.endsWith('.jsonl')) {
+        fs.copyFileSync(path.join(fixturesDir, entry), path.join(tempDir, entry));
+      }
+    }
+  });
+
+  afterEach(() => {
+    tailer?.stop();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('picks up events from multiple worker files and hot-adds a new file', async () => {
+    const received: Array<{ worker: string; msg: string }> = [];
+
+    tailer = new DirectoryTailer({ directory: tempDir });
+    tailer.on('event', (event: LogEvent) => {
+      received.push({ worker: event.worker, msg: event.msg });
+    });
+
+    tailer.start();
+    // Let initial scan settle — tailers position at end of existing files
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Append new events to the pre-existing fixture files
+    const alphaPath = path.join(tempDir, 'alpha-d6288428.jsonl');
+    const bravoPath = path.join(tempDir, 'bravo-44c92b93.jsonl');
+
+    fs.appendFileSync(alphaPath, makeNeedleEvent('alpha-d6288428', 'session-alpha-001', 10, 'bead.claimed', { bead_id: 'bd-hot1', actor: 'fabric-test' }) + '\n');
+    fs.appendFileSync(bravoPath, makeNeedleEvent('bravo-44c92b93', 'session-bravo-002', 10, 'bead.claimed', { bead_id: 'bd-hot2', actor: 'fabric-test' }) + '\n');
+
+    // Wait for watchers to fire and events to propagate
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Assert: at least 2 distinct worker_id values in received events
+    const workers = new Set(received.map((e) => e.worker));
+    expect(workers.size).toBeGreaterThanOrEqual(2);
+    expect(workers).toContain('alpha-d6288428');
+    expect(workers).toContain('bravo-44c92b93');
+
+    // Mid-test: hot-add a new gamma worker file
+    const gammaPath = path.join(tempDir, 'gamma-aabb1122.jsonl');
+    fs.writeFileSync(gammaPath, '');
+    await new Promise((r) => setTimeout(r, 200));
+
+    fs.appendFileSync(gammaPath, makeNeedleEvent('gamma-aabb1122', 'session-gamma-003', 1, 'worker.started', { pid: 30303, workspace: '/home/coder/NEEDLE', agent: 'claude-code-sonnet' }) + '\n');
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Assert: gamma event showed up
+    const gammaEvents = received.filter((e) => e.worker === 'gamma-aabb1122');
+    expect(gammaEvents.length).toBeGreaterThanOrEqual(1);
+    expect(gammaEvents.some((e) => e.msg === 'worker.started')).toBe(true);
+
+    tailer.stop();
   });
 });
