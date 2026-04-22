@@ -49,7 +49,8 @@ fabric logs
 fabric tui --otlp-grpc :4317
 ```
 
-FABRIC reads from `~/.needle/logs/` by default.
+FABRIC watches `~/.needle/logs/` by default, tailing every `*.jsonl` file in
+the directory and hot-adding new worker logs as they appear.
 
 ## Intelligence Features
 

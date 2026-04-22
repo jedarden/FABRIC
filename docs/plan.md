@@ -43,16 +43,26 @@ interface LogEvent {
 
 ## Default Source
 
-FABRIC reads from `~/.needle/logs/` by default. NEEDLE's folder structure:
+FABRIC watches the directory `~/.needle/logs/` by default and tails every NEEDLE
+per-worker JSONL file concurrently. NEEDLE writes one JSONL per worker session
+named `{worker_id}-{session_id}.jsonl` (e.g. `alpha-d6288428.jsonl`). New files
+that appear while FABRIC is running are hot-added without restart.
 
 ```
 ~/.needle/
-├── config.yaml    # NEEDLE configuration
-├── logs/          # Worker log output (FABRIC reads this)
-├── state/         # Runtime state
-├── cache/         # Cached data
+├── config.yaml                   # NEEDLE configuration
+├── logs/                         # FABRIC watches this directory
+│   ├── alpha-d6288428.jsonl      # one file per (worker, session)
+│   ├── bravo-44c92b93.jsonl
+│   └── ...
+├── state/                        # Runtime state
+├── cache/                        # Cached data
 └── README.md
 ```
+
+There is no consolidated `workers.log` — FABRIC must scan the directory and
+tail every matching file. (See Phase 8 for the fix to the original single-file
+tail bug.)
 
 ## Output: Live Displays
 
@@ -1382,6 +1392,23 @@ fabric logs --worker w-abc123           # Filter by worker
 - [ ] Anomaly detection (unexpected file activity)
 - [ ] Recovery playbook (error pattern matching)
 
+### Phase 8: Post-launch Fixes
+
+Gaps discovered after the 134 initial implementation beads closed.
+
+**Gap: directory source did not actually tail per-worker JSONL files.**
+`resolveSource` in `src/cli.ts` was appending `/workers.log` to any directory
+path and tailing a single nonexistent file. In practice FABRIC silently failed
+against live NEEDLE output (confirmed 2026-04-22 with 5 active workers). This
+gap is tracked by epic **bd-0nd** and its child beads:
+
+- [x] **bd-0nd.1** — Implement `DirectoryTailer` that tails every `*.jsonl` in a directory and hot-adds new files.
+- [x] **bd-0nd.2** — Route `--source <dir>` to `DirectoryTailer`; drop the `workers.log` suffix.
+- [x] **bd-0nd.3** — Integration test: consume a directory of real NEEDLE per-worker JSONL fixtures.
+- [x] **bd-0nd.4** — Update `docs/plan.md` + `README.md` to describe directory tailing as the documented behavior.
+
+All four children are complete. `fabric tui --source ~/.needle/logs/` now shows live workers against an unmodified NEEDLE install.
+
 ## Technology Options
 
 ### Log Tailer
@@ -1430,5 +1457,5 @@ FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detec
 
 ---
 
-**Status**: Planning phase
-**Last Updated**: 2026-03-02
+**Status**: Phases 1–8 complete.
+**Last Updated**: 2026-04-22
