@@ -11,7 +11,8 @@
 
 import { Command, Option } from 'commander';
 import { VERSION } from './index.js';
-import { LogTailer, tailLogFile } from './tailer.js';
+import { LogTailer } from './tailer.js';
+import { DirectoryTailer } from './directoryTailer.js';
 import { formatEvent } from './parser.js';
 import { getStore } from './store.js';
 import { createWebServer } from './web/index.js';
@@ -19,17 +20,29 @@ import { EventDeduplicator } from './normalizer.js';
 import * as fs from 'fs';
 import type { LogLevel, EventFilter, LogEvent } from './types.js';
 
-/** Resolve --source to a file path. Directories get workers.log appended. */
-function resolveSource(source: string): string {
-  const expanded = source.replace('~', process.env.HOME || '');
+type ResolvedSource = { kind: 'directory'; path: string } | { kind: 'file'; path: string };
+
+const HOME = process.env.HOME || '';
+
+/** Resolve --source to a typed source. Errors if path doesn't exist. */
+function resolveSource(source: string): ResolvedSource {
+  const expanded = source.startsWith('~') ? source.replace('~', HOME) : source;
   try {
-    if (fs.statSync(expanded).isDirectory()) {
-      return expanded.replace(/\/$/, '') + '/workers.log';
-    }
+    const stat = fs.statSync(expanded);
+    return stat.isDirectory()
+      ? { kind: 'directory', path: expanded }
+      : { kind: 'file', path: expanded };
   } catch {
-    // Path doesn't exist yet — use as-is
+    console.error(`Error: Source path does not exist: ${expanded}`);
+    process.exit(1);
   }
-  return expanded;
+}
+
+/** Resolve CLI source options into a typed source. */
+function resolveFromOptions(source?: string, file?: string): ResolvedSource {
+  if (source) return resolveSource(source);
+  if (file) return { kind: 'file', path: file.startsWith('~') ? file.replace('~', HOME) : file };
+  return { kind: 'directory', path: `${HOME}/.needle/logs` };
 }
 
 /** Simple glob → regex for NeedleEventType patterns like "bead.*", "worker.started". */
@@ -78,33 +91,33 @@ program
 program
   .command('tui')
   .description('Launch terminal UI dashboard')
-  .option('-f, --file <path>', 'Log file to tail', '~/.needle/logs/workers.log')
+  .option('-f, --file <path>', 'Log file to tail (single-file mode)')
   .option('--source <path>', 'Log source (file or directory)', undefined)
   .option('--otlp-grpc <addr>', 'Enable OTLP/gRPC receiver (e.g. :4317 or 0.0.0.0:4317)')
   .option('--otlp-http <addr>', 'Enable OTLP/HTTP receiver (e.g. :4318 or 0.0.0.0:4318)')
   .action(async (options) => {
-    const filePath = options.source
-      ? resolveSource(options.source)
-      : options.file.replace('~', process.env.HOME || '');
+    const resolved = resolveFromOptions(options.source, options.file);
 
     try {
       const { createTuiApp } = await import('./tui/index.js');
       const { OtlpGrpcReceiver } = await import('./otlpGrpcReceiver.js');
       const store = getStore();
-      const app = createTuiApp(store, { logPath: filePath });
+      const app = createTuiApp(store, { logPath: resolved.path });
 
       // Shared deduplicator for cross-source dedup when OTLP is active
       const needsDedup = !!(options.otlpGrpc || options.otlpHttp);
       const deduplicator = needsDedup ? new EventDeduplicator() : undefined;
 
       // Setup log tailing
-      const tailer = new LogTailer({
-        path: filePath,
-        parseJson: true,
-        follow: true,
-        lines: 50, // Load last 50 lines on start
-        deduplicator,
-      });
+      const tailer = resolved.kind === 'directory'
+        ? new DirectoryTailer({ directory: resolved.path, deduplicator })
+        : new LogTailer({
+            path: resolved.path,
+            parseJson: true,
+            follow: true,
+            lines: 50,
+            deduplicator,
+          });
 
       tailer.on('event', (event) => {
         store.add(event);
@@ -159,15 +172,13 @@ program
   .command('web')
   .description('Launch web dashboard')
   .option('-p, --port <number>', 'Port to listen on', '3000')
-  .option('-f, --file <path>', 'Log file to tail', '~/.needle/logs/workers.log')
+  .option('-f, --file <path>', 'Log file to tail (single-file mode)')
   .option('--source <path>', 'Log source (file or directory)', undefined)
   .option('-a, --auth-token <token>', 'Auth token for POST endpoints (or use FABRIC_AUTH_TOKEN env var)')
   .option('--otlp-grpc <addr>', 'Enable OTLP/gRPC receiver (e.g. :4317 or 0.0.0.0:4317)')
   .option('--otlp-http <addr>', 'Enable OTLP/HTTP receiver (e.g. :4318 or 0.0.0.0:4318)')
   .action(async (options) => {
-    const filePath = options.source
-      ? resolveSource(options.source)
-      : options.file.replace('~', process.env.HOME || '');
+    const resolved = resolveFromOptions(options.source, options.file);
     const port = parseInt(options.port, 10) || 3000;
     const authToken = options.authToken || process.env.FABRIC_AUTH_TOKEN;
     const otlpHttpAddr: string | undefined = options.otlpHttp;
@@ -187,20 +198,22 @@ program
       const store = getStore();
       const server = createWebServer({
         port,
-        logPath: filePath,
+        logPath: resolved.path,
         store,
         authToken,
         otlpHttpPort,
       });
 
       // Setup log tailing
-      const tailer = new LogTailer({
-        path: filePath,
-        parseJson: true,
-        follow: true,
-        lines: 100, // Load last 100 lines on start
-        deduplicator,
-      });
+      const tailer = resolved.kind === 'directory'
+        ? new DirectoryTailer({ directory: resolved.path, deduplicator })
+        : new LogTailer({
+            path: resolved.path,
+            parseJson: true,
+            follow: true,
+            lines: 100,
+            deduplicator,
+          });
 
       tailer.on('event', (event) => {
         store.add(event);
@@ -253,7 +266,7 @@ program
   .command('tail')
   .alias('logs')
   .description('Tail NEEDLE log file and display events')
-  .option('-f, --file <path>', 'Log file to tail', '~/.needle/logs/workers.log')
+  .option('-f, --file <path>', 'Log file to tail (single-file mode)')
   .option('--source <path>', 'Log source (file or directory)', undefined)
   .option('-w, --worker <id>', 'Filter by worker ID')
   .option('-t, --event-type <pattern>', 'Filter by event type (glob, e.g. "bead.*", "worker.started")')
@@ -264,14 +277,12 @@ program
   .option('--otlp-grpc <addr>', 'Enable OTLP/gRPC receiver (e.g. :4317 or 0.0.0.0:4317)')
   .option('--otlp-http <addr>', 'Enable OTLP/HTTP receiver (e.g. :4318 or 0.0.0.0:4318)')
   .action(async (options) => {
-    const filePath = options.source
-      ? resolveSource(options.source)
-      : options.file.replace('~', process.env.HOME || '');
+    const resolved = resolveFromOptions(options.source, options.file);
     const lines = parseInt(options.lines, 10) || 0;
     const follow = options.follow !== false;
     const eventTypeFilter = options.eventType as string | undefined;
 
-    console.log(`FABRIC Tail - Watching: ${filePath}`);
+    console.log(`FABRIC Tail - Watching: ${resolved.path} (${resolved.kind})`);
     console.log(`Follow: ${follow}, Lines: ${lines}`);
     console.log('---');
 
@@ -287,13 +298,15 @@ program
     const deduplicator = needsDedup ? new EventDeduplicator() : undefined;
 
     try {
-      const tailer = new LogTailer({
-        path: filePath,
-        parseJson: true,
-        follow,
-        lines,
-        deduplicator,
-      });
+      const tailer = resolved.kind === 'directory'
+        ? new DirectoryTailer({ directory: resolved.path, deduplicator })
+        : new LogTailer({
+            path: resolved.path,
+            parseJson: true,
+            follow,
+            lines,
+            deduplicator,
+          });
 
       const store = getStore();
 
