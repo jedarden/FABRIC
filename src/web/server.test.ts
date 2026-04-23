@@ -1158,3 +1158,204 @@ describe('Web Server API Endpoints', () => {
     });
   });
 });
+
+describe('Web Server Auth', () => {
+  let store: InMemoryEventStore;
+  let server: WebServer;
+  let port: number;
+  const AUTH_TOKEN = 'test-secret-token-12345';
+
+  const createEvent = (overrides: Partial<LogEvent> = {}): LogEvent => ({
+    ts: Date.now(),
+    worker: 'w-auth-test',
+    level: 'info',
+    msg: 'Auth test message',
+    ...overrides,
+  });
+
+  const validEvent = {
+    ts: new Date().toISOString(),
+    event: 'auth.test',
+    worker: 'auth-test-worker',
+  };
+
+  beforeEach(async () => {
+    store = new InMemoryEventStore();
+    resetCrossReferenceManager();
+    port = 31000 + Math.floor(Math.random() * 1000);
+
+    server = createWebServer({
+      port,
+      logPath: '/tmp/test-logs',
+      store,
+      authToken: AUTH_TOKEN,
+    });
+
+    await new Promise<void>((resolve) => {
+      server.on('start', () => resolve());
+      server.start();
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      server.on('stop', () => resolve());
+      server.stop();
+    });
+    store.clear();
+    resetCrossReferenceManager();
+  });
+
+  const fetchApi = async (path: string, options?: RequestInit) => {
+    return fetch(`http://localhost:${port}${path}`, options);
+  };
+
+  describe('POST /api/events auth', () => {
+    it('should reject POST without Authorization header with 401', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(validEvent),
+      });
+
+      expect(response.status).toBe(401);
+      const data = await response.json() as any;
+      expect(data.error).toBe('Missing authorization');
+      expect(data.message).toContain('Authorization header required');
+    });
+
+    it('should reject POST with wrong token with 403', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer wrong-token',
+        },
+        body: JSON.stringify(validEvent),
+      });
+
+      expect(response.status).toBe(403);
+      const data = await response.json() as any;
+      expect(data.error).toBe('Forbidden');
+      expect(data.message).toContain('Invalid or expired token');
+    });
+
+    it('should reject POST with malformed Authorization header with 403', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic abc123',
+        },
+        body: JSON.stringify(validEvent),
+      });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('should accept POST with correct Bearer token with 201', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AUTH_TOKEN}`,
+        },
+        body: JSON.stringify(validEvent),
+      });
+
+      expect(response.status).toBe(201);
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.event).toBeDefined();
+    });
+
+    it('should reject empty Bearer token', async () => {
+      const response = await fetchApi('/api/events', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ',
+        },
+        body: JSON.stringify(validEvent),
+      });
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe('POST /api/events/batch auth', () => {
+    const batchEvents = [
+      { ts: new Date().toISOString(), event: 'batch.auth.1', worker: 'auth-worker' },
+      { ts: new Date().toISOString(), event: 'batch.auth.2', worker: 'auth-worker' },
+    ];
+
+    it('should reject batch POST without auth with 401', async () => {
+      const response = await fetchApi('/api/events/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batchEvents),
+      });
+
+      expect(response.status).toBe(401);
+    });
+
+    it('should accept batch POST with correct token', async () => {
+      const response = await fetchApi('/api/events/batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AUTH_TOKEN}`,
+        },
+        body: JSON.stringify(batchEvents),
+      });
+
+      expect(response.status).toBe(201);
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.ingested).toBe(2);
+    });
+  });
+
+  describe('POST /api/cost/alerts/:id/acknowledge auth', () => {
+    it('should reject cost alert acknowledge without auth with 401', async () => {
+      const response = await fetchApi('/api/cost/alerts/test-alert/acknowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('GET endpoints not affected by auth', () => {
+    it('should allow GET /api/health without auth', async () => {
+      const response = await fetchApi('/api/health');
+      expect(response.status).toBe(200);
+    });
+
+    it('should allow GET /api/workers without auth', async () => {
+      const response = await fetchApi('/api/workers');
+      expect(response.status).toBe(200);
+    });
+
+    it('should allow GET /api/events without auth', async () => {
+      const response = await fetchApi('/api/events');
+      expect(response.status).toBe(200);
+    });
+
+    it('should allow GET /api/collisions without auth', async () => {
+      const response = await fetchApi('/api/collisions');
+      expect(response.status).toBe(200);
+    });
+
+    it('should allow GET /api/xref/stats without auth', async () => {
+      const response = await fetchApi('/api/xref/stats');
+      expect(response.status).toBe(200);
+    });
+
+    it('should allow GET /api/cost/summary without auth', async () => {
+      const response = await fetchApi('/api/cost/summary');
+      expect(response.status).toBe(200);
+    });
+  });
+});

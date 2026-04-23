@@ -64,24 +64,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
     httpServer = createServer(app);
     wsServer = new WebSocketServer({ server: httpServer });
 
-    // ── OTLP/HTTP routes (mounted before json middleware so raw body is available) ──
-    if (otlpHttpPort) {
-      const otlpRouter = createOtlpHttpRouter({
-        onEvent: (event: LogEvent) => {
-          store.add(event);
-          broadcast(event);
-        },
-      });
-      app.use(otlpRouter);
-    }
-
-    // Parse JSON bodies
-    app.use(express.json({ limit: MAX_PAYLOAD_SIZE.toString() }));
-
-    // Create auth middleware for POST endpoints if token is configured
+    // ── Auth middleware for all POST routes ──
     const authMiddleware = (req: Request, res: Response, next: () => void) => {
       if (!authToken) {
-        // No auth configured, allow all requests
         next();
         return;
       }
@@ -100,6 +85,29 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
       next();
     };
+
+    // Apply auth to all POST requests (event ingestion, OTLP, etc.)
+    app.use((req, res, next) => {
+      if (req.method === 'POST') {
+        authMiddleware(req, res, next);
+      } else {
+        next();
+      }
+    });
+
+    // ── OTLP/HTTP routes (mounted before json middleware so raw body is available) ──
+    if (otlpHttpPort) {
+      const otlpRouter = createOtlpHttpRouter({
+        onEvent: (event: LogEvent) => {
+          store.add(event);
+          broadcast(event);
+        },
+      });
+      app.use(otlpRouter);
+    }
+
+    // Parse JSON bodies
+    app.use(express.json({ limit: MAX_PAYLOAD_SIZE.toString() }));
 
     wsServer.on('connection', (ws: WebSocket) => {
       clients.add(ws);
@@ -152,7 +160,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // POST endpoint to ingest NEEDLE telemetry events
-    app.post('/api/events', authMiddleware, (req: Request, res: Response) => {
+    app.post('/api/events', (req: Request, res: Response) => {
       try {
         const eventObj = req.body;
 
@@ -194,7 +202,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // POST endpoint to ingest batched NEEDLE telemetry events
-    app.post('/api/events/batch', authMiddleware, (req: Request, res: Response) => {
+    app.post('/api/events/batch', (req: Request, res: Response) => {
       try {
         const eventsArray = req.body;
 
