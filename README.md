@@ -99,14 +99,33 @@ fabric:
   endpoint: http://localhost:3000/api/events
   timeout: 2
   batching: false
+  auth_token: your-secret-token   # must match FABRIC_AUTH_TOKEN on the server
 ```
 
-Start FABRIC web server, then start NEEDLE workers — events flow automatically:
+Start FABRIC web server with an auth token, then start NEEDLE workers — events flow automatically:
 
 ```bash
-fabric web          # starts on http://localhost:3000
-needle run ...      # workers POST to /api/events
+FABRIC_AUTH_TOKEN=your-secret-token fabric web   # starts on http://localhost:3000
+needle run ...                                    # workers POST to /api/events with Bearer token
 ```
+
+#### Authentication
+
+All POST endpoints (`/api/events`, `/api/events/batch`) require a `Bearer` token when the server is started with an auth token:
+
+```bash
+# Start with auth token (env var or flag)
+FABRIC_AUTH_TOKEN=secret fabric web
+fabric web --auth-token secret
+
+# Manual POST (e.g. for testing)
+curl -X POST http://localhost:3000/api/events \
+  -H 'Authorization: Bearer secret' \
+  -H 'Content-Type: application/json' \
+  -d '{"ts":"2026-04-23T00:00:00Z","event":"worker.started","worker":"w-test"}'
+```
+
+If no auth token is configured, all POST requests are accepted without authentication (suitable for local-only use).
 
 ### Option 2: OTLP (recommended for multi-host or production)
 

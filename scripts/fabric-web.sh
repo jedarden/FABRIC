@@ -32,8 +32,13 @@ start() {
     mkdir -p "$HOME/.fabric/logs"
 
     # Start tmux session with FABRIC web server
+    AUTH_ARGS=""
+    if [ -n "${FABRIC_AUTH_TOKEN:-}" ]; then
+        AUTH_ARGS="--auth-token $FABRIC_AUTH_TOKEN"
+    fi
+
     tmux new-session -d -s "$SESSION_NAME" -c "$FABRIC_DIR" \
-        "node dist/cli.js web -p $PORT --source $LOG_SOURCE 2>&1 | tee -a $HOME/.fabric/logs/web.log"
+        "node dist/cli.js web -p $PORT --source $LOG_SOURCE $AUTH_ARGS 2>&1 | tee -a $HOME/.fabric/logs/web.log"
 
     # Save PID for reference
     tmux list-panes -t "$SESSION_NAME" -F '#{pane_pid}' > "$PID_FILE" 2>/dev/null || true
@@ -123,6 +128,7 @@ case "${1:-}" in
         echo "Environment variables:"
         echo "  FABRIC_PORT       - Port to listen on (default: 3000)"
         echo "  FABRIC_LOG_SOURCE - Log directory to watch (default: ~/.needle/logs)"
+        echo "  FABRIC_AUTH_TOKEN - Bearer token required on POST endpoints (optional)"
         exit 1
         ;;
 esac
