@@ -87,6 +87,29 @@ NEEDLE does the work. FABRIC shows you what's happening and helps you understand
 
 ## Wiring NEEDLE → FABRIC
 
+There are two ways to send NEEDLE telemetry to FABRIC: config-based HTTP POST (simpler) or OTLP (lower latency, more features).
+
+### Option 1: Config-based HTTP POST (recommended for local dev)
+
+Set `fabric.enabled: true` in `~/.needle/config.yaml`:
+
+```yaml
+fabric:
+  enabled: true
+  endpoint: http://localhost:3000/api/events
+  timeout: 2
+  batching: false
+```
+
+Start FABRIC web server, then start NEEDLE workers — events flow automatically:
+
+```bash
+fabric web          # starts on http://localhost:3000
+needle run ...      # workers POST to /api/events
+```
+
+### Option 2: OTLP (recommended for multi-host or production)
+
 NEEDLE ships with an `otlp` feature (enabled by default in `Cargo.toml`) that exports telemetry over the standard OpenTelemetry OTLP protocol. No rebuild or extra flags are needed — just set two environment variables before launching workers:
 
 ```bash
