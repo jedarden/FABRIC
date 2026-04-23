@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FABRIC_DIR="$(dirname "$SCRIPT_DIR")"
 SESSION_NAME="fabric-web"
 PORT="${FABRIC_PORT:-3000}"
-LOG_PATH="${FABRIC_LOG_PATH:-$HOME/.needle/logs/workers.log}"
+LOG_SOURCE="${FABRIC_LOG_SOURCE:-$HOME/.needle/logs}"
 PID_FILE="$HOME/.fabric-web.pid"
 
 start() {
@@ -26,14 +26,14 @@ start() {
     fi
 
     echo "Starting FABRIC web server on port $PORT..."
-    echo "Log path: $LOG_PATH"
+    echo "Log source: $LOG_SOURCE"
 
     # Create logs directory if needed
     mkdir -p "$HOME/.fabric/logs"
 
     # Start tmux session with FABRIC web server
     tmux new-session -d -s "$SESSION_NAME" -c "$FABRIC_DIR" \
-        "node dist/cli.js web -p $PORT -f $LOG_PATH 2>&1 | tee -a $HOME/.fabric/logs/web.log"
+        "node dist/cli.js web -p $PORT --source $LOG_SOURCE 2>&1 | tee -a $HOME/.fabric/logs/web.log"
 
     # Save PID for reference
     tmux list-panes -t "$SESSION_NAME" -F '#{pane_pid}' > "$PID_FILE" 2>/dev/null || true
@@ -121,8 +121,8 @@ case "${1:-}" in
         echo "Usage: $0 {start|stop|restart|status|logs}"
         echo ""
         echo "Environment variables:"
-        echo "  FABRIC_PORT     - Port to listen on (default: 3000)"
-        echo "  FABRIC_LOG_PATH - Log file to tail (default: ~/.needle/logs/workers.log)"
+        echo "  FABRIC_PORT       - Port to listen on (default: 3000)"
+        echo "  FABRIC_LOG_SOURCE - Log directory to watch (default: ~/.needle/logs)"
         exit 1
         ;;
 esac
