@@ -450,3 +450,56 @@ export interface FleetAnalytics {
   beadsPerHour: number;
   beadCompletions: BeadCompletion[];
 }
+
+// ============================================
+// Error Group Types
+// ============================================
+
+export interface ErrorFingerprint {
+  signature: string;
+  category: ErrorCategory;
+  sampleMessage: string;
+  hash: string;
+}
+
+export interface ErrorGroupCard {
+  id: string;
+  fingerprint: ErrorFingerprint;
+  firstSeen: number;
+  lastSeen: number;
+  count: number;
+  affectedWorkers: string[];
+  isActive: boolean;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  recentEvents: Array<{
+    timestamp: string;
+    level: string;
+    worker: string;
+    message: string;
+    tool?: string;
+    ts?: number;
+    error?: string;
+  }>;
+  sampleStack?: string;
+}
+
+export interface ErrorGroupStats {
+  totalGroups: number;
+  activeGroups: number;
+  totalErrors: number;
+  byCategory: Record<string, number>;
+  bySeverity: Record<string, number>;
+}
+
+export interface SimilarError {
+  id: number;
+  session_id: string;
+  worker_id: string;
+  error_type: string;
+  error_message: string;
+  file_path: string | null;
+  timestamp: number;
+  resolution: string | null;
+  resolution_successful: boolean | null;
+  similarity: number;
+}

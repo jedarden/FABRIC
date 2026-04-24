@@ -221,6 +221,12 @@ const DEFAULT_OPTIONS: Required<WorkerAnalyticsOptions> = {
   timeSeriesInterval: 3600000, // 1 hour
 };
 
+/** Maximum entries retained for unbounded-per-worker arrays. */
+const MAX_EVENT_TIMESTAMPS = 5000;
+const MAX_ERROR_TIMESTAMPS = 500;
+const MAX_ACTIVITY_PERIODS = 500;
+const MAX_BEAD_COMPLETION_TIMES = 500;
+
 /**
  * Internal tracking data for a worker
  */
@@ -284,6 +290,9 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     // Update activity tracking
     worker.lastSeen = event.ts;
     worker.eventTimestamps.push(event.ts);
+    if (worker.eventTimestamps.length > MAX_EVENT_TIMESTAMPS) {
+      worker.eventTimestamps = worker.eventTimestamps.slice(-MAX_EVENT_TIMESTAMPS);
+    }
     this.updateActivityPeriods(worker, event.ts);
 
     // Track bead events
@@ -295,6 +304,9 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     if (event.level === 'error' || event.error) {
       worker.errorCount++;
       worker.errorTimestamps.push(event.ts);
+      if (worker.errorTimestamps.length > MAX_ERROR_TIMESTAMPS) {
+        worker.errorTimestamps = worker.errorTimestamps.slice(-MAX_ERROR_TIMESTAMPS);
+      }
     }
 
     // Update cost from cost tracker
@@ -630,6 +642,9 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
       if (startTime) {
         const duration = event.ts - startTime;
         worker.beadCompletionTimes.push(duration);
+        if (worker.beadCompletionTimes.length > MAX_BEAD_COMPLETION_TIMES) {
+          worker.beadCompletionTimes = worker.beadCompletionTimes.slice(-MAX_BEAD_COMPLETION_TIMES);
+        }
         worker.beadsCompleted++;
         worker.beadStartTimes.delete(beadId); // Clean up
       }
@@ -647,11 +662,12 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     const lastPeriod = worker.activityPeriods[worker.activityPeriods.length - 1];
 
     if (timestamp - lastPeriod.end <= ACTIVITY_GAP_MS) {
-      // Extend current period
       lastPeriod.end = timestamp;
     } else {
-      // Start new period
       worker.activityPeriods.push({ start: timestamp, end: timestamp });
+      if (worker.activityPeriods.length > MAX_ACTIVITY_PERIODS) {
+        worker.activityPeriods = worker.activityPeriods.slice(-MAX_ACTIVITY_PERIODS);
+      }
     }
   }
 

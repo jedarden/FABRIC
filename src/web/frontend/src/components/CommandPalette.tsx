@@ -35,6 +35,8 @@ const DEFAULT_COMMANDS: CommandSuggestion[] = [
   { id: 'show-replay', label: 'Show session replay', category: 'Commands', action: 'show:replay', icon: '📼' },
   { id: 'show-cross-ref', label: 'Show cross-reference panel', category: 'Commands', action: 'show:crossref', icon: '🔀' },
   { id: 'show-cost', label: 'Show cost dashboard', category: 'Commands', action: 'show:cost', icon: '💰' },
+  { id: 'show-budget', label: 'Show budget alerts', category: 'Commands', action: 'show:budget', icon: '%' },
+  { id: 'show-errors', label: 'Show error groups', category: 'Commands', action: 'show:errors', icon: '🐛' },
   // Focus mode
   { id: 'focus-toggle', label: 'Toggle focus mode', category: 'Commands', action: 'focus:toggle', icon: '📌' },
   { id: 'focus-clear', label: 'Clear pinned items', category: 'Commands', action: 'focus:clear', icon: '📍' },

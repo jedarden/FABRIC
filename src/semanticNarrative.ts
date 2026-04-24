@@ -33,6 +33,9 @@ const DEFAULT_OPTIONS: Required<NarrativeOptions> = {
   minEventsPerSegment: 1,
 };
 
+/** Maximum events retained per worker narrative context. */
+const MAX_CONTEXT_EVENTS = 500;
+
 /**
  * Internal tracking for narrative generation
  */
@@ -72,8 +75,10 @@ export class SemanticNarrativeGenerator implements SemanticNarrativeManager {
       this.contexts.set(event.worker, context);
     }
 
-    // Add event to context
-    context.events.push(event);
+    // Add event to context (bounded to prevent unbounded growth)
+    if (context.events.length < MAX_CONTEXT_EVENTS) {
+      context.events.push(event);
+    }
     context.lastEventTime = event.ts;
 
     // Track entities

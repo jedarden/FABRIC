@@ -25,6 +25,12 @@ const MIN_STRENGTH = 0.1;
 /** Maximum links to store */
 const MAX_LINKS = 5000;
 
+/** Maximum entities to track (prevents unbounded growth from per-event entries) */
+const MAX_ENTITIES = 2000;
+
+/** Maximum entries in the event index */
+const MAX_EVENT_INDEX = 5000;
+
 /**
  * Generate a unique ID for a cross-reference link
  */
@@ -65,17 +71,16 @@ interface InternalEntity {
 export class CrossReferenceManager {
   private links: Map<string, CrossReferenceLink> = new Map();
   private entities: Map<string, InternalEntity> = new Map();
-  private eventIndex: Map<string, string[]> = new Map();
   private workerIndex: Map<string, string[]> = new Map();
   private fileIndex: Map<string, string[]> = new Map();
   private beadIndex: Map<string, string[]> = new Map();
 
   /**
-   * Process a log event and extract cross-references
+   * Process a log event and extract cross-references.
+   * Per-event entities and links are skipped — only durable entities
+   * (worker, file, bead) and cross-entity relationships are tracked.
    */
   processEvent(event: LogEvent): void {
-    this.registerEntity('event', this.getEventId(event), event.ts, this.getEventLabel(event));
-
     if (event.worker) {
       this.registerEntity('worker', event.worker, event.ts, `Worker ${event.worker.slice(0, 8)}`);
     }
@@ -87,23 +92,6 @@ export class CrossReferenceManager {
 
     if (event.bead) {
       this.registerEntity('bead', event.bead, event.ts, `Task ${event.bead}`);
-    }
-
-    if (event.worker) {
-      this.createLink('event', this.getEventId(event), 'worker', event.worker, 'same_worker', 1.0, event.ts);
-    }
-
-    if (event.path) {
-      this.createLink('event', this.getEventId(event), 'file', event.path, 'same_file', 1.0, event.ts);
-    }
-
-    if (event.bead) {
-      this.createLink('event', this.getEventId(event), 'bead', event.bead, 'same_bead', 1.0, event.ts);
-    }
-
-    const eventId = this.getEventId(event);
-    if (!this.eventIndex.has(eventId)) {
-      this.eventIndex.set(eventId, []);
     }
   }
 
@@ -130,7 +118,8 @@ export class CrossReferenceManager {
   }
 
   /**
-   * Register an entity in the tracking system
+   * Register an entity in the tracking system.
+   * Event-type entities are skipped to avoid unbounded per-event growth.
    */
   private registerEntity(
     type: CrossReferenceEntityType,
@@ -138,6 +127,9 @@ export class CrossReferenceManager {
     timestamp: number,
     label: string
   ): void {
+    // Skip event-type entities — they're transient and create one entry per event
+    if (type === 'event') return;
+
     const entityId = generateEntityId(type, id);
     const existing = this.entities.get(entityId);
 
@@ -145,6 +137,9 @@ export class CrossReferenceManager {
       existing.lastSeen = timestamp;
       existing.occurrenceCount++;
     } else {
+      if (this.entities.size >= MAX_ENTITIES) {
+        this.trimEntities();
+      }
       this.entities.set(entityId, {
         type,
         id,
@@ -257,7 +252,6 @@ export class CrossReferenceManager {
    */
   private getIndexMap(type: CrossReferenceEntityType): Map<string, string[]> | null {
     switch (type) {
-      case 'event': return this.eventIndex;
       case 'worker': return this.workerIndex;
       case 'file': return this.fileIndex;
       case 'bead': return this.beadIndex;
@@ -694,10 +688,22 @@ export class CrossReferenceManager {
   }
 
   /**
+   * Trim oldest-seen entities when over the entity cap.
+   */
+  private trimEntities(): void {
+    const sorted = Array.from(this.entities.entries())
+      .sort((a, b) => a[1].lastSeen - b[1].lastSeen);
+
+    const toRemove = sorted.slice(0, Math.floor(MAX_ENTITIES * 0.2));
+    for (const [entityId] of toRemove) {
+      this.entities.delete(entityId);
+    }
+  }
+
+  /**
    * Rebuild all indices from current links
    */
   private rebuildIndices(): void {
-    this.eventIndex.clear();
     this.workerIndex.clear();
     this.fileIndex.clear();
     this.beadIndex.clear();
@@ -714,7 +720,6 @@ export class CrossReferenceManager {
   clear(): void {
     this.links.clear();
     this.entities.clear();
-    this.eventIndex.clear();
     this.workerIndex.clear();
     this.fileIndex.clear();
     this.beadIndex.clear();

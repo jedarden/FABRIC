@@ -14,6 +14,8 @@ import TimelineView from './components/TimelineView';
 import SessionReplay from './components/SessionReplay';
 import CostDashboard from './components/CostDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
+import ErrorGroupPanel from './components/ErrorGroupPanel';
+import BudgetAlertPanel, { BudgetBanner } from './components/BudgetAlertPanel';
 import CommandPalette from './components/CommandPalette';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
@@ -247,6 +249,15 @@ const App: React.FC = () => {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showCostDashboard, setShowCostDashboard] = useState(false);
+  const [showErrorGroups, setShowErrorGroups] = useState(false);
+  const [showBudgetAlert, setShowBudgetAlert] = useState(false);
+  const [budgetBannerDismissed, setBudgetBannerDismissed] = useState(false);
+
+  // Budget alert state polled from /api/cost/summary
+  const [budgetSummary, setBudgetSummary] = useState<{
+    budget: { limit: number; spent: number; percentUsed: number; isOverBudget: boolean; warningLevel: 'none' | 'warning' | 'critical'; remaining: number };
+    burnRate: { costPerMinute: number; minutesToExhaustion: number | null; timeToExhaustion: string | null; projectedTotalCost: number; windowMinutes: number; isHighBurnRate: boolean };
+  } | null>(null);
   const [selectedTimelineTime, setSelectedTimelineTime] = useState<number | null>(null);
   const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
 
@@ -268,6 +279,24 @@ const App: React.FC = () => {
       url.searchParams.delete('replay');
       window.history.replaceState({}, '', url.toString());
     }
+  }, []);
+
+  // Poll budget status for banner alerts
+  useEffect(() => {
+    const pollBudget = async () => {
+      try {
+        const res = await fetch('/api/cost/summary');
+        if (res.ok) {
+          const data = await res.json();
+          setBudgetSummary({ budget: data.budget, burnRate: data.burnRate });
+        }
+      } catch {
+        // ignore
+      }
+    };
+    pollBudget();
+    const interval = setInterval(pollBudget, 15000);
+    return () => clearInterval(interval);
   }, []);
 
   // Fetch recovery suggestions from API
@@ -493,6 +522,10 @@ const App: React.FC = () => {
       setShowCrossReference(true);
     } else if (action === 'show:cost') {
       setShowCostDashboard(true);
+    } else if (action === 'show:errors') {
+      setShowErrorGroups(true);
+    } else if (action === 'show:budget') {
+      setShowBudgetAlert(true);
     } else if (action.startsWith('worker:')) {
       const workerId = action.slice('worker:'.length);
       setSelectedWorker(workerId);
@@ -561,6 +594,14 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
+      {budgetSummary && !budgetBannerDismissed && budgetSummary.budget.warningLevel !== 'none' && (
+        <BudgetBanner
+          budget={budgetSummary.budget}
+          burnRate={budgetSummary.burnRate}
+          onOpenPanel={() => setShowBudgetAlert(true)}
+          onDismiss={() => setBudgetBannerDismissed(true)}
+        />
+      )}
       <header className="header">
         <h1>FABRIC</h1>
         <div className="header-actions">
@@ -680,6 +721,14 @@ const App: React.FC = () => {
             <span className="recovery-toggle-label">Recovery</span>
           </button>
           <button
+            className={`error-group-toggle ${showErrorGroups ? 'active' : ''}`}
+            onClick={() => setShowErrorGroups(!showErrorGroups)}
+            title="View error groups"
+          >
+            <span className="error-group-toggle-icon">🐛</span>
+            <span className="error-group-toggle-label">Errors</span>
+          </button>
+          <button
             className="file-heatmap-toggle"
             onClick={() => setShowFileHeatmap(!showFileHeatmap)}
             title="View file heatmap"
@@ -718,6 +767,17 @@ const App: React.FC = () => {
           >
             <span className="session-replay-toggle-icon">📼</span>
             <span className="session-replay-toggle-label">Replay</span>
+          </button>
+          <button
+            className={`budget-toggle ${showBudgetAlert ? 'active' : ''}`}
+            onClick={() => setShowBudgetAlert(!showBudgetAlert)}
+            title="Budget alerts"
+          >
+            <span className="budget-toggle-icon">%</span>
+            <span className="budget-toggle-label">Budget</span>
+            {budgetSummary && budgetSummary.budget.warningLevel !== 'none' && (
+              <span className="budget-alert-badge">!</span>
+            )}
           </button>
           {unacknowledgedAlertCount > 0 && (
             <button
@@ -850,6 +910,20 @@ const App: React.FC = () => {
           <CostDashboard
             visible={showCostDashboard}
             onClose={() => setShowCostDashboard(false)}
+          />
+        )}
+
+        {showBudgetAlert && (
+          <BudgetAlertPanel
+            visible={showBudgetAlert}
+            onClose={() => setShowBudgetAlert(false)}
+          />
+        )}
+
+        {showErrorGroups && (
+          <ErrorGroupPanel
+            visible={showErrorGroups}
+            onClose={() => setShowErrorGroups(false)}
           />
         )}
 

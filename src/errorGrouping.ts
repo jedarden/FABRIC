@@ -200,6 +200,9 @@ const DEFAULT_OPTIONS: Required<ErrorGroupingOptions> = {
   maxGroups: 100,
 };
 
+/** Maximum events retained per error group. */
+const MAX_EVENTS_PER_GROUP = 50;
+
 /**
  * Categorize an error message
  */
@@ -336,9 +339,11 @@ export class ErrorGroupManager {
     const existingGroupId = this.hashToGroup.get(fingerprint.hash);
 
     if (existingGroupId) {
-      // Add to existing group
+      // Add to existing group (cap events to prevent unbounded growth)
       const group = this.groups.get(existingGroupId)!;
-      group.events.push(event);
+      if (group.events.length < MAX_EVENTS_PER_GROUP) {
+        group.events.push(event);
+      }
       group.count++;
       group.lastSeen = event.ts;
 

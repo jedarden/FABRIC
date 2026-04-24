@@ -25,6 +25,9 @@ const MAX_PAYLOAD_SIZE = 64 * 1024;
 /** Maximum number of events in a batch request */
 const MAX_BATCH_SIZE = 100;
 
+/** Maximum buffered bytes per WebSocket client before termination. */
+const WS_MAX_BUFFERED_BYTES = 1024 * 1024; // 1 MB
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Send a systemd sd_notify message via the NOTIFY_SOCKET Unix datagram socket. */
@@ -644,6 +647,80 @@ export function createWebServer(options: WebServerOptions): WebServer {
       res.json({ success: true });
     });
 
+    // ============================================
+    // Error Group API Endpoints
+    // ============================================
+
+    // Get all error groups
+    app.get('/api/errors/groups', (req: Request, res: Response) => {
+      const activeOnly = req.query.activeOnly === 'true';
+      const groups = activeOnly
+        ? store.getActiveErrorGroups()
+        : store.getErrorGroups();
+
+      // Serialize for the wire — events can be large, send a trimmed version
+      const trimmed = groups.map(g => ({
+        id: g.id,
+        fingerprint: g.fingerprint,
+        firstSeen: g.firstSeen,
+        lastSeen: g.lastSeen,
+        count: g.count,
+        affectedWorkers: g.affectedWorkers,
+        isActive: g.isActive,
+        severity: g.severity,
+        recentEvents: g.events.slice(-5).map(e => ({
+          timestamp: e.timestamp,
+          level: e.level,
+          worker: e.worker,
+          message: e.message,
+          tool: e.tool,
+          ts: e.ts,
+          error: (e as Record<string, unknown>).error as string | undefined,
+        })),
+        sampleStack: (() => {
+          const withStack = g.events.find(e => (e as Record<string, unknown>).error && String((e as Record<string, unknown>).error).includes('\n'));
+          return withStack ? String((withStack as Record<string, unknown>).error) : undefined;
+        })(),
+      }));
+
+      res.json(trimmed);
+    });
+
+    // Get error group statistics
+    app.get('/api/errors/stats', (_req: Request, res: Response) => {
+      const stats = store.getErrorStats();
+      res.json(stats);
+    });
+
+    // Find similar past errors from error_history
+    app.get('/api/errors/history/similar', (req: Request, res: Response) => {
+      const message = req.query.message as string;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+
+      if (!message) {
+        res.status(400).json({ error: 'Missing required parameter: message' });
+        return;
+      }
+
+      const similar = store.historical.findSimilarErrors(message, limit);
+      res.json(similar);
+    });
+
+    // Get historical error records
+    app.get('/api/errors/history', (req: Request, res: Response) => {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+      const workerId = req.query.worker as string | undefined;
+      const errorType = req.query.errorType as string | undefined;
+
+      const records = store.historical.getErrorHistory({
+        limit,
+        workerId,
+        errorType,
+      });
+
+      res.json(records);
+    });
+
     // Fleet analytics — reads log files fresh on each request
     app.get('/api/analytics', (_req: Request, res: Response) => {
       try {
@@ -778,6 +855,13 @@ export function createWebServer(options: WebServerOptions): WebServer {
     const message = JSON.stringify({ type: 'event', data: event });
     for (const client of clients) {
       if (client.readyState === WebSocket.OPEN) {
+        // Backpressure: terminate clients whose send buffer exceeds the limit
+        if (client.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
+          console.warn(`WebSocket client buffer exceeded ${WS_MAX_BUFFERED_BYTES} bytes — terminating`);
+          client.close(1013, 'Send buffer overflow');
+          clients.delete(client);
+          continue;
+        }
         client.send(message);
       }
     }
@@ -794,6 +878,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
     for (const client of clients) {
       if (client.readyState === WebSocket.OPEN) {
+        if (client.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
+          client.close(1013, 'Send buffer overflow');
+          clients.delete(client);
+          continue;
+        }
         client.send(message);
       }
     }

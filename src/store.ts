@@ -85,6 +85,33 @@ interface FileModificationTracker {
   timestamps: number[];
 }
 
+/** Max events stored in collision records before trimming. */
+const MAX_COLLISION_EVENTS = 50;
+
+/** Max timestamps retained per file in the heatmap tracker. */
+const MAX_FILE_TIMESTAMPS = 200;
+
+/** Max age (ms) for taskStartTimes entries before considering them abandoned. */
+const TASK_START_MAX_AGE_MS = 86_400_000; // 24 hours
+
+/** Max age (ms) for inactive collision entries before deletion from the map. */
+const STALE_COLLISION_MAX_AGE_MS = 300_000; // 5 minutes
+
+/** Max age (ms) for inactive fileModification entries before deletion. */
+const STALE_FILE_MOD_MAX_AGE_MS = 3_600_000; // 1 hour
+
+/** Max files retained per worker in activeFiles/activeDirectories arrays. */
+const MAX_WORKER_ACTIVE_FILES = 200;
+
+/** How many events to trim at once (batch trim amortises O(n) splice cost). */
+const TRIM_BATCH_SIZE = 100;
+
+/** Max events buffered before batch processing flushes immediately. */
+const MAX_BATCH_BUFFER_SIZE = 500;
+
+/** Max age (ms) for inactive workers before pruning from the workers map. */
+const STALE_WORKER_MAX_AGE_MS = 3_600_000; // 1 hour
+
 export class InMemoryEventStore implements EventStore {
   private events: LogEvent[] = [];
   private sequenceIndex: Map<string, LogEvent> = new Map(); // key: `${worker}:${sequence}`
@@ -105,6 +132,8 @@ export class InMemoryEventStore implements EventStore {
   private batchTimeout: NodeJS.Timeout | null = null;
   private sessionStartTime: number = 0;
   private taskStartTimes: Map<string, number> = new Map(); // beadId -> startTime
+  /** Index of file-path → last modification timestamp — used by detectCollision for O(1) lookups. */
+  private recentFileMods: Map<string, { workerId: string; ts: number }[]> = new Map();
 
   constructor(maxEvents: number = 10000) {
     this.maxEvents = maxEvents;
@@ -158,12 +187,25 @@ export class InMemoryEventStore implements EventStore {
     this.semanticNarrativeManager.processEvent(event);
 
     // Add to batch buffer for relationship detection
-    this.batchBuffer.push(event);
+    if (this.batchBuffer.length < MAX_BATCH_BUFFER_SIZE) {
+      this.batchBuffer.push(event);
+    }
     this.scheduleBatchProcessing();
 
-    // Trim if over limit
-    if (this.events.length > this.maxEvents) {
-      this.events.shift();
+    // Trim in batches when over limit (amortises O(n) splice cost)
+    if (this.events.length > this.maxEvents + TRIM_BATCH_SIZE) {
+      const removed = this.events.splice(0, this.events.length - this.maxEvents);
+      // Prune sequenceIndex entries for the evicted events
+      for (const ev of removed) {
+        if (ev.sequence != null && ev.sequence >= 0) {
+          this.sequenceIndex.delete(`${ev.worker}:${ev.sequence}`);
+        }
+      }
+    }
+
+    // Periodic cleanup of stale secondary structures (every 10k events)
+    if (this.events.length % 10_000 === 0) {
+      this.cleanupStaleSecondaryData();
     }
   }
 
@@ -177,11 +219,12 @@ export class InMemoryEventStore implements EventStore {
 
     this.batchTimeout = setTimeout(() => {
       if (this.batchBuffer.length > 0) {
-        this.crossReferenceManager.processBatch([...this.batchBuffer]);
+        const batch = this.batchBuffer;
         this.batchBuffer = [];
+        this.crossReferenceManager.processBatch(batch);
       }
       this.batchTimeout = null;
-    }, 1000); // Process batch every 1 second
+    }, 1000);
   }
 
   /**
@@ -255,6 +298,7 @@ export class InMemoryEventStore implements EventStore {
     this.beadCollisions.clear();
     this.taskCollisions.clear();
     this.fileModifications.clear();
+    this.recentFileMods.clear();
     this.errorGroupManager.clear();
     this.crossReferenceManager.clear();
     this.batchBuffer = [];
@@ -317,6 +361,72 @@ export class InMemoryEventStore implements EventStore {
         totalTokens: analytics.totalTokens,
         metricsSource: hasMetricData ? 'otlp-metric' : 'log-derived',
       });
+    }
+  }
+
+  /**
+   * Periodic cleanup of secondary data structures that can grow stale.
+   */
+  private cleanupStaleSecondaryData(): void {
+    const now = Date.now();
+
+    // Clean up abandoned task start times
+    for (const [beadId, startTime] of this.taskStartTimes) {
+      if (now - startTime > TASK_START_MAX_AGE_MS) {
+        this.taskStartTimes.delete(beadId);
+      }
+    }
+
+    // Clean up recentFileMods entries that are past the collision window
+    for (const [path, mods] of this.recentFileMods) {
+      const cutoff = now - COLLISION_WINDOW_MS;
+      while (mods.length > 0 && mods[0].ts < cutoff) {
+        mods.shift();
+      }
+      if (mods.length === 0) {
+        this.recentFileMods.delete(path);
+      }
+    }
+
+    // Delete inactive collisions past their retention window
+    const staleCollisionCutoff = now - STALE_COLLISION_MAX_AGE_MS;
+    for (const [key, c] of this.collisions) {
+      if (!c.isActive && c.detectedAt < staleCollisionCutoff) {
+        this.collisions.delete(key);
+      }
+    }
+    for (const [key, c] of this.beadCollisions) {
+      if (!c.isActive && c.detectedAt < staleCollisionCutoff) {
+        this.beadCollisions.delete(key);
+      }
+    }
+    for (const [key, c] of this.taskCollisions) {
+      if (!c.isActive && c.detectedAt < staleCollisionCutoff) {
+        this.taskCollisions.delete(key);
+      }
+    }
+
+    // Delete stale fileModification trackers
+    const staleFileModCutoff = now - STALE_FILE_MOD_MAX_AGE_MS;
+    for (const [path, tracker] of this.fileModifications) {
+      if (tracker.lastModified < staleFileModCutoff) {
+        this.fileModifications.delete(path);
+      } else {
+        // Prune per-worker entries for workers no longer in the active set
+        for (const wId of tracker.workerModifications.keys()) {
+          if (!this.workers.has(wId)) {
+            tracker.workerModifications.delete(wId);
+          }
+        }
+      }
+    }
+
+    // Prune workers with no recent activity
+    const staleWorkerCutoff = now - STALE_WORKER_MAX_AGE_MS;
+    for (const [workerId, worker] of this.workers) {
+      if (worker.status !== 'active' && worker.lastActivity < staleWorkerCutoff) {
+        this.workers.delete(workerId);
+      }
     }
   }
 
@@ -453,6 +563,11 @@ export class InMemoryEventStore implements EventStore {
     return this.errorGroupManager.getStats();
   }
 
+  /** Expose historical store for error history queries */
+  get historical(): HistoricalStore {
+    return this.historicalStore;
+  }
+
   /**
    * Get event count
    */
@@ -494,15 +609,21 @@ export class InMemoryEventStore implements EventStore {
       worker.activeBead = event.bead;
     }
 
-    // Track active files
+    // Track active files (bounded to prevent unbounded growth)
     if (event.path && this.isFileModification(event)) {
       if (!worker.activeFiles.includes(event.path)) {
         worker.activeFiles.push(event.path);
+        if (worker.activeFiles.length > MAX_WORKER_ACTIVE_FILES) {
+          worker.activeFiles = worker.activeFiles.slice(-MAX_WORKER_ACTIVE_FILES);
+        }
       }
       // Track directory
       const directory = event.path.substring(0, event.path.lastIndexOf('/')) || '/';
       if (!worker.activeDirectories.includes(directory)) {
         worker.activeDirectories.push(directory);
+        if (worker.activeDirectories.length > MAX_WORKER_ACTIVE_FILES) {
+          worker.activeDirectories = worker.activeDirectories.slice(-MAX_WORKER_ACTIVE_FILES);
+        }
       }
     }
 
@@ -532,6 +653,7 @@ export class InMemoryEventStore implements EventStore {
         }
         if (needleEvent === 'bead.completed') {
           worker.activeFiles = [];
+          worker.activeDirectories = [];
           worker.activeBead = undefined;
         }
       } else if (
@@ -547,16 +669,23 @@ export class InMemoryEventStore implements EventStore {
     // Update last event
     worker.lastEvent = event;
 
-    // Update collision status (check all collision types)
-    const hasFileCollision = this.getWorkerCollisions(worker.id).length > 0;
-    const hasBeadCollision = this.getWorkerBeadCollisions(worker.id).length > 0;
-    const hasTaskCollision = this.getWorkerTaskCollisions(worker.id).length > 0;
-    worker.hasCollision = hasFileCollision || hasBeadCollision || hasTaskCollision;
+    // Run gap-based stuck detection (throttled — only every 100 events per worker)
+    if (worker.eventCount % 100 === 0) {
+      const stuckPattern = isWorkerStuck(worker, this.events);
+      worker.stuck = stuckPattern != null;
+      worker.stuckReason = stuckPattern?.reason ?? undefined;
+    }
 
-    // Run gap-based stuck detection
-    const stuckPattern = isWorkerStuck(worker, this.events);
-    worker.stuck = stuckPattern != null;
-    worker.stuckReason = stuckPattern?.reason ?? undefined;
+    // Update collision status (throttled — only when a new collision is detected
+    // or every 500 events per worker to avoid O(collisions × workers) per event)
+    if (this.collisions.has(event.path || '') ||
+        (event.bead && this.beadCollisions.has(`bead:${event.bead}`)) ||
+        worker.eventCount % 500 === 0) {
+      const hasFileCollision = this.getWorkerCollisions(worker.id).length > 0;
+      const hasBeadCollision = this.getWorkerBeadCollisions(worker.id).length > 0;
+      const hasTaskCollision = this.getWorkerTaskCollisions(worker.id).length > 0;
+      worker.hasCollision = hasFileCollision || hasBeadCollision || hasTaskCollision;
+    }
   }
 
   /**
@@ -631,7 +760,8 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
-   * Detect collision when a file modification event occurs
+   * Detect collision when a file modification event occurs.
+   * Uses recentFileMods index for O(k) lookups instead of scanning all events.
    */
   private detectCollision(event: LogEvent): void {
     if (!event.path || !this.isFileModification(event)) {
@@ -641,49 +771,54 @@ export class InMemoryEventStore implements EventStore {
     const path = event.path;
     const workerId = event.worker;
 
-    // Look for other workers modifying the same file within the time window
-    const recentEvents = this.events.filter(e => {
-      if (e.path !== path) return false;
-      if (e.worker === workerId) return false;
-      if (!this.isFileModification(e)) return false;
-      if (Math.abs(e.ts - event.ts) > COLLISION_WINDOW_MS) return false;
-      return true;
-    });
+    // Maintain the per-file recent modifications index
+    let mods = this.recentFileMods.get(path);
+    if (!mods) {
+      mods = [];
+      this.recentFileMods.set(path, mods);
+    }
+    mods.push({ workerId, ts: event.ts });
 
-    if (recentEvents.length > 0) {
-      // Collision detected!
-      const collisionKey = path;
-      const workers = new Set<string>([workerId]);
-      const collisionEvents: LogEvent[] = [event];
+    // Trim index entries older than the collision window
+    const cutoff = event.ts - COLLISION_WINDOW_MS;
+    while (mods.length > 0 && mods[0].ts < cutoff) {
+      mods.shift();
+    }
 
-      for (const e of recentEvents) {
-        workers.add(e.worker);
-        collisionEvents.push(e);
+    // Check for collisions: other workers modifying same file within window
+    const otherWorkers = new Set<string>();
+    for (const m of mods) {
+      if (m.workerId !== workerId) {
+        otherWorkers.add(m.workerId);
       }
+    }
 
-      // Update or create collision record
+    if (otherWorkers.size > 0) {
+      const collisionKey = path;
+      const workers = new Set<string>([workerId, ...otherWorkers]);
+
       const existing = this.collisions.get(collisionKey);
       if (existing) {
-        // Add new worker if not already tracked
         for (const w of workers) {
           if (!existing.workers.includes(w)) {
             existing.workers.push(w);
           }
         }
-        existing.events.push(event);
+        if (existing.events.length < MAX_COLLISION_EVENTS) {
+          existing.events.push(event);
+        }
         existing.detectedAt = event.ts;
       } else {
         const collision: FileCollision = {
           path,
           workers: Array.from(workers),
           detectedAt: event.ts,
-          events: collisionEvents,
+          events: [event],
           isActive: true,
         };
         this.collisions.set(collisionKey, collision);
       }
 
-      // Update collision status for all involved workers
       for (const w of workers) {
         const workerInfo = this.workers.get(w);
         if (workerInfo) {
@@ -750,7 +885,9 @@ export class InMemoryEventStore implements EventStore {
     // Update modification count
     tracker.modifications++;
     tracker.lastModified = event.ts;
-    tracker.timestamps.push(event.ts);
+    if (tracker.timestamps.length < MAX_FILE_TIMESTAMPS) {
+      tracker.timestamps.push(event.ts);
+    }
 
     // Track worker contribution
     const workerMods = tracker.workerModifications.get(workerId);
@@ -986,7 +1123,8 @@ export class InMemoryEventStore implements EventStore {
   // ============================================
 
   /**
-   * Detect bead collision when multiple workers work on the same bead
+   * Detect bead collision when multiple workers work on the same bead.
+   * Uses worker activeBead tracking for O(1) lookup instead of scanning all events.
    */
   private detectBeadCollision(event: LogEvent): void {
     if (!event.bead) return;
@@ -994,26 +1132,20 @@ export class InMemoryEventStore implements EventStore {
     const beadId = event.bead;
     const workerId = event.worker;
 
-    // Look for other workers working on the same bead
-    const recentEvents = this.events.filter(e => {
-      if (e.bead !== beadId) return false;
-      if (e.worker === workerId) return false;
-      if (Math.abs(e.ts - event.ts) > BEAD_COLLISION_WINDOW_MS) return false;
-      return true;
-    });
+    // Check if any other worker is currently assigned to this bead
+    const otherWorkersOnBead: string[] = [];
+    for (const [wId, worker] of this.workers) {
+      if (wId !== workerId && worker.activeBead === beadId) {
+        otherWorkersOnBead.push(wId);
+      }
+    }
 
-    if (recentEvents.length > 0) {
+    if (otherWorkersOnBead.length > 0) {
       // Bead collision detected!
       const collisionKey = `bead:${beadId}`;
       const workers = new Set<string>([workerId]);
       const collisionEvents: LogEvent[] = [event];
 
-      for (const e of recentEvents) {
-        workers.add(e.worker);
-        collisionEvents.push(e);
-      }
-
-      // Determine severity based on tool usage
       const allTools = collisionEvents.map(e => e.tool).filter(Boolean);
       const hasWriteTools = allTools.some(t => FILE_MODIFICATION_TOOLS.includes(t || ''));
       const severity: 'warning' | 'critical' = hasWriteTools ? 'critical' : 'warning';
@@ -1026,7 +1158,9 @@ export class InMemoryEventStore implements EventStore {
             existing.workers.push(w);
           }
         }
-        existing.events.push(event);
+        if (existing.events.length < MAX_COLLISION_EVENTS) {
+          existing.events.push(event);
+        }
         existing.detectedAt = event.ts;
         existing.severity = severity;
       } else {
