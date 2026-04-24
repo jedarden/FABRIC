@@ -196,7 +196,39 @@ describe('logPruner', () => {
     expect(event.data.dry_run).toBe(false);
   });
 
-  it('formatPruneResult includes key info', () => {
+  it('includes retention_state in mend event and result', () => {
+    const logDir = makeDir(tmpDir, 'logs');
+    // 5 days old — past archiveAfterDays=3 but under maxAgeDays=7
+    touch(logDir, 'old-foxtrot-006.jsonl', 5, 300);
+
+    const result = pruneLogs({
+      logDir,
+      archiveAfterDays: 3,
+      archiveRetentionDays: 30,
+      maxAgeDays: 7,
+      dryRun: false,
+    });
+
+    expect(result.retentionState.fileCount).toBe(0);
+    expect(result.retentionState.totalSizeBytes).toBe(0);
+    expect(result.retentionState.oldestFileAgeDays).toBe(0);
+    expect(result.retentionState.archiveCount).toBe(1);
+    expect(result.retentionState.archiveSizeBytes).toBeGreaterThan(0);
+    expect(result.retentionState.policy).toEqual({
+      archiveAfterDays: 3,
+      maxAgeDays: 7,
+      archiveRetentionDays: 30,
+    });
+
+    const mendFile = path.join(logDir, 'fabric-mend.jsonl');
+    const event = JSON.parse(fs.readFileSync(mendFile, 'utf8').trim());
+    expect(event.data.retention_state).toBeDefined();
+    expect(event.data.retention_state.file_count).toBe(0);
+    expect(event.data.retention_state.policy.archive_after_days).toBe(3);
+    expect(event.data.retention_state.oldest_file_age_days).toBe(0);
+  });
+
+  it('formatPruneResult includes retention state', () => {
     const result: PruneResult = {
       filesScanned: 100,
       filesArchived: 20,
@@ -209,11 +241,21 @@ describe('logPruner', () => {
       archivesBefore: 5,
       archivesAfter: 4,
       durationMs: 123,
+      retentionState: {
+        fileCount: 30,
+        totalSizeBytes: 1024 * 1024 * 50,
+        oldestFileAgeDays: 2.5,
+        archiveCount: 4,
+        archiveSizeBytes: 1024 * 1024 * 10,
+        policy: { archiveAfterDays: 3, maxAgeDays: 7, archiveRetentionDays: 30 },
+      },
     };
-
     const text = formatPruneResult(result, false);
     expect(text).toContain('Files scanned:  100');
     expect(text).toContain('5.0 MB');
     expect(text).toContain('100 → 30');
+    expect(text).toContain('Retention state:');
+    expect(text).toContain('50.0 MB');
+    expect(text).toContain('archive>3d');
   });
 });

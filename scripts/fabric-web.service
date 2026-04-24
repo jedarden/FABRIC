@@ -3,11 +3,13 @@ Description=FABRIC Web Dashboard
 After=network.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=all
 WorkingDirectory=/home/coding/FABRIC
 ExecStart=/usr/bin/node dist/cli.js web --port 3000 --source /home/coding/.needle/logs --otlp-http :4318
-Restart=always
+Restart=on-failure
 RestartSec=5
+WatchdogSec=30
 EnvironmentFile=/home/coding/.config/fabric/secrets.env
 Environment=NODE_ENV=production
 StandardOutput=journal

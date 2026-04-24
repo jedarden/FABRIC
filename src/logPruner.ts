@@ -18,6 +18,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 
+export interface RetentionState {
+  fileCount: number;
+  totalSizeBytes: number;
+  oldestFileAgeDays: number;
+  archiveCount: number;
+  archiveSizeBytes: number;
+  policy: {
+    archiveAfterDays: number;
+    maxAgeDays: number;
+    archiveRetentionDays: number;
+  };
+}
+
 export interface PruneOptions {
   /** Directory to prune (default: ~/.needle/logs) */
   logDir: string;
@@ -50,6 +63,7 @@ export interface PruneResult {
   archivesBefore: number;
   archivesAfter: number;
   durationMs: number;
+  retentionState: RetentionState;
 }
 
 export interface FileGroup {
@@ -101,31 +115,23 @@ function createTarball(archiveDir: string, date: string, files: string[], dryRun
   const tarballPath = path.join(archiveDir, `${date}.tar.gz`);
 
   if (fs.existsSync(tarballPath)) {
-    // Append to existing tarball — tar -rf doesn't work with compressed archives,
-    // so we extract, add, and recompress. Simpler: just add to existing tarball.
-    // Since tar --append doesn't work with .tar.gz, create a temporary uncompressed
-    // tar, append, then recompress.
     const tmpTar = path.join(archiveDir, `${date}.tmp.tar`);
     try {
-      // Decompress existing archive
       if (!dryRun) {
         execFileSync('gzip', ['-d', '-k', '-f', tarballPath], { timeout: 60000 });
-        const gzPath = `${tarballPath.slice(0, -3)}`; // remove .gz
+        const gzPath = `${tarballPath.slice(0, -3)}`;
         fs.renameSync(gzPath, tmpTar);
 
-        // Append new files
         const fileArgs = files.map(f => path.basename(f));
         execFileSync('tar', ['-rf', tmpTar, ...fileArgs], {
           cwd: path.dirname(files[0]),
           timeout: 60000,
         });
 
-        // Recompress
         execFileSync('gzip', ['-f', tmpTar], { timeout: 60000 });
         fs.renameSync(`${tmpTar}.gz`, tarballPath);
       }
     } catch {
-      // If append fails, just overwrite
       if (!dryRun) {
         if (fs.existsSync(tmpTar)) fs.unlinkSync(tmpTar);
         if (fs.existsSync(`${tmpTar}.gz`)) fs.unlinkSync(`${tmpTar}.gz`);
@@ -149,6 +155,47 @@ function createTarball(archiveDir: string, date: string, files: string[], dryRun
   return tarballPath;
 }
 
+/** Compute current retention state for a log directory. */
+function computeRetentionState(logDir: string, policy: RetentionState['policy']): RetentionState {
+  const archiveDir = path.join(logDir, 'archive');
+  let fileCount = 0;
+  let totalSizeBytes = 0;
+  let oldestMtimeMs = Infinity;
+
+  if (fs.existsSync(logDir)) {
+    for (const entry of fs.readdirSync(logDir)) {
+      if (SKIP_NAMES.has(entry)) continue;
+      const full = path.join(logDir, entry);
+      try {
+        const stat = fs.statSync(full);
+        if (!stat.isFile()) continue;
+        fileCount++;
+        totalSizeBytes += stat.size;
+        if (stat.mtimeMs < oldestMtimeMs) oldestMtimeMs = stat.mtimeMs;
+      } catch { /* skip */ }
+    }
+  }
+
+  let archiveCount = 0;
+  let archiveSizeBytes = 0;
+  if (fs.existsSync(archiveDir)) {
+    for (const entry of fs.readdirSync(archiveDir)) {
+      if (!entry.endsWith('.tar.gz')) continue;
+      try {
+        const stat = fs.statSync(path.join(archiveDir, entry));
+        archiveCount++;
+        archiveSizeBytes += stat.size;
+      } catch { /* skip */ }
+    }
+  }
+
+  const oldestFileAgeDays = oldestMtimeMs === Infinity
+    ? 0
+    : (Date.now() - oldestMtimeMs) / (24 * 60 * 60 * 1000);
+
+  return { fileCount, totalSizeBytes, oldestFileAgeDays, archiveCount, archiveSizeBytes, policy };
+}
+
 /** Emit a mend.logs_pruned event to the fabric-mend events file. */
 function emitMendEvent(logDir: string, result: PruneResult, dryRun: boolean): void {
   const eventPath = path.join(logDir, 'fabric-mend.jsonl');
@@ -169,6 +216,18 @@ function emitMendEvent(logDir: string, result: PruneResult, dryRun: boolean): vo
       file_count_before: result.fileCountBefore,
       file_count_after: result.fileCountAfter,
       dry_run: dryRun,
+      retention_state: {
+        file_count: result.retentionState.fileCount,
+        total_size_bytes: result.retentionState.totalSizeBytes,
+        oldest_file_age_days: Math.round(result.retentionState.oldestFileAgeDays * 10) / 10,
+        archive_count: result.retentionState.archiveCount,
+        archive_size_bytes: result.retentionState.archiveSizeBytes,
+        policy: {
+          archive_after_days: result.retentionState.policy.archiveAfterDays,
+          max_age_days: result.retentionState.policy.maxAgeDays,
+          archive_retention_days: result.retentionState.policy.archiveRetentionDays,
+        },
+      },
     },
   };
 
@@ -199,6 +258,7 @@ export function pruneLogs(options: Partial<PruneOptions> = {}): PruneResult {
   const dryRun = options.dryRun ?? false;
   const skipPatterns = options.skipPatterns ?? [];
   const skipRegexes = skipPatterns.map(p => new RegExp(p));
+  const policy = { archiveAfterDays, maxAgeDays, archiveRetentionDays };
 
   if (!fs.existsSync(logDir)) {
     return {
@@ -206,6 +266,7 @@ export function pruneLogs(options: Partial<PruneOptions> = {}): PruneResult {
       archivesCreated: 0, archivesDeleted: 0, bytesFreed: 0,
       fileCountBefore: 0, fileCountAfter: 0,
       archivesBefore: 0, archivesAfter: 0, durationMs: Date.now() - startMs,
+      retentionState: { fileCount: 0, totalSizeBytes: 0, oldestFileAgeDays: 0, archiveCount: 0, archiveSizeBytes: 0, policy },
     };
   }
 
@@ -311,6 +372,7 @@ export function pruneLogs(options: Partial<PruneOptions> = {}): PruneResult {
     archivesBefore,
     archivesAfter: finalArchives.length,
     durationMs: Date.now() - startMs,
+    retentionState: computeRetentionState(logDir, policy),
   };
 
   // Phase 4: Emit mend.logs_pruned event
@@ -324,6 +386,7 @@ export function pruneLogs(options: Partial<PruneOptions> = {}): PruneResult {
 /** Format a PruneResult as a human-readable summary. */
 export function formatPruneResult(result: PruneResult, dryRun: boolean): string {
   const prefix = dryRun ? '[DRY RUN] ' : '';
+  const rs = result.retentionState;
   const lines = [
     `${prefix}Prune complete (${result.durationMs}ms)`,
     `  Files scanned:  ${result.filesScanned}`,
@@ -334,6 +397,11 @@ export function formatPruneResult(result: PruneResult, dryRun: boolean): string 
     `  Archives deleted: ${result.archivesDeleted}`,
     `  File count:     ${result.fileCountBefore} → ${result.fileCountAfter}`,
     `  Archive count:  ${result.archivesBefore} → ${result.archivesAfter}`,
+    `  Retention state:`,
+    `    Current files: ${rs.fileCount} (${formatBytes(rs.totalSizeBytes)})`,
+    `    Oldest file:   ${rs.oldestFileAgeDays.toFixed(1)} days`,
+    `    Archives:      ${rs.archiveCount} (${formatBytes(rs.archiveSizeBytes)})`,
+    `    Policy:        archive>${rs.policy.archiveAfterDays}d, max>${rs.policy.maxAgeDays}d, retain>${rs.policy.archiveRetentionDays}d`,
   ];
   return lines.join('\n');
 }

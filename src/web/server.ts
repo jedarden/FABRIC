@@ -13,9 +13,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
-import { normalizeToLogEvent } from '../normalizer.js';
+import { normalizeToLogEvent, EventDeduplicator } from '../normalizer.js';
 import { computeFleetAnalytics } from '../analytics.js';
 import { createOtlpHttpRouter } from '../otlpHttpReceiver.js';
+import { ServerMetrics } from '../serverMetrics.js';
 
 /** Maximum payload size for POST requests (64KB) */
 const MAX_PAYLOAD_SIZE = 64 * 1024;
@@ -33,6 +34,10 @@ export interface WebServerOptions {
   authToken?: string;
   /** When set, creates a second HTTP listener on this port for OTLP/HTTP traffic. */
   otlpHttpPort?: number;
+  /** Max events allowed in the store before liveness check fails (memory-bomb guard). */
+  maxEventCount?: number;
+  /** Shared deduplicator — exposes dedup_dropped in /api/health. */
+  deduplicator?: EventDeduplicator;
 }
 
 export interface WebServer extends EventEmitter {
@@ -41,14 +46,17 @@ export interface WebServer extends EventEmitter {
   getPort(): number;
   broadcast(event: LogEvent): void;
   broadcastCollisions(): void;
+  recordEvent(): void;
+  setTailerFilesWatched(count: number): void;
 }
 
 /**
  * Create the FABRIC web server
  */
 export function createWebServer(options: WebServerOptions): WebServer {
-  const { port, logPath, store, authToken, otlpHttpPort } = options;
+  const { port, logPath, store, authToken, otlpHttpPort, maxEventCount, deduplicator } = options;
   const emitter = new EventEmitter();
+  const metrics = new ServerMetrics();
 
   let app: Express;
   let httpServer: HttpServer;
@@ -100,6 +108,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const otlpRouter = createOtlpHttpRouter({
         onEvent: (event: LogEvent) => {
           store.add(event);
+          metrics.recordEvent();
           broadcast(event);
         },
       });
@@ -136,7 +145,34 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
     // Health check endpoint
     app.get('/api/health', (_req: Request, res: Response) => {
-      res.json({ status: 'ok', storeSize: store.size });
+      metrics.wsClients = clients.size;
+      metrics.dedupDropped = deduplicator?.droppedCount ?? 0;
+      metrics.eventCount = store.size;
+      const snap = metrics.snapshot();
+      const overloaded = maxEventCount != null && store.size > maxEventCount;
+      if (overloaded) snap.status = 'overloaded';
+      res.status(overloaded ? 503 : 200).json({
+        status: snap.status,
+        uptime_sec: snap.uptime_sec,
+        version: snap.version,
+        event_count: snap.event_count,
+        ingest_rate_per_sec: snap.ingest_rate_per_sec,
+        ws_clients: snap.ws_clients,
+        tailer_files_watched: snap.tailer_files_watched,
+        dedup_dropped: snap.dedup_dropped,
+        process_resident_memory_bytes: snap.process_resident_memory_bytes,
+      });
+    });
+
+    // Prometheus metrics endpoint
+    app.get('/api/metrics', (_req: Request, res: Response) => {
+      metrics.wsClients = clients.size;
+      metrics.dedupDropped = deduplicator?.droppedCount ?? 0;
+      metrics.eventCount = store.size;
+      const snap = metrics.snapshot();
+      const overloaded = maxEventCount != null && store.size > maxEventCount;
+      if (overloaded) snap.status = 'overloaded';
+      res.type('text/plain').send(metrics.toPrometheus(snap));
     });
 
     // Get all workers
@@ -189,6 +225,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
         // Store the event
         store.add(logEvent);
+        metrics.recordEvent();
 
         // Broadcast to all connected WebSocket clients
         broadcast(logEvent);
@@ -257,6 +294,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
           // Store the event
           store.add(logEvent);
+          metrics.recordEvent();
           ingestedEvents.push(logEvent);
         }
 
@@ -659,6 +697,22 @@ export function createWebServer(options: WebServerOptions): WebServer {
     httpServer.on('error', (err) => {
       emitter.emit('error', err);
     });
+
+    // Liveness self-check: exit non-zero if overloaded for consecutive checks
+    if (maxEventCount) {
+      let consecutiveFailures = 0;
+      setInterval(() => {
+        if (store.size > maxEventCount) {
+          consecutiveFailures++;
+          if (consecutiveFailures >= 3) {
+            console.error(`Liveness check failed: event store (${store.size}) exceeds max (${maxEventCount}) for 3 consecutive checks — exiting`);
+            process.exit(1);
+          }
+        } else {
+          consecutiveFailures = 0;
+        }
+      }, 10_000);
+    }
   }
 
   function stop() {
@@ -718,7 +772,15 @@ export function createWebServer(options: WebServerOptions): WebServer {
     }
   }
 
-  return Object.assign(emitter, { start, stop, getPort, broadcast, broadcastCollisions });
+  function recordEvent(): void {
+    metrics.recordEvent();
+  }
+
+  function setTailerFilesWatched(count: number): void {
+    metrics.tailerFilesWatched = count;
+  }
+
+  return Object.assign(emitter, { start, stop, getPort, broadcast, broadcastCollisions, recordEvent, setTailerFilesWatched });
 }
 
 export default createWebServer;

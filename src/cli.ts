@@ -18,6 +18,7 @@ import { getStore } from './store.js';
 import { createWebServer } from './web/index.js';
 import { EventDeduplicator } from './normalizer.js';
 import * as fs from 'fs';
+import * as net from 'net';
 import type { LogLevel, EventFilter, LogEvent } from './types.js';
 
 type ResolvedSource = { kind: 'directory'; path: string } | { kind: 'file'; path: string };
@@ -177,11 +178,13 @@ program
   .option('-a, --auth-token <token>', 'Auth token for POST endpoints (or use FABRIC_AUTH_TOKEN env var)')
   .option('--otlp-grpc <addr>', 'Enable OTLP/gRPC receiver (e.g. :4317 or 0.0.0.0:4317)')
   .option('--otlp-http <addr>', 'Enable OTLP/HTTP receiver (e.g. :4318 or 0.0.0.0:4318)')
+  .option('--max-events <number>', 'Max events in store before liveness guard exits (memory-bomb guard)')
   .action(async (options) => {
     const resolved = resolveFromOptions(options.source, options.file);
     const port = parseInt(options.port, 10) || 3000;
     const authToken = options.authToken || process.env.FABRIC_AUTH_TOKEN;
     const otlpHttpAddr: string | undefined = options.otlpHttp;
+    const maxEventCount = options.maxEvents ? parseInt(options.maxEvents, 10) : undefined;
 
     // Extract port number from --otlp-http (e.g. ":4318" or "0.0.0.0:4318" → 4318)
     let otlpHttpPort: number | undefined;
@@ -190,9 +193,9 @@ program
       otlpHttpPort = match ? parseInt(match[1], 10) : undefined;
     }
 
-    // Shared deduplicator for cross-source dedup when OTLP is active
-    const needsDedup = !!(options.otlpGrpc || options.otlpHttp);
-    const deduplicator = needsDedup ? new EventDeduplicator() : undefined;
+    // Shared deduplicator for cross-source dedup when OTLP is active.
+    // Always created so dedup_dropped is reported accurately in /api/health.
+    const deduplicator = new EventDeduplicator();
 
     try {
       const store = getStore();
@@ -202,6 +205,8 @@ program
         store,
         authToken,
         otlpHttpPort,
+        maxEventCount,
+        deduplicator,
       });
 
       // Setup log tailing
@@ -217,7 +222,12 @@ program
 
       tailer.on('event', (event) => {
         store.add(event);
+        server.recordEvent();
         server.broadcast(event);
+        // Keep tailer_files_watched in sync for directory tailers
+        if (tailer instanceof DirectoryTailer) {
+          server.setTailerFilesWatched(tailer.activeFiles.length);
+        }
       });
 
       tailer.on('error', (err) => {
@@ -231,6 +241,7 @@ program
         otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc, deduplicator });
         otlpReceiver.on('event', (event) => {
           store.add(event);
+          server.recordEvent();
           server.broadcast(event);
         });
         const boundAddr = await otlpReceiver.start();
@@ -254,7 +265,31 @@ program
 
       // Start tailing and server
       tailer.start();
+      // Set initial tailer file count (directory tailers know their count after start())
+      server.setTailerFilesWatched(
+        tailer instanceof DirectoryTailer ? tailer.activeFiles.length : 1
+      );
       server.start();
+
+      // systemd watchdog: periodically send WATCHDOG=1 to prevent restart
+      const watchdogUsec = parseInt(process.env.WATCHDOG_USEC || '0', 10);
+      if (watchdogUsec > 0) {
+        const notifySocket = process.env.NOTIFY_SOCKET;
+        const intervalMs = Math.floor(watchdogUsec / 1000 / 2); // notify at half the timeout
+        const sdNotify = (msg: string) => {
+          if (!notifySocket) return;
+          try {
+            const client = net.createConnection(notifySocket, () => {
+              client.write(msg);
+              client.end();
+            });
+            client.on('error', () => {});
+          } catch { /* ignore if not running under systemd */ }
+        };
+        sdNotify('READY=1');
+        setInterval(() => sdNotify('WATCHDOG=1'), intervalMs);
+        console.log(`systemd watchdog enabled (interval: ${intervalMs}ms)`);
+      }
 
     } catch (err) {
       console.error(`Failed to start web server: ${(err as Error).message}`);

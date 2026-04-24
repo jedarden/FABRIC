@@ -14,6 +14,7 @@ import TimelineView from './components/TimelineView';
 import SessionReplay from './components/SessionReplay';
 import CostDashboard from './components/CostDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
+import CommandPalette from './components/CommandPalette';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
 
@@ -231,6 +232,7 @@ const ThemeToggle: React.FC = () => {
 };
 
 const App: React.FC = () => {
+  const { toggleTheme, setTheme } = useTheme();
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [selectedWorker, setSelectedWorker] = useState<string | null>(null);
@@ -243,6 +245,8 @@ const App: React.FC = () => {
   const [showFileContext, setShowFileContext] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showCostDashboard, setShowCostDashboard] = useState(false);
   const [selectedTimelineTime, setSelectedTimelineTime] = useState<number | null>(null);
   const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
 
@@ -435,6 +439,84 @@ const App: React.FC = () => {
     presetManager.deletePreset(name);
   }, [presetManager]);
 
+  // Global Cmd+K / Ctrl+K handler
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
+  // Command palette command dispatcher
+  const handleCommandExecute = useCallback((action: string) => {
+    if (action === 'clear') {
+      setSelectedWorker(null);
+      setPinnedWorkers(new Set());
+      setPinnedBeads(new Set());
+      setFocusModeEnabled(false);
+    } else if (action === 'refresh') {
+      window.location.reload();
+    } else if (action === 'theme:toggle') {
+      toggleTheme();
+    } else if (action === 'theme:dark') {
+      setTheme('dark');
+    } else if (action === 'theme:light') {
+      setTheme('light');
+    } else if (action === 'focus:toggle') {
+      setFocusModeEnabled(prev => !prev);
+    } else if (action === 'focus:clear') {
+      setPinnedWorkers(new Set());
+      setPinnedBeads(new Set());
+    } else if (action === 'preset:save') {
+      setShowPresetSaveDialog(true);
+    } else if (action === 'preset:list') {
+      setShowPresetDropdown(true);
+    } else if (action === 'show:heatmap') {
+      setShowFileHeatmap(true);
+    } else if (action === 'show:dag') {
+      setShowDependencyDag(true);
+    } else if (action === 'show:analytics') {
+      setShowAnalytics(true);
+    } else if (action === 'show:recovery') {
+      setShowRecoveryPanel(true);
+    } else if (action === 'show:filecontext') {
+      setShowFileContext(true);
+    } else if (action === 'show:timeline') {
+      setShowTimeline(prev => !prev);
+    } else if (action === 'show:replay') {
+      setShowSessionReplay(true);
+    } else if (action === 'show:crossref') {
+      setShowCrossReference(true);
+    } else if (action === 'show:cost') {
+      setShowCostDashboard(true);
+    } else if (action.startsWith('worker:')) {
+      const workerId = action.slice('worker:'.length);
+      setSelectedWorker(workerId);
+    } else if (action.startsWith('bead:')) {
+      const beadId = action.slice('bead:'.length);
+      togglePinBead(beadId);
+      setFocusModeEnabled(true);
+    } else if (action.startsWith('filter:worker:')) {
+      const workerId = action.slice('filter:worker:'.length);
+      if (workerId) setSelectedWorker(workerId);
+    } else if (action.startsWith('filter:bead:')) {
+      const beadId = action.slice('filter:bead:'.length);
+      if (beadId) {
+        togglePinBead(beadId);
+        setFocusModeEnabled(true);
+      }
+    } else if (action.startsWith('log:')) {
+      // log:workerId — select that worker
+      const workerId = action.slice('log:'.length);
+      if (workerId) setSelectedWorker(workerId);
+    }
+    // filter:level:X — handled by ActivityStream's own filter controls (not wired here)
+  }, [toggleTheme, setTheme, togglePinBead]);
+
   // Timeline time selection handler
   const handleTimelineTimeSelect = useCallback((timestamp: number) => {
     setSelectedTimelineTime(timestamp);
@@ -482,6 +564,14 @@ const App: React.FC = () => {
       <header className="header">
         <h1>FABRIC</h1>
         <div className="header-actions">
+          <button
+            className="command-palette-toggle"
+            onClick={() => setShowCommandPalette(true)}
+            title="Open command palette (Cmd+K / Ctrl+K)"
+          >
+            <span className="command-palette-icon">⌘</span>
+            <span className="command-palette-label">K</span>
+          </button>
           <ThemeToggle />
           <button
             className={`focus-mode-toggle ${focusModeEnabled ? 'active' : ''}`}
@@ -756,6 +846,13 @@ const App: React.FC = () => {
           />
         )}
 
+        {showCostDashboard && (
+          <CostDashboard
+            visible={showCostDashboard}
+            onClose={() => setShowCostDashboard(false)}
+          />
+        )}
+
         {showSessionReplay && (
           <div className="session-replay-panel">
             <div className="session-replay-header">
@@ -792,6 +889,14 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      <CommandPalette
+        visible={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        onCommand={handleCommandExecute}
+        workers={workers}
+        events={events}
+      />
     </div>
   );
 };

@@ -63,23 +63,132 @@ describe('Web Server API Endpoints', () => {
 
       const data = await response.json() as any;
       expect(data.status).toBe('ok');
+      expect(data.uptime_sec).toBeGreaterThanOrEqual(0);
+      expect(data.version).toBeDefined();
+      expect(data.event_count).toBeDefined();
+      expect(data.ingest_rate_per_sec).toBeDefined();
+      expect(data.ws_clients).toBeDefined();
+      expect(data.tailer_files_watched).toBeDefined();
+      expect(data.dedup_dropped).toBeDefined();
+      expect(data.process_resident_memory_bytes).toBeGreaterThan(0);
     });
 
-    it('should include store size', async () => {
+    it('should include event count from store', async () => {
       store.add(createEvent());
       store.add(createEvent());
 
       const response = await fetchApi('/api/health');
       const data = await response.json() as any;
 
-      expect(data.storeSize).toBe(2);
+      expect(data.event_count).toBe(2);
     });
 
-    it('should return 0 store size for empty store', async () => {
+    it('should return 0 event count for empty store', async () => {
       const response = await fetchApi('/api/health');
       const data = await response.json() as any;
 
-      expect(data.storeSize).toBe(0);
+      expect(data.event_count).toBe(0);
+    });
+  });
+
+  describe('GET /api/health overload guard', () => {
+    let overloadServer: WebServer;
+    let overloadPort: number;
+
+    beforeEach(async () => {
+      overloadPort = 32000 + Math.floor(Math.random() * 1000);
+      overloadServer = createWebServer({
+        port: overloadPort,
+        logPath: '/tmp/test-logs',
+        store,
+        maxEventCount: 2,
+      });
+      await new Promise<void>((resolve) => {
+        overloadServer.on('start', () => resolve());
+        overloadServer.start();
+      });
+    });
+
+    afterEach(async () => {
+      await new Promise<void>((resolve) => {
+        overloadServer.on('stop', () => resolve());
+        overloadServer.stop();
+      });
+    });
+
+    it('should return 200 ok when store is within limit', async () => {
+      store.add(createEvent());
+
+      const response = await fetch(`http://localhost:${overloadPort}/api/health`);
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data.status).toBe('ok');
+    });
+
+    it('should return 503 overloaded when store exceeds maxEventCount', async () => {
+      store.add(createEvent());
+      store.add(createEvent());
+      store.add(createEvent()); // exceeds maxEventCount=2
+
+      const response = await fetch(`http://localhost:${overloadPort}/api/health`);
+      expect(response.status).toBe(503);
+      const data = await response.json() as any;
+      expect(data.status).toBe('overloaded');
+      expect(data.event_count).toBe(3);
+    });
+
+    it('metrics should reflect overloaded status as fabric_status 0', async () => {
+      store.add(createEvent());
+      store.add(createEvent());
+      store.add(createEvent()); // exceeds maxEventCount=2
+
+      const response = await fetch(`http://localhost:${overloadPort}/api/metrics`);
+      const text = await response.text();
+      expect(text).toContain('fabric_status 0');
+    });
+  });
+
+  describe('GET /api/metrics', () => {
+    it('should return Prometheus text format', async () => {
+      const response = await fetchApi('/api/metrics');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/plain');
+
+      const text = await response.text();
+      expect(text).toContain('# HELP fabric_status');
+      expect(text).toContain('# TYPE fabric_status gauge');
+      expect(text).toContain('fabric_status 1');
+      expect(text).toContain('fabric_uptime_seconds');
+      expect(text).toContain('fabric_info{version=');
+      expect(text).toContain('fabric_event_count');
+      expect(text).toContain('fabric_ingest_rate_per_second');
+      expect(text).toContain('fabric_websocket_clients');
+      expect(text).toContain('fabric_tailer_files_watched');
+      expect(text).toContain('fabric_dedup_dropped_total');
+      expect(text).toContain('fabric_process_resident_memory_bytes');
+    });
+
+    it('should include event count from store', async () => {
+      store.add(createEvent());
+      store.add(createEvent());
+      store.add(createEvent());
+
+      const response = await fetchApi('/api/metrics');
+      const text = await response.text();
+
+      expect(text).toContain('fabric_event_count 3');
+    });
+
+    it('should have valid Prometheus metric names', async () => {
+      const response = await fetchApi('/api/metrics');
+      const text = await response.text();
+      const lines = text.split('\n').filter(l => l && !l.startsWith('#'));
+
+      for (const line of lines) {
+        const match = line.match(/^(fabric_\w+)/);
+        expect(match).toBeTruthy();
+        expect(match![1]).toMatch(/^fabric_[a-z_]+$/);
+      }
     });
   });
 
