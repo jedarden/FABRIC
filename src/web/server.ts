@@ -13,11 +13,13 @@ import { createSocket } from 'dgram';
 import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
+import { SemanticNarrativeGenerator } from '../semanticNarrative.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
 import { normalizeToLogEvent, EventDeduplicator } from '../normalizer.js';
 import { computeFleetAnalytics } from '../analytics.js';
 import { createOtlpHttpRouter } from '../otlpHttpReceiver.js';
 import { ServerMetrics } from '../serverMetrics.js';
+import { SessionDigestGenerator, formatDigestAsMarkdown } from '../sessionDigest.js';
 
 /** Maximum payload size for POST requests (64KB) */
 const MAX_PAYLOAD_SIZE = 64 * 1024;
@@ -726,6 +728,19 @@ export function createWebServer(options: WebServerOptions): WebServer {
       try {
         const analytics = computeFleetAnalytics();
         res.json(analytics);
+      } catch (err) {
+        res.status(500).json({ error: String(err) });
+      }
+    });
+
+    app.get('/api/digest', (req: Request, res: Response) => {
+      try {
+        const generator = new SessionDigestGenerator(store);
+        const opts: Record<string, unknown> = {};
+        if (req.query.startTime) opts.startTime = Number(req.query.startTime);
+        if (req.query.endTime) opts.endTime = Number(req.query.endTime);
+        const digest = generator.generateDigest(opts);
+        res.json(digest);
       } catch (err) {
         res.status(500).json({ error: String(err) });
       }

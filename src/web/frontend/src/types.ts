@@ -515,6 +515,71 @@ export interface SimilarError {
 // Conversation Transcript Types
 // ============================================
 
+// ============================================
+// Session Digest Types
+// ============================================
+
+export interface DigestBeadCompletion {
+  beadId: string;
+  workerId: string;
+  completedAt: number;
+  durationMs?: number;
+}
+
+export interface DigestFileModification {
+  path: string;
+  modifications: number;
+  workers: string[];
+  tools: string[];
+}
+
+export interface DigestErrorOccurrence {
+  message: string;
+  category: ErrorCategory;
+  workerId: string;
+  timestamp: number;
+  fingerprint?: string;
+}
+
+export interface DigestWorkerSummary {
+  workerId: string;
+  beadsCompleted: number;
+  filesModified: number;
+  errorsEncountered: number;
+  totalEvents: number;
+  activeTimeMs: number;
+  firstActivity: number;
+  lastActivity: number;
+}
+
+export interface SessionDigestData {
+  sessionId: string;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  beadsCompleted: DigestBeadCompletion[];
+  filesModified: DigestFileModification[];
+  errors: DigestErrorOccurrence[];
+  workers: DigestWorkerSummary[];
+  cost: {
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+  };
+  stats: {
+    totalEvents: number;
+    totalWorkers: number;
+    totalBeads: number;
+    totalFiles: number;
+    totalErrors: number;
+    avgEventsPerWorker: number;
+    avgBeadsPerWorker: number;
+  };
+}
+
+export type DigestTab = 'summary' | 'beads' | 'files' | 'errors' | 'workers';
+
 export type ConversationTurnRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface ConversationTurn {

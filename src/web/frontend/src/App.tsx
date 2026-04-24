@@ -16,6 +16,7 @@ import CostDashboard from './components/CostDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import ErrorGroupPanel from './components/ErrorGroupPanel';
 import BudgetAlertPanel, { BudgetBanner } from './components/BudgetAlertPanel';
+import SessionDigestPanel from './components/SessionDigestPanel';
 import CommandPalette from './components/CommandPalette';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
@@ -251,6 +252,7 @@ const App: React.FC = () => {
   const [showCostDashboard, setShowCostDashboard] = useState(false);
   const [showErrorGroups, setShowErrorGroups] = useState(false);
   const [showBudgetAlert, setShowBudgetAlert] = useState(false);
+  const [showSessionDigest, setShowSessionDigest] = useState(false);
   const [budgetBannerDismissed, setBudgetBannerDismissed] = useState(false);
 
   // Budget alert state polled from /api/cost/summary
@@ -527,6 +529,8 @@ const App: React.FC = () => {
       setShowErrorGroups(true);
     } else if (action === 'show:budget') {
       setShowBudgetAlert(true);
+    } else if (action === 'show:digest') {
+      setShowSessionDigest(true);
     } else if (action.startsWith('worker:')) {
       const workerId = action.slice('worker:'.length);
       setSelectedWorker(workerId);
@@ -790,6 +794,14 @@ const App: React.FC = () => {
               <span className="budget-alert-badge">!</span>
             )}
           </button>
+          <button
+            className={`digest-toggle ${showSessionDigest ? 'active' : ''}`}
+            onClick={() => setShowSessionDigest(!showSessionDigest)}
+            title="Generate session digest"
+          >
+            <span className="digest-toggle-icon">📋</span>
+            <span className="digest-toggle-label">Digest</span>
+          </button>
           {unacknowledgedAlertCount > 0 && (
             <button
               className="collision-alert-toggle"
@@ -937,6 +949,13 @@ const App: React.FC = () => {
           <ErrorGroupPanel
             visible={showErrorGroups}
             onClose={() => setShowErrorGroups(false)}
+          />
+        )}
+
+        {showSessionDigest && (
+          <SessionDigestPanel
+            visible={showSessionDigest}
+            onClose={() => setShowSessionDigest(false)}
           />
         )}
 
