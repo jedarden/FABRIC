@@ -580,6 +580,100 @@ export interface SessionDigestData {
 
 export type DigestTab = 'summary' | 'beads' | 'files' | 'errors' | 'workers';
 
+// ============================================
+// Git Integration Types
+// ============================================
+
+export type GitFileStatus =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'copied'
+  | 'untracked'
+  | 'unmerged';
+
+export interface GitFileChange {
+  path: string;
+  status: GitFileStatus;
+  originalPath?: string;
+  staged: boolean;
+}
+
+export interface GitStatusEvent {
+  id: string;
+  type: 'status';
+  ts: number;
+  worker: string;
+  bead?: string;
+  branch: string;
+  commit?: string;
+  staged: GitFileChange[];
+  unstaged: GitFileChange[];
+  untracked: string[];
+  ahead?: number;
+  behind?: number;
+  tracking?: string;
+}
+
+export interface GitCommitEvent {
+  id: string;
+  type: 'commit';
+  ts: number;
+  worker: string;
+  bead?: string;
+  hash: string;
+  message: string;
+  branch?: string;
+  author?: string;
+  email?: string;
+  parents?: string[];
+  files?: GitFileChange[];
+}
+
+export interface PRFileChange extends GitFileChange {
+  linesAdded: number;
+  linesDeleted: number;
+  worker?: string;
+}
+
+export interface PotentialConflict {
+  hasUpstreamCommits: boolean;
+  upstreamCommitCount: number;
+  conflictingFiles: string[];
+  rebaseRecommended: boolean;
+  rebaseReason?: string;
+}
+
+export interface PRPreview {
+  title: string;
+  description: string;
+  commitMessage: string;
+  files: PRFileChange[];
+  totalLinesAdded: number;
+  totalLinesDeleted: number;
+  filesChanged: number;
+  conflicts: PotentialConflict;
+  sourceBranch: string;
+  targetBranch: string;
+  ahead: number;
+  behind: number;
+  hasUncommittedChanges: boolean;
+  generatedAt: number;
+}
+
+export interface GitStatusResponse {
+  status: GitStatusEvent | null;
+  commits: GitCommitEvent[];
+  prPreview: PRPreview | null;
+  hasConflicts: boolean;
+  fileWorkerMap: Record<string, string[]>;
+  totalGitEvents: number;
+  updatedAt: number;
+}
+
+export type GitViewMode = 'status' | 'pr-preview' | 'diff';
+
 export type ConversationTurnRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface ConversationTurn {
@@ -596,4 +690,77 @@ export interface ConversationTurn {
   success?: boolean;
   sequence?: number;
   meta?: Record<string, unknown>;
+}
+
+// ============================================
+// Semantic Narrative Types
+// ============================================
+
+export type EventPattern =
+  | 'bead_started'
+  | 'bead_completed'
+  | 'file_editing'
+  | 'file_created'
+  | 'testing'
+  | 'debugging'
+  | 'git_operations'
+  | 'dependency_install'
+  | 'collision_detected'
+  | 'error_recovery'
+  | 'iteration'
+  | 'investigation'
+  | 'tool_usage'
+  | 'error_handling'
+  | 'task_completion'
+  | 'exploration'
+  | 'planning'
+  | 'research';
+
+export type NarrativeSentiment = 'productive' | 'struggling' | 'mixed' | 'idle';
+
+export interface NarrativeSegmentView {
+  id: string;
+  pattern: EventPattern;
+  summary: string;
+  details?: string;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  workerId: string;
+  beadId?: string;
+  entities: {
+    files?: string[];
+    tools?: string[];
+    beads?: string[];
+    errors?: string[];
+  };
+  confidence: number;
+  isActive: boolean;
+  eventCount: number;
+}
+
+export interface SemanticNarrativeView {
+  id: string;
+  workerId: string;
+  title: string;
+  summary: string;
+  segments: NarrativeSegmentView[];
+  fullNarrative: string;
+  timeline: string[];
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  accomplishments: string[];
+  challenges: string[];
+  sentiment: NarrativeSentiment;
+  stats: {
+    totalEvents: number;
+    segmentCount: number;
+    beadsWorked: number;
+    filesModified: number;
+    errorsEncountered: number;
+    toolsUsed: number;
+  };
+  generatedAt: number;
+  isLive: boolean;
 }

@@ -11,7 +11,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createSocket } from 'dgram';
 import { WebSocketServer, WebSocket } from 'ws';
-import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus } from '../types.js';
+import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus, SemanticNarrative, NarrativeSegment } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { SemanticNarrativeGenerator } from '../semanticNarrative.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
@@ -20,6 +20,8 @@ import { computeFleetAnalytics } from '../analytics.js';
 import { createOtlpHttpRouter } from '../otlpHttpReceiver.js';
 import { ServerMetrics } from '../serverMetrics.js';
 import { SessionDigestGenerator, formatDigestAsMarkdown } from '../sessionDigest.js';
+import { parseGitEvents } from '../gitParser.js';
+import { generatePRPreview } from '../tui/utils/prPreview.js';
 
 /** Maximum payload size for POST requests (64KB) */
 const MAX_PAYLOAD_SIZE = 64 * 1024;
@@ -451,6 +453,72 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // ============================================
+    // Git Integration API Endpoints
+    // ============================================
+
+    // Get live git status derived from ingested log events
+    app.get('/api/git/status', (req: Request, res: Response) => {
+      try {
+        const workerFilter = req.query.worker as string | undefined;
+        const limit = req.query.limit ? parseInt(req.query.limit as string) : 500;
+
+        // Fetch events and parse git events from them
+        const filter: EventFilter = {};
+        if (workerFilter) filter.worker = workerFilter;
+        const allEvents = store.query(filter).slice(-limit);
+        const gitEvents = parseGitEvents(allEvents);
+
+        // Extract latest status event
+        const statusEvents = gitEvents.filter(e => e.type === 'status');
+        const currentStatus = statusEvents.length > 0 ? statusEvents[statusEvents.length - 1] : null;
+
+        // Extract recent commits
+        const commitEvents = gitEvents.filter(e => e.type === 'commit');
+        const recentCommits = commitEvents.slice(-10);
+
+        // Check for conflicts (unmerged files in staged/unstaged)
+        let hasConflicts = false;
+        if (currentStatus && currentStatus.type === 'status') {
+          hasConflicts =
+            currentStatus.staged.some(f => f.status === 'unmerged') ||
+            currentStatus.unstaged.some(f => f.status === 'unmerged');
+        }
+
+        // Build worker attribution map: file path → worker IDs
+        const fileWorkerMap: Record<string, string[]> = {};
+        for (const event of gitEvents) {
+          if (event.type === 'status' && event.type === 'status') {
+            for (const file of [...event.staged, ...event.unstaged]) {
+              if (!fileWorkerMap[file.path]) fileWorkerMap[file.path] = [];
+              if (!fileWorkerMap[file.path].includes(event.worker)) {
+                fileWorkerMap[file.path].push(event.worker);
+              }
+            }
+          }
+        }
+
+        // Generate PR preview
+        const prPreview = gitEvents.length > 0 ? generatePRPreview(gitEvents) : null;
+
+        res.json({
+          status: currentStatus,
+          commits: recentCommits,
+          prPreview,
+          hasConflicts,
+          fileWorkerMap,
+          totalGitEvents: gitEvents.length,
+          updatedAt: Date.now(),
+        });
+      } catch (error) {
+        console.error('Error generating git status:', error);
+        res.status(500).json({
+          error: 'Failed to generate git status',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
+    // ============================================
     // Cross-Reference API Endpoints
     // ============================================
 
@@ -743,6 +811,71 @@ export function createWebServer(options: WebServerOptions): WebServer {
         res.json(digest);
       } catch (err) {
         res.status(500).json({ error: String(err) });
+      }
+    });
+
+    // ============================================
+    // Semantic Narrative API Endpoints
+    // ============================================
+
+    function serializeNarrative(narrative: SemanticNarrative) {
+      return {
+        ...narrative,
+        segments: narrative.segments.map((s: NarrativeSegment) => ({
+          id: s.id,
+          pattern: s.pattern,
+          summary: s.summary,
+          details: s.details,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          durationMs: s.durationMs,
+          workerId: s.workerId,
+          beadId: s.beadId,
+          entities: s.entities,
+          confidence: s.confidence,
+          isActive: s.isActive,
+          eventCount: s.events.length,
+        })),
+      };
+    }
+
+    // Get narratives for all active workers
+    app.get('/api/narrative', (_req: Request, res: Response) => {
+      try {
+        const workers = store.getWorkers().filter(w => w.status === 'active');
+        const narratives = [];
+
+        for (const worker of workers) {
+          const events = store.query({ worker: worker.id });
+          if (events.length === 0) continue;
+
+          const generator = new SemanticNarrativeGenerator();
+          events.forEach(e => generator.processEvent(e));
+          const narrative = generator.generateNarrative(worker.id);
+          narratives.push(serializeNarrative(narrative));
+        }
+
+        res.json(narratives);
+      } catch (err) {
+        console.error('Error generating narratives:', err);
+        res.status(500).json({ error: 'Failed to generate narratives' });
+      }
+    });
+
+    // Get narrative for a specific worker
+    app.get('/api/narrative/:workerId', (req: Request, res: Response) => {
+      try {
+        const workerId = req.params.workerId as string;
+        const events = store.query({ worker: workerId });
+
+        const generator = new SemanticNarrativeGenerator();
+        events.forEach(e => generator.processEvent(e));
+        const narrative = generator.generateNarrative(workerId);
+
+        res.json(serializeNarrative(narrative));
+      } catch (err) {
+        console.error('Error generating narrative:', err);
+        res.status(500).json({ error: 'Failed to generate narrative' });
       }
     });
 

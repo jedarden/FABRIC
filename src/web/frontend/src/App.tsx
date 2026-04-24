@@ -15,8 +15,10 @@ import SessionReplay from './components/SessionReplay';
 import CostDashboard from './components/CostDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import ErrorGroupPanel from './components/ErrorGroupPanel';
+import SemanticNarrativePanel from './components/SemanticNarrativePanel';
 import BudgetAlertPanel, { BudgetBanner } from './components/BudgetAlertPanel';
 import SessionDigestPanel from './components/SessionDigestPanel';
+import GitIntegrationPanel from './components/GitIntegrationPanel';
 import CommandPalette from './components/CommandPalette';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
@@ -253,6 +255,8 @@ const App: React.FC = () => {
   const [showErrorGroups, setShowErrorGroups] = useState(false);
   const [showBudgetAlert, setShowBudgetAlert] = useState(false);
   const [showSessionDigest, setShowSessionDigest] = useState(false);
+  const [showGitIntegration, setShowGitIntegration] = useState(false);
+  const [showNarrative, setShowNarrative] = useState(false);
   const [budgetBannerDismissed, setBudgetBannerDismissed] = useState(false);
 
   // Budget alert state polled from /api/cost/summary
@@ -531,6 +535,10 @@ const App: React.FC = () => {
       setShowBudgetAlert(true);
     } else if (action === 'show:digest') {
       setShowSessionDigest(true);
+    } else if (action === 'show:git') {
+      setShowGitIntegration(true);
+    } else if (action === 'show:narrative') {
+      setShowNarrative(true);
     } else if (action.startsWith('worker:')) {
       const workerId = action.slice('worker:'.length);
       setSelectedWorker(workerId);
@@ -802,6 +810,22 @@ const App: React.FC = () => {
             <span className="digest-toggle-icon">📋</span>
             <span className="digest-toggle-label">Digest</span>
           </button>
+          <button
+            className={`git-toggle ${showGitIntegration ? 'active' : ''}`}
+            onClick={() => setShowGitIntegration(!showGitIntegration)}
+            title="Git integration — live status for watched repo"
+          >
+            <span className="git-toggle-icon">&#x2335;</span>
+            <span className="git-toggle-label">Git</span>
+          </button>
+          <button
+            className={`narrative-toggle ${showNarrative ? 'active' : ''}`}
+            onClick={() => setShowNarrative(!showNarrative)}
+            title="Semantic narrative — natural language description of worker activity"
+          >
+            <span className="narrative-toggle-icon">&#x1F4DD;</span>
+            <span className="narrative-toggle-label">Narrative</span>
+          </button>
           {unacknowledgedAlertCount > 0 && (
             <button
               className="collision-alert-toggle"
@@ -956,6 +980,13 @@ const App: React.FC = () => {
           <SessionDigestPanel
             visible={showSessionDigest}
             onClose={() => setShowSessionDigest(false)}
+          />
+        )}
+
+        {showNarrative && (
+          <SemanticNarrativePanel
+            visible={showNarrative}
+            onClose={() => setShowNarrative(false)}
           />
         )}
 

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { WorkerInfo, LogEvent, NeedleState } from '../types';
 import ConversationTranscriptPanel from './ConversationTranscriptPanel';
+import { WorkerNarrativeInline } from './SemanticNarrativePanel';
 import { logEventsToTurns } from '../utils/conversationTurns';
 
 const NEEDLE_STATE_ICONS: Record<NeedleState, string> = {
@@ -21,7 +22,7 @@ const NEEDLE_STATE_COLORS: Record<NeedleState, string> = {
   STOPPED: '#777',
 };
 
-type WorkerTab = 'overview' | 'conversation';
+type WorkerTab = 'overview' | 'conversation' | 'narrative';
 
 interface WorkerDetailProps {
   worker: WorkerInfo;
@@ -114,6 +115,12 @@ const WorkerDetail: React.FC<WorkerDetailProps> = ({
           {conversationTurns.length > 0 && (
             <span className="worker-detail-tab-count">{conversationTurns.length}</span>
           )}
+        </button>
+        <button
+          className={`worker-detail-tab ${activeTab === 'narrative' ? 'active' : ''}`}
+          onClick={() => setActiveTab('narrative')}
+        >
+          Narrative
         </button>
       </div>
 
@@ -213,6 +220,10 @@ const WorkerDetail: React.FC<WorkerDetailProps> = ({
 
         {activeTab === 'conversation' && (
           <ConversationTranscriptPanel turns={conversationTurns} highlightSequence={highlightSequence} />
+        )}
+
+        {activeTab === 'narrative' && (
+          <WorkerNarrativeInline workerId={worker.id} />
         )}
       </div>
     </aside>
