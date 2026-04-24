@@ -483,6 +483,31 @@ program
   });
 
 program
+  .command('prune')
+  .description('Prune old NEEDLE log files (archive + delete)')
+  .option('--source <path>', 'Log directory to prune (default: ~/.needle/logs)')
+  .option('--archive-after <days>', 'Archive files older than N days', '3')
+  .option('--archive-retain <days>', 'Delete archives older than N days', '30')
+  .option('--max-age <days>', 'Delete files older than N days regardless', '7')
+  .option('--dry-run', 'Report what would happen without making changes')
+  .action(async (options) => {
+    const { pruneLogs, formatPruneResult } = await import('./logPruner.js');
+    const logDir = options.source
+      ? (options.source.startsWith('~') ? options.source.replace('~', HOME) : options.source)
+      : `${HOME}/.needle/logs`;
+
+    const result = pruneLogs({
+      logDir,
+      archiveAfterDays: parseInt(options.archiveAfter, 10) || 3,
+      archiveRetentionDays: parseInt(options.archiveRetain, 10) || 30,
+      maxAgeDays: parseInt(options.maxAge, 10) || 7,
+      dryRun: !!options.dryRun,
+    });
+
+    console.log(formatPruneResult(result, !!options.dryRun));
+  });
+
+program
   .command('digest')
   .description('Generate session digest from log file')
   .option('-f, --file <path>', 'Log file to analyze', '~/.needle/logs/workers.log')

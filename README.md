@@ -171,6 +171,38 @@ fabric logs --worker tcb-a --otlp-grpc :4317
 
 Everything stays on your machine — FABRIC is a local collector, not a third-party service. Telemetry is read-only: FABRIC ingests spans/logs/metrics for display but never writes back to NEEDLE or modifies worker state.
 
+## Log Retention (`fabric prune`)
+
+`~/.needle/logs/` grows unbounded as NEEDLE workers create telemetry JSONL and stderr logs. `fabric prune` enforces a retention policy:
+
+```bash
+# Run with defaults (archive after 3 days, hard delete after 7 days)
+fabric prune
+
+# Dry run — see what would happen
+fabric prune --dry-run
+
+# Custom retention
+fabric prune --archive-after 5 --max-age 14 --archive-retain 60
+
+# Prune a different directory
+fabric prune --source /path/to/logs
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--archive-after` | 3 days | Archive files older than this into `~/.needle/logs/archive/YYYY-MM-DD.tar.gz` |
+| `--max-age` | 7 days | Hard delete files older than this (safety net) |
+| `--archive-retain` | 30 days | Delete archive tarballs older than this |
+| `--dry-run` | off | Report what would happen without making changes |
+
+The pruner emits `mend.logs_pruned` events to `~/.needle/logs/fabric-mend.jsonl`, visible to FABRIC's directory tailer. Run via cron for automatic retention:
+
+```bash
+# Daily at 03:17
+17 3 * * * ~/.local/bin/fabric prune
+```
+
 ## Production Deployment
 
 FABRIC runs as a user-level systemd service (`fabric-web.service`) with OTLP/HTTP enabled:
