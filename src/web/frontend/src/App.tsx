@@ -258,6 +258,7 @@ const App: React.FC = () => {
     budget: { limit: number; spent: number; percentUsed: number; isOverBudget: boolean; warningLevel: 'none' | 'warning' | 'critical'; remaining: number };
     burnRate: { costPerMinute: number; minutesToExhaustion: number | null; timeToExhaustion: string | null; projectedTotalCost: number; windowMinutes: number; isHighBurnRate: boolean };
   } | null>(null);
+  const [highlightSequence, setHighlightSequence] = useState<number | null>(null);
   const [selectedTimelineTime, setSelectedTimelineTime] = useState<number | null>(null);
   const [recoverySuggestions, setRecoverySuggestions] = useState<RecoverySuggestion[]>([]);
 
@@ -557,6 +558,16 @@ const App: React.FC = () => {
     setTimeout(() => setSelectedTimelineTime(null), 5000);
   }, []);
 
+  // Activity stream → conversation sync: clicking an event selects the worker
+  // and highlights the corresponding turn in the conversation view
+  const handleEventSelect = useCallback((event: LogEvent) => {
+    setSelectedWorker(event.worker);
+    if (event.sequence != null) {
+      setHighlightSequence(event.sequence);
+      setTimeout(() => setHighlightSequence(null), 4000);
+    }
+  }, []);
+
   // Filter workers and events based on Focus Mode
   const filteredWorkers = focusModeEnabled && pinnedWorkers.size > 0
     ? workers.filter(w => pinnedWorkers.has(w.id))
@@ -845,6 +856,7 @@ const App: React.FC = () => {
           onTogglePinBead={togglePinBead}
           focusModeEnabled={focusModeEnabled}
           selectedTimelineTime={selectedTimelineTime}
+          onEventSelect={handleEventSelect}
         />
 
         {selectedWorkerInfo && (
@@ -852,6 +864,7 @@ const App: React.FC = () => {
             worker={selectedWorkerInfo}
             onClose={() => setSelectedWorker(null)}
             allWorkerEvents={selectedWorker ? filteredEvents : undefined}
+            highlightSequence={highlightSequence}
           />
         )}
 

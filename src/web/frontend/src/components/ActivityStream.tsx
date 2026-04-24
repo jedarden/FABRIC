@@ -11,6 +11,7 @@ interface ActivityStreamProps {
   onTogglePinBead?: (beadId: string) => void;
   focusModeEnabled?: boolean;
   selectedTimelineTime?: number | null;
+  onEventSelect?: (event: LogEvent) => void;
 }
 
 const ActivityStream: React.FC<ActivityStreamProps> = ({
@@ -22,6 +23,7 @@ const ActivityStream: React.FC<ActivityStreamProps> = ({
   onTogglePinBead,
   focusModeEnabled = false,
   selectedTimelineTime,
+  onEventSelect,
 }) => {
   const listRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = React.useState<ActivityFilter>({});
@@ -193,6 +195,8 @@ const ActivityStream: React.FC<ActivityStreamProps> = ({
                 <div
                   key={`${event.timestamp}-${i}`}
                   className={`event-item ${eventBeadPinned ? 'bead-pinned' : ''}`}
+                  onClick={() => onEventSelect?.(event)}
+                  style={{ cursor: onEventSelect ? 'pointer' : 'default' }}
                 >
                   <span className="event-time">{formatTime(event.timestamp)}</span>
                   <span className={`event-level ${event.level}`}>{event.level}</span>

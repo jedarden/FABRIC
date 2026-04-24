@@ -435,7 +435,7 @@ describe('WorkerDetail', () => {
 
       render(<WorkerDetail worker={worker} onClose={mockOnClose} />);
 
-      const closeButton = screen.getByRole('button');
+      const closeButton = screen.getByTitle('Close details');
       expect(closeButton).toHaveAttribute('title', 'Close details');
     });
 
