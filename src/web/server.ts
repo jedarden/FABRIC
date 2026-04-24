@@ -9,6 +9,7 @@ import { createServer, Server as HttpServer } from 'http';
 import { EventEmitter } from 'events';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { createSocket } from 'dgram';
 import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
@@ -25,6 +26,21 @@ const MAX_PAYLOAD_SIZE = 64 * 1024;
 const MAX_BATCH_SIZE = 100;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** Send a systemd sd_notify message via the NOTIFY_SOCKET Unix datagram socket. */
+function sdNotify(state: string): void {
+  const socketPath = process.env.NOTIFY_SOCKET;
+  if (!socketPath) return;
+  try {
+    const client = createSocket('unix_dgram');
+    const msg = Buffer.from(state);
+    // Abstract sockets start with '@' in systemd notation; replace with '\0'
+    const addr = socketPath.startsWith('@') ? '\0' + socketPath.slice(1) : socketPath;
+    client.send(msg, 0, msg.length, addr, () => client.close());
+  } catch {
+    // Never crash the server due to a notify failure
+  }
+}
 
 export interface WebServerOptions {
   port: number;
@@ -679,6 +695,17 @@ export function createWebServer(options: WebServerOptions): WebServer {
         );
       }
       console.log('Press Ctrl+C to stop');
+
+      // Notify systemd that the service is ready (Type=notify)
+      sdNotify('READY=1\nSTATUS=FABRIC running\n');
+
+      // Watchdog keepalives: ping at half the configured interval
+      const watchdogUsec = parseInt(process.env.WATCHDOG_USEC ?? '0', 10);
+      if (watchdogUsec > 0) {
+        const intervalMs = Math.floor(watchdogUsec / 2 / 1000);
+        setInterval(() => sdNotify('WATCHDOG=1'), intervalMs);
+      }
+
       emitter.emit('start');
     });
 
