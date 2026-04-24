@@ -127,6 +127,33 @@ curl -X POST http://localhost:3000/api/events \
 
 If no auth token is configured, all POST requests are accepted without authentication (suitable for local-only use).
 
+#### Token rotation
+
+To rotate `FABRIC_AUTH_TOKEN` with zero dropped events:
+
+```bash
+# 1. Generate a new token
+NEW_TOKEN=$(openssl rand -hex 32)
+
+# 2. Write it to the secrets file (0600 — not readable by other users)
+install -m 0600 /dev/null ~/.config/fabric/secrets.env
+echo "FABRIC_AUTH_TOKEN=${NEW_TOKEN}" > ~/.config/fabric/secrets.env
+
+# 3. Update ~/.needle/config.yaml if the old token was hard-coded there
+#    (if using ${FABRIC_AUTH_TOKEN} substitution, no change needed)
+
+# 4. Restart the service so FABRIC picks up the new token
+systemctl --user restart fabric-web
+
+# 5. Confirm the service is using the new token
+systemctl --user status fabric-web
+curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/events \
+  -X POST -H 'Content-Type: application/json' -d '{}'
+# Expected: 401 (auth enforced)
+```
+
+NEEDLE workers reload their config on the next task start — no restart needed on the worker side when `auth_token: "${FABRIC_AUTH_TOKEN}"` is used.
+
 ### Option 2: OTLP (recommended for multi-host or production)
 
 NEEDLE ships with an `otlp` feature (enabled by default in `Cargo.toml`) that exports telemetry over the standard OpenTelemetry OTLP protocol. No rebuild or extra flags are needed — just set two environment variables before launching workers:

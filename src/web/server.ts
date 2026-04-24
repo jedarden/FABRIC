@@ -633,6 +633,13 @@ export function createWebServer(options: WebServerOptions): WebServer {
       console.log(`FABRIC Web Dashboard running at http://localhost:${port}`);
       console.log(`API: http://localhost:${port}/api/`);
       console.log(`Watching: ${logPath}`);
+      if (!authToken) {
+        console.warn(
+          'WARNING: FABRIC_AUTH_TOKEN is not set. ' +
+          'POST /api/events is unauthenticated and accepts events from any process. ' +
+          'Set FABRIC_AUTH_TOKEN (or --auth-token) before exposing FABRIC outside localhost.'
+        );
+      }
       console.log('Press Ctrl+C to stop');
       emitter.emit('start');
     });
