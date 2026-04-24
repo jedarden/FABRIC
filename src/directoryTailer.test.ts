@@ -187,4 +187,124 @@ describe('DirectoryTailer', () => {
     const err = await errorPromise;
     expect(err.message).toContain('Directory not found');
   });
+
+  it('caps active-file count and inotify watches with many files', async () => {
+    const COUNT = 10_000;
+    const MAX_ACTIVE = 100;
+
+    // Create COUNT empty *.jsonl files synchronously.
+    for (let i = 0; i < COUNT; i++) {
+      fs.writeFileSync(path.join(tempDir, `worker-${String(i).padStart(5, '0')}.jsonl`), '');
+    }
+
+    const tailer = new DirectoryTailer({
+      directory: tempDir,
+      maxActiveFiles: MAX_ACTIVE,
+      recentMtimeMs: 86_400_000,
+    });
+
+    tailer.start();
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // Active set must be bounded.
+    expect(tailer.activeFiles.length).toBeLessThanOrEqual(MAX_ACTIVE);
+    // All files must be tracked in fileInfo.
+    expect(tailer.knownFileCount).toBe(COUNT);
+
+    // On Linux, each fs.FSWatcher corresponds to one inotify watch.  Check the
+    // open-fd count as a proxy (Node.js uses one inotify fd shared by all
+    // watches, so the actual fd count stays very small regardless of watch count,
+    // but inotify watches are bounded by maxActiveFiles + 1 for the dir watcher).
+    if (fs.existsSync('/proc/self/fd')) {
+      const fdCount = fs.readdirSync('/proc/self/fd').length;
+      // Generous ceiling: baseline fds (~20) + MAX_ACTIVE + dir watcher + some slack.
+      expect(fdCount).toBeLessThan(MAX_ACTIVE + 60);
+    }
+
+    tailer.stop();
+  }, 60_000);
+
+  it('evicts LRU and re-activates a file on mtime change', async () => {
+    // maxActiveFiles=2 with 3 files forces an eviction.
+    const fileA = path.join(tempDir, 'a.jsonl');
+    const fileB = path.join(tempDir, 'b.jsonl');
+    const fileC = path.join(tempDir, 'c.jsonl');
+
+    fs.writeFileSync(fileA, '');
+    fs.writeFileSync(fileB, '');
+    fs.writeFileSync(fileC, '');
+
+    const tailer = new DirectoryTailer({
+      directory: tempDir,
+      maxActiveFiles: 2,
+      recentMtimeMs: 86_400_000,
+      inactiveCheckIntervalMs: 200, // fast poll for test
+    });
+
+    const received: string[] = [];
+    tailer.on('event', (event) => {
+      received.push(event.msg);
+    });
+
+    tailer.start();
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Only 2 of 3 files should be active.
+    expect(tailer.activeFiles.length).toBe(2);
+
+    // Find the evicted file and write content to it.
+    const evicted = [fileA, fileB, fileC].find(
+      (f) => !tailer.activeFiles.includes(f),
+    )!;
+    expect(evicted).toBeDefined();
+
+    // Append an event to the evicted file — the poll should re-activate it.
+    fs.appendFileSync(evicted, makeEvent('w-evicted', 'reactivated-event', 1) + '\n');
+
+    // Wait for the poll interval to fire and re-activate.
+    await new Promise((r) => setTimeout(r, 800));
+
+    tailer.stop();
+
+    expect(received).toContain('reactivated-event');
+  });
+
+  it('resumes from saved position when a file is re-activated after eviction', async () => {
+    const fileA = path.join(tempDir, 'a.jsonl');
+    const fileB = path.join(tempDir, 'b.jsonl');
+
+    fs.writeFileSync(fileA, makeEvent('w-a', 'before-eviction', 1) + '\n');
+    fs.writeFileSync(fileB, '');
+
+    // maxActiveFiles=1 so opening fileB will evict fileA.
+    const tailer = new DirectoryTailer({
+      directory: tempDir,
+      maxActiveFiles: 1,
+      recentMtimeMs: 86_400_000,
+      inactiveCheckIntervalMs: 200,
+    });
+
+    const received: string[] = [];
+    tailer.on('event', (event) => received.push(event.msg));
+
+    tailer.start();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Exactly one file is active; the other is inactive.
+    expect(tailer.activeFiles.length).toBe(1);
+
+    // Write to the inactive file to trigger re-activation.
+    const inactive = tailer.activeFiles[0] === fileA ? fileB : fileA;
+    fs.appendFileSync(inactive, makeEvent('w-inactive', 'after-reactivation', 2) + '\n');
+
+    await new Promise((r) => setTimeout(r, 800));
+    tailer.stop();
+
+    // The event written after re-activation must have been received.
+    expect(received).toContain('after-reactivation');
+    // The event written before eviction (to fileA at start time) should NOT
+    // have been re-emitted when fileA was re-activated (position is checkpointed).
+    const beforeCount = received.filter((m) => m === 'before-eviction').length;
+    expect(beforeCount).toBe(0);
+  });
 });

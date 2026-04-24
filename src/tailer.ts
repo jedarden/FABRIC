@@ -25,6 +25,14 @@ export interface TailerOptions {
 
   /** Shared deduplicator for cross-source dedup (JSONL + OTLP). */
   deduplicator?: EventDeduplicator;
+
+  /**
+   * Start reading from this byte offset instead of end-of-file.
+   * When set, any content between startPosition and current EOF is read
+   * immediately on start (catch-up read), then the tailer follows new writes.
+   * Use 0 to read the whole file from the beginning.
+   */
+  startPosition?: number;
 }
 
 export interface TailerEvents {
@@ -40,6 +48,7 @@ export class LogTailer extends EventEmitter {
   private follow: boolean;
   private lines: number;
   private deduplicator?: EventDeduplicator;
+  private startPositionOpt?: number;
   private watcher?: fs.FSWatcher;
   private position: number = 0;
   private buffer: string = '';
@@ -52,6 +61,12 @@ export class LogTailer extends EventEmitter {
     this.follow = options.follow ?? true;
     this.lines = options.lines ?? 0;
     this.deduplicator = options.deduplicator;
+    this.startPositionOpt = options.startPosition;
+  }
+
+  /** Current read position in bytes (useful for checkpointing before eviction). */
+  get currentPosition(): number {
+    return this.position;
   }
 
   /**
@@ -77,6 +92,8 @@ export class LogTailer extends EventEmitter {
     // Read existing content if requested
     if (this.lines > 0) {
       this.readExistingLines();
+    } else if (this.startPositionOpt !== undefined) {
+      this.position = this.startPositionOpt;
     } else {
       // Start from end of file
       const stats = fs.statSync(this.filePath);
@@ -86,6 +103,13 @@ export class LogTailer extends EventEmitter {
     // Watch for changes if follow mode
     if (this.follow) {
       this.watch();
+    }
+
+    // When given an explicit start position, do an immediate catch-up read to
+    // consume any bytes written between the checkpoint and now, then rely on
+    // the watcher for future writes.
+    if (this.startPositionOpt !== undefined) {
+      this.readNewContent();
     }
   }
 
