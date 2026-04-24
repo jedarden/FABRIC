@@ -5,9 +5,10 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/home/coding/FABRIC
-ExecStart=/usr/bin/node dist/cli.js web --port 3000 --source /home/coding/.needle/logs
+ExecStart=/usr/bin/node dist/cli.js web --port 3000 --source /home/coding/.needle/logs --otlp-http :4318
 Restart=always
 RestartSec=5
+EnvironmentFile=/home/coding/.config/fabric/secrets.env
 Environment=NODE_ENV=production
 StandardOutput=journal
 StandardError=journal
