@@ -990,6 +990,13 @@ const App: React.FC = () => {
           />
         )}
 
+        {showGitIntegration && (
+          <GitIntegrationPanel
+            visible={showGitIntegration}
+            onClose={() => setShowGitIntegration(false)}
+          />
+        )}
+
         {showSessionReplay && (
           <div className="session-replay-panel">
             <div className="session-replay-header">
