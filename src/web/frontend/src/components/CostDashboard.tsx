@@ -131,6 +131,12 @@ const BudgetProgressBar: React.FC<BudgetProgressBarProps> = ({ spent, limit, per
             backgroundColor: getColor(),
           }}
         />
+        <div className="budget-threshold-marker" style={{ left: '80%' }} title="Warning (80%)" />
+        <div className="budget-threshold-marker budget-threshold-critical" style={{ left: '95%' }} title="Critical (95%)" />
+      </div>
+      <div className="budget-progress-markers">
+        <span className="budget-marker" style={{ left: '80%' }}>80%</span>
+        <span className="budget-marker" style={{ left: '95%' }}>95%</span>
       </div>
     </div>
   );
@@ -181,7 +187,7 @@ const CostDashboard: React.FC<CostDashboardProps> = ({ visible, onClose }) => {
   const [beads, setBeads] = useState<BeadCostEntry[]>([]);
   const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>([]);
   const [alerts, setAlerts] = useState<BudgetAlert[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'workers' | 'beads' | 'trends'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'workers' | 'beads' | 'trends' | 'alerts'>('overview');
   const [loading, setLoading] = useState(false);
 
   const fetchCostData = useCallback(async () => {
@@ -243,6 +249,7 @@ const CostDashboard: React.FC<CostDashboardProps> = ({ visible, onClose }) => {
     { id: 'workers' as const, label: 'Workers' },
     { id: 'beads' as const, label: 'Tasks' },
     { id: 'trends' as const, label: 'Trends' },
+    { id: 'alerts' as const, label: 'Alerts', badge: alerts.filter(a => !a.acknowledged).length || undefined },
   ];
 
   return (
@@ -268,6 +275,9 @@ const CostDashboard: React.FC<CostDashboardProps> = ({ visible, onClose }) => {
               onClick={() => setActiveTab(tab.id)}
             >
               {tab.label}
+              {tab.badge && tab.badge > 0 && (
+                <span className="cost-tab-badge">{tab.badge}</span>
+              )}
             </button>
           ))}
         </div>
@@ -279,6 +289,30 @@ const CostDashboard: React.FC<CostDashboardProps> = ({ visible, onClose }) => {
 
           {activeTab === 'overview' && summary && (
             <div className="cost-overview">
+              {/* Budget Alert Banner (when >= 80%) */}
+              {summary.budget.limit > 0 && summary.budget.warningLevel !== 'none' && (
+                <div className={`cost-dashboard-alert-banner ${summary.budget.warningLevel === 'critical' || summary.budget.isOverBudget ? 'cost-dashboard-alert-critical' : 'cost-dashboard-alert-warning'}`}>
+                  <span className="cost-dashboard-alert-icon">
+                    {summary.budget.isOverBudget ? '!!' : summary.budget.warningLevel === 'critical' ? '!!' : '!'}
+                  </span>
+                  <span className="cost-dashboard-alert-text">
+                    {summary.budget.isOverBudget
+                      ? `Budget exceeded: ${formatCost(summary.budget.spent)} / ${formatCost(summary.budget.limit)} (${Math.round(summary.budget.percentUsed)}%)`
+                      : `${summary.budget.warningLevel === 'critical' ? 'Critical' : 'Warning'}: ${formatCost(summary.budget.spent)} / ${formatCost(summary.budget.limit)} (${Math.round(summary.budget.percentUsed)}% used)`}
+                  </span>
+                  <span className="cost-dashboard-alert-burn">
+                    {formatBurnRate(summary.burnRate.costPerMinute)}
+                    {summary.burnRate.timeToExhaustion && ` | ETA: ${summary.burnRate.timeToExhaustion}`}
+                  </span>
+                  <div className="cost-dashboard-alert-bar">
+                    <div
+                      className="cost-dashboard-alert-bar-fill"
+                      style={{ width: `${Math.min(100, summary.budget.percentUsed)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Session Cost */}
               <div className="cost-card">
                 <div className="cost-card-title">Session Cost</div>
@@ -296,57 +330,56 @@ const CostDashboard: React.FC<CostDashboardProps> = ({ visible, onClose }) => {
                 )}
               </div>
 
-              {/* Burn Rate */}
+              {/* Burn Rate & ETA */}
               <div className="cost-card">
-                <div className="cost-card-title">Burn Rate</div>
-                <div className={`cost-card-value ${summary.burnRate.isHighBurnRate ? 'cost-high' : ''}`}>
-                  {formatBurnRate(summary.burnRate.costPerMinute)}
-                </div>
-                <div className="cost-card-subtitle">
-                  Window: {summary.burnRate.windowMinutes} min avg
-                </div>
-                {summary.burnRate.timeToExhaustion && (
-                  <div className="cost-exhaustion">
-                    Time to exhaustion: <strong>{summary.burnRate.timeToExhaustion}</strong>
+                <div className="cost-card-title">Burn Rate & ETA</div>
+                <div className="budget-alert-summary-row">
+                  <div className="budget-alert-stat">
+                    <span className="budget-alert-stat-label">Rate</span>
+                    <span className={`budget-alert-stat-value ${summary.burnRate.isHighBurnRate ? 'cost-high' : ''}`}>
+                      {formatBurnRate(summary.burnRate.costPerMinute)}
+                    </span>
                   </div>
-                )}
-                <div className="cost-projected">
-                  Projected session total: {formatCost(summary.burnRate.projectedTotalCost)}
+                  <div className="budget-alert-stat">
+                    <span className="budget-alert-stat-label">ETA to Exhaust</span>
+                    <span className="budget-alert-stat-value">
+                      {summary.burnRate.timeToExhaustion || 'N/A'}
+                    </span>
+                  </div>
+                  <div className="budget-alert-stat">
+                    <span className="budget-alert-stat-label">Projected Total</span>
+                    <span className="budget-alert-stat-value">{formatCost(summary.burnRate.projectedTotalCost)}</span>
+                  </div>
                 </div>
+                {summary.burnRate.isHighBurnRate && (
+                  <div className="budget-burn-warning">High burn rate detected</div>
+                )}
               </div>
 
-              {/* Alerts */}
-              {alerts.filter(a => !a.acknowledged).length > 0 && (
-                <div className="cost-card cost-alerts-card">
-                  <div className="cost-card-title">Active Alerts</div>
-                  {alerts.filter(a => !a.acknowledged).map(alert => (
-                    <div key={alert.id} className={`cost-alert-item cost-alert-${alert.type}`}>
-                      <div className="cost-alert-header">
-                        <span className="cost-alert-type">{alert.type.toUpperCase()}</span>
-                        <span className="cost-alert-time">{new Date(alert.timestamp).toLocaleTimeString()}</span>
+              {/* Top Consumers */}
+              <div className="cost-card">
+                <div className="cost-card-title">Top Consumers ({summary.workerCount} workers)</div>
+                <div className="budget-consumers-list">
+                  {workers.slice(0, 10).length === 0 && (
+                    <div className="cost-empty">No cost data yet</div>
+                  )}
+                  {workers.slice(0, 10).map(w => (
+                    <div key={w.workerId} className="budget-consumer-row">
+                      <div className="budget-consumer-info">
+                        <span className="budget-consumer-id">{w.workerId}</span>
+                        {w.currentBead && <span className="budget-consumer-bead">{w.currentBead}</span>}
                       </div>
-                      <div className="cost-alert-details">
-                        {formatCost(alert.spent)} / {formatCost(alert.limit)} at {formatBurnRate(alert.burnRate)}
+                      <div className="budget-consumer-bar-container">
+                        <div
+                          className="budget-consumer-bar"
+                          style={{ width: `${(w.costUsd / (Math.max(...workers.slice(0, 10).map(wc => wc.costUsd)) || 0.001)) * 100}%` }}
+                        />
                       </div>
-                      <button className="cost-alert-ack" onClick={() => handleAcknowledge(alert.id)}>
-                        Acknowledge
-                      </button>
+                      <span className="budget-consumer-cost">{formatCost(w.costUsd)}</span>
+                      <span className="budget-consumer-tokens">{formatTokens(w.totalTokens)} tok | {w.apiCalls} calls</span>
                     </div>
                   ))}
                 </div>
-              )}
-
-              {/* Quick Workers Summary */}
-              <div className="cost-card">
-                <div className="cost-card-title">Top Workers ({summary.workerCount} total)</div>
-                {workers.slice(0, 5).map(w => (
-                  <div key={w.workerId} className="cost-worker-row">
-                    <span className="cost-worker-id">{w.workerId}</span>
-                    <span className="cost-worker-cost">{formatCost(w.costUsd)}</span>
-                    <span className="cost-worker-tokens">{formatTokens(w.totalTokens)} tok</span>
-                  </div>
-                ))}
-                {workers.length === 0 && <div className="cost-empty">No cost data yet</div>}
               </div>
             </div>
           )}
@@ -450,6 +483,99 @@ const CostDashboard: React.FC<CostDashboardProps> = ({ visible, onClose }) => {
                   {timeSeries.length === 0 && <div className="cost-empty">No trend data yet</div>}
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'alerts' && summary && (
+            <div className="cost-alerts-view">
+              {/* Budget Status */}
+              {summary.budget.limit > 0 && (
+                <div className="cost-card">
+                  <div className="cost-card-title">Budget Status</div>
+                  <div className="budget-alert-summary-row">
+                    <div className="budget-alert-stat">
+                      <span className="budget-alert-stat-label">Spent</span>
+                      <span className={`budget-alert-stat-value ${summary.budget.warningLevel === 'critical' || summary.budget.isOverBudget ? 'cost-high' : summary.budget.warningLevel === 'warning' ? 'cost-warn' : ''}`}>
+                        {formatCost(summary.budget.spent)}
+                      </span>
+                    </div>
+                    <div className="budget-alert-stat">
+                      <span className="budget-alert-stat-label">Limit</span>
+                      <span className="budget-alert-stat-value">{formatCost(summary.budget.limit)}</span>
+                    </div>
+                    <div className="budget-alert-stat">
+                      <span className="budget-alert-stat-label">Remaining</span>
+                      <span className="budget-alert-stat-value">{formatCost(Math.max(0, summary.budget.remaining))}</span>
+                    </div>
+                    <div className="budget-alert-stat">
+                      <span className="budget-alert-stat-label">Usage</span>
+                      <span className={`budget-alert-stat-value ${summary.budget.warningLevel === 'critical' || summary.budget.isOverBudget ? 'cost-high' : summary.budget.warningLevel === 'warning' ? 'cost-warn' : ''}`}>
+                        {Math.round(summary.budget.percentUsed)}%
+                      </span>
+                    </div>
+                  </div>
+                  <BudgetProgressBar
+                    spent={summary.budget.spent}
+                    limit={summary.budget.limit}
+                    percentUsed={summary.budget.percentUsed}
+                    warningLevel={summary.budget.warningLevel}
+                  />
+                </div>
+              )}
+
+              {/* Burn Rate & ETA */}
+              <div className="cost-card">
+                <div className="cost-card-title">Burn Rate & ETA</div>
+                <div className="budget-alert-summary-row">
+                  <div className="budget-alert-stat">
+                    <span className="budget-alert-stat-label">Rate</span>
+                    <span className={`budget-alert-stat-value ${summary.burnRate.isHighBurnRate ? 'cost-high' : ''}`}>
+                      {formatBurnRate(summary.burnRate.costPerMinute)}
+                    </span>
+                  </div>
+                  <div className="budget-alert-stat">
+                    <span className="budget-alert-stat-label">ETA to Exhaust</span>
+                    <span className="budget-alert-stat-value">
+                      {summary.burnRate.timeToExhaustion || 'N/A'}
+                    </span>
+                  </div>
+                  <div className="budget-alert-stat">
+                    <span className="budget-alert-stat-label">Projected Total</span>
+                    <span className="budget-alert-stat-value">{formatCost(summary.burnRate.projectedTotalCost)}</span>
+                  </div>
+                </div>
+                {summary.burnRate.isHighBurnRate && (
+                  <div className="budget-burn-warning">High burn rate detected</div>
+                )}
+              </div>
+
+              {/* Active Alerts */}
+              {alerts.length > 0 ? (
+                <div className="cost-card cost-alerts-card">
+                  <div className="cost-card-title">Alerts ({alerts.filter(a => !a.acknowledged).length} active)</div>
+                  {alerts.map(alert => (
+                    <div key={alert.id} className={`cost-alert-item cost-alert-${alert.type}${alert.acknowledged ? ' cost-alert-acked' : ''}`}>
+                      <div className="cost-alert-header">
+                        <span className="cost-alert-type">{alert.type.toUpperCase()}</span>
+                        <span className="cost-alert-time">{new Date(alert.timestamp).toLocaleTimeString()}</span>
+                      </div>
+                      <div className="cost-alert-details">
+                        {formatCost(alert.spent)} / {formatCost(alert.limit)} at {formatBurnRate(alert.burnRate)}
+                      </div>
+                      {!alert.acknowledged && (
+                        <button className="cost-alert-ack" onClick={() => handleAcknowledge(alert.id)}>
+                          Acknowledge
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="cost-card">
+                  <div className="cost-card-title">Alerts</div>
+                  <div className="cost-empty">No budget alerts</div>
+                </div>
+              )}
             </div>
           )}
         </div>

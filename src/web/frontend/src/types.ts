@@ -15,9 +15,16 @@ export interface LogEvent {
   tool?: string;
   message: string;
   raw: string;
-  bead?: string; // Bead/task identifier for Focus Mode
-  sequence?: number; // Per-worker monotonic counter — authoritative for ordering
-  ts?: number; // Unix timestamp in ms (display only)
+  bead?: string;
+  sequence?: number;
+  ts?: number;
+  msg?: string;
+  error?: string;
+  path?: string;
+  provider?: string;
+  model?: string;
+  session?: string;
+  duration_ms?: number;
 }
 
 /**
@@ -502,4 +509,26 @@ export interface SimilarError {
   resolution: string | null;
   resolution_successful: boolean | null;
   similarity: number;
+}
+
+// ============================================
+// Conversation Transcript Types
+// ============================================
+
+export type ConversationTurnRole = 'system' | 'user' | 'assistant' | 'tool';
+
+export interface ConversationTurn {
+  id: string;
+  role: ConversationTurnRole;
+  eventType: string;
+  timestamp: number;
+  content: string;
+  isCollapsible: boolean;
+  isCollapsed: boolean;
+  tool?: string;
+  durationMs?: number;
+  error?: string;
+  success?: boolean;
+  sequence?: number;
+  meta?: Record<string, unknown>;
 }
