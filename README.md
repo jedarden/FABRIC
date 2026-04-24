@@ -171,6 +171,25 @@ fabric logs --worker tcb-a --otlp-grpc :4317
 
 Everything stays on your machine — FABRIC is a local collector, not a third-party service. Telemetry is read-only: FABRIC ingests spans/logs/metrics for display but never writes back to NEEDLE or modifies worker state.
 
+## Production Deployment
+
+FABRIC runs as a user-level systemd service (`fabric-web.service`) with OTLP/HTTP enabled:
+
+```bash
+# Service status
+systemctl --user status fabric-web.service
+
+# Verify OTLP listener
+ss -tlnp | grep 4318
+```
+
+| Component | Port | Purpose |
+|-----------|------|---------|
+| Web dashboard | `:3000` | Browser UI + REST API |
+| OTLP/HTTP | `:4318` | NEEDLE metric ingestion |
+
+NEEDLE's `otlp_metric_sink` is enabled in `~/.needle/config.yaml`, pushing aggregated token/cost/bead metrics to `http://localhost:4318/v1/metrics`. FABRIC deduplicates these against JSONL-tailed events and writes them to `~/.needle/fabric.db` with `metrics_source='otlp-metric'`.
+
 🚧 **In Development** - See [docs/plan.md](docs/plan.md) for implementation roadmap.
 
 ## Documentation
