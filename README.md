@@ -230,6 +230,38 @@ The pruner emits `mend.logs_pruned` events to `~/.needle/logs/fabric-mend.jsonl`
 17 3 * * * ~/.local/bin/fabric prune
 ```
 
+## Remote Access via Tailscale
+
+The web dashboard is served over HTTPS on the Tailscale tailnet (not the public internet):
+
+```
+https://hetzner-ex44.tail1b1987.ts.net/
+```
+
+**Access model:**
+- Available only to devices joined to the `tail1b1987.ts.net` tailnet (laptop, phone, etc.)
+- TLS provided by Tailscale's managed certificates — no self-signed cert warnings
+- GET requests (dashboard, workers list, event feed) are unauthenticated
+- POST requests (`/api/events`, `/api/events/batch`) require `Authorization: Bearer <FABRIC_AUTH_TOKEN>`
+- Not exposed via Tailscale Funnel — no public internet access
+
+**Setup (one-time):**
+
+```bash
+# Grant operator access + configure HTTPS proxy
+./scripts/setup-tailscale-serve.sh
+
+# Or manually
+sudo tailscale set --operator=$USER
+tailscale serve --bg http://localhost:3000
+```
+
+The serve config persists across reboots. To remove it:
+
+```bash
+tailscale serve --https=443 off
+```
+
 ## Production Deployment
 
 FABRIC runs as a user-level systemd service (`fabric-web.service`) with OTLP/HTTP enabled:
@@ -242,9 +274,10 @@ systemctl --user status fabric-web.service
 ss -tlnp | grep 4318
 ```
 
-| Component | Port | Purpose |
-|-----------|------|---------|
-| Web dashboard | `:3000` | Browser UI + REST API |
+| Component | Port/URL | Purpose |
+|-----------|----------|---------|
+| Web dashboard (local) | `:3000` | Browser UI + REST API |
+| Web dashboard (remote) | `https://hetzner-ex44.tail1b1987.ts.net/` | Tailscale HTTPS (tailnet only) |
 | OTLP/HTTP | `:4318` | NEEDLE metric ingestion |
 
 NEEDLE's `otlp_metric_sink` is enabled in `~/.needle/config.yaml`, pushing aggregated token/cost/bead metrics to `http://localhost:4318/v1/metrics`. FABRIC deduplicates these against JSONL-tailed events and writes them to `~/.needle/fabric.db` with `metrics_source='otlp-metric'`.
