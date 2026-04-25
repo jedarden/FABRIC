@@ -394,7 +394,7 @@ const App: React.FC = () => {
             eventCount: w.eventCount + 1,
             status: 'active' as const,
             currentTool: event.tool,
-            recentEvents: [...w.recentEvents.slice(-9), event],
+            recentEvents: [...(w.recentEvents ?? []).slice(-9), event],
           } : w);
         } else {
           return [...prev, {
