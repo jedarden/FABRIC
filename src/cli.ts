@@ -17,6 +17,7 @@ import { formatEvent } from './parser.js';
 import { getStore } from './store.js';
 import { createWebServer } from './web/index.js';
 import { EventDeduplicator } from './normalizer.js';
+import { createConfigCommand } from './config.js';
 import * as fs from 'fs';
 import * as net from 'net';
 import type { LogLevel, EventFilter, LogEvent } from './types.js';
@@ -634,5 +635,8 @@ program
       process.exit(1);
     }
   });
+
+// Add config command
+program.addCommand(createConfigCommand());
 
 program.parse();
