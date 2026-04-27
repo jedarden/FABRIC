@@ -172,17 +172,106 @@ src/tui/app.ts                              [MODIFIED] +88 -5 lines
 - [x] No compilation errors
 - [x] Integration verified
 
+## Export/Import Functionality ✨
+
+### Export Formats
+
+#### 1. File Export (.fabric-replay)
+- **Format:** JSON file with versioned schema
+- **Location:** `~/Downloads/session-YYYY-MM-DD.fabric-replay`
+- **Command:** `>export file` (via command palette Ctrl+K)
+- **TUI Handler:** `handleExportToFile()` in `src/tui/app.ts`
+- **Web Handler:** Export button in SessionReplay component
+
+```json
+{
+  "version": "1.0",
+  "exportedAt": 1709337600000,
+  "eventCount": 150,
+  "events": [
+    { "ts": 1709337500000, "worker": "w-alpha", "level": "info", "msg": "..." }
+  ],
+  "metadata": {
+    "sessionStart": 1709337500000,
+    "sessionEnd": 1709337800000,
+    "workerCount": 3,
+    "sourcePath": "/path/to/log.jsonl"
+  }
+}
+```
+
+#### 2. Shareable Link (Base64)
+- **Format:** URL with base64-encoded replay data
+- **Command:** `>export link` (via command palette)
+- **Web Only:** Copies shareable URL to clipboard
+- **URL Format:** `https://fabric.example.com/?replay=<base64_data>`
+
+**Usage:**
+1. Export session as shareable link (web mode)
+2. Share via chat, email, or bookmark
+3. Recipient opens link → instant replay in browser
+
+#### 3. Import Functionality
+- **Command:** `>export import` (via command palette)
+- **TUI:** Directs to CLI: `fabric replay --file <path>`
+- **Web:** File picker dialog for .fabric-replay files
+
+### Export Utilities
+
+**Backend (`src/utils/replayExport.ts`):**
+- `createReplayExport()` - Create export data structure
+- `exportToJson()` - Export to JSON string
+- `exportToBase64()` - Export to base64 (Node.js)
+- `importFromJson()` - Import from JSON string
+- `importFromBase64()` - Import from base64 string
+- `generateShareableUrl()` - Generate shareable URL
+- `generateExportFilename()` - Generate filename with timestamp
+- `validateReplayExport()` - Validate export structure
+
+**Frontend (`src/web/frontend/src/utils/replayExport.ts`):**
+- `exportToBase64Browser()` - Export to base64 (browser)
+- `importFromBase64Browser()` - Import from base64 (browser)
+- `extractReplayFromUrl()` - Extract replay data from URL parameter
+
+### Command Palette Integration
+
+**Export Commands Registered:**
+```
+Export: Export to file        → action: 'export:file'
+Export: Export shareable link → action: 'export:link'
+Export: Import replay         → action: 'export:import'
+```
+
+**Trigger:** Press `Ctrl+K` in TUI, type `export`, select option
+
+### Testing
+
+**Export/Import Tests (`test-export-import.js`):**
+- ✅ Create replay export
+- ✅ Export to JSON string
+- ✅ Import from JSON string
+- ✅ Export to base64 string
+- ✅ Import from base64 string
+- ✅ Generate export filename
+- ✅ Write and read .fabric-replay file
+- ✅ Handle empty event array
+- ✅ Handle invalid JSON import
+- ✅ Handle invalid base64 import
+
+**All 10 tests passing ✅**
+
 ## Future Enhancements (Optional)
 
 - Export replay as video/GIF
 - Annotate specific events during replay
-- Save/load replay sessions
 - Compare two replay sessions side-by-side
 - Search within replay events
 - Bookmark important moments
+- Export as clipboard (TUI - requires clipboard library)
 
 ---
 
 **Completed:** 2026-03-04
+**Updated:** 2026-04-27 (Export/Import functionality verified)
 **Worker:** claude-code-sonnet
 **Bead:** bd-3k9 (Closed ✓)
