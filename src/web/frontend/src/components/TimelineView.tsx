@@ -1,22 +1,29 @@
-import React, { useMemo, useState, useRef, useCallback } from 'react';
+import React, { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { LogEvent, WorkerInfo } from '../types';
 
 export type TimeRange = '5m' | '10m' | '30m' | '1h';
+export type TimelineStyle = 'blocks' | 'bars';
 
 interface TimelineViewProps {
   events: LogEvent[];
   workers: WorkerInfo[];
   onTimeSelect?: (timestamp: number) => void;
+  onWorkerClick?: (workerId: string) => void;
   selectedWorker?: string | null;
   focusModeEnabled?: boolean;
   pinnedWorkers?: Set<string>;
   defaultTimeRange?: TimeRange;
+  currentTime?: number;
+  timelineStyle?: TimelineStyle;
+  compactMode?: boolean;
 }
 
 interface WorkerTimelineData {
   workerId: string;
   status: 'active' | 'idle' | 'error';
   segments: TimelineSegment[];
+  totalEvents: number;
+  isActive: boolean;
 }
 
 interface TimelineSegment {
@@ -24,6 +31,7 @@ interface TimelineSegment {
   end: number;
   level: 'debug' | 'info' | 'warn' | 'error';
   eventCount: number;
+  intensity: number; // 0-1 for block visualization
 }
 
 const TIME_RANGE_MS: Record<TimeRange, number> = {
@@ -57,14 +65,63 @@ const TimelineView: React.FC<TimelineViewProps> = ({
   events,
   workers,
   onTimeSelect,
+  onWorkerClick,
   selectedWorker,
   focusModeEnabled = false,
   pinnedWorkers = new Set(),
   defaultTimeRange = '10m',
+  currentTime: propCurrentTime,
+  timelineStyle = 'blocks',
+  compactMode = false,
 }) => {
   const [timeRange, setTimeRange] = useState<TimeRange>(defaultTimeRange);
+  const [style, setStyle] = useState<TimelineStyle>(timelineStyle);
   const [hoveredSegment, setHoveredSegment] = useState<{ workerId: string; segment: TimelineSegment } | null>(null);
+  const [hoveredBlock, setHoveredBlock] = useState<{ workerId: string; time: number; eventCount: number; level: string } | null>(null);
+  const [localCurrentTime, setLocalCurrentTime] = useState<number>(Date.now());
+  const [newEventHighlights, setNewEventHighlights] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevEventsLengthRef = useRef(0);
+
+  // Use prop time if provided, otherwise use local time with auto-refresh
+  const effectiveCurrentTime = propCurrentTime ?? localCurrentTime;
+
+  // Auto-refresh current time every second for real-time feel
+  useEffect(() => {
+    if (propCurrentTime === undefined) {
+      intervalRef.current = setInterval(() => {
+        setLocalCurrentTime(Date.now());
+      }, 1000);
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [propCurrentTime]);
+
+  // Detect new events for highlight animation
+  useEffect(() => {
+    const currentLength = events.length;
+    if (currentLength > prevEventsLengthRef.current) {
+      // New events arrived - highlight the affected workers
+      const newWorkers = new Set<string>();
+      for (let i = prevEventsLengthRef.current; i < currentLength; i++) {
+        newWorkers.add(events[i].worker);
+      }
+      setNewEventHighlights(newWorkers);
+
+      // Clear highlights after animation
+      const timeout = setTimeout(() => {
+        setNewEventHighlights(new Set());
+      }, 2000);
+
+      return () => clearTimeout(timeout);
+    }
+    prevEventsLengthRef.current = currentLength;
+  }, [events]);
 
   // Filter workers based on focus mode
   const filteredWorkers = useMemo(() => {
@@ -88,7 +145,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
 
   // Calculate timeline data
   const timelineData = useMemo(() => {
-    const now = Date.now();
+    const now = effectiveCurrentTime;
     const rangeStart = now - TIME_RANGE_MS[timeRange];
 
     // Create a map of worker activity
@@ -100,6 +157,8 @@ const TimelineView: React.FC<TimelineViewProps> = ({
         workerId: worker.id,
         status: worker.status,
         segments: [],
+        totalEvents: 0,
+        isActive: worker.status === 'active',
       });
     });
 
@@ -110,6 +169,8 @@ const TimelineView: React.FC<TimelineViewProps> = ({
           workerId: event.worker,
           status: 'active',
           segments: [],
+          totalEvents: 0,
+          isActive: true,
         });
       }
     });
@@ -144,7 +205,11 @@ const TimelineView: React.FC<TimelineViewProps> = ({
       const workerData = workerMap.get(workerId);
       if (!workerData) return;
 
+      let totalEventCount = 0;
+
       buckets.forEach((bucket, bucketStart) => {
+        totalEventCount += bucket.count;
+
         // Find the dominant level
         let dominantLevel: 'debug' | 'info' | 'warn' | 'error' = 'info';
         let maxCount = 0;
@@ -155,13 +220,20 @@ const TimelineView: React.FC<TimelineViewProps> = ({
           }
         });
 
+        // Calculate intensity (0-1) based on event density
+        // Higher intensity = more filled blocks
+        const intensity = Math.min(1, bucket.count / 10); // 10+ events = full intensity
+
         workerData.segments.push({
           start: bucketStart,
           end: bucketStart + BUCKET_SIZE,
           level: dominantLevel,
           eventCount: bucket.count,
+          intensity,
         });
       });
+
+      workerData.totalEvents = totalEventCount;
 
       // Sort segments by time
       workerData.segments.sort((a, b) => a.start - b.start);
@@ -177,7 +249,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
   // Generate time axis labels
   const timeLabels = useMemo(() => {
     const labels: { time: number; label: string }[] = [];
-    const now = Date.now();
+    const now = effectiveCurrentTime;
     const rangeMs = TIME_RANGE_MS[timeRange];
 
     // Determine appropriate interval based on range
@@ -221,25 +293,96 @@ const TimelineView: React.FC<TimelineViewProps> = ({
   }, [onTimeSelect, timeRange, timelineData.rangeStart]);
 
   // Truncate worker name for display
+  // Matches plan mockup: "worker-alpha" -> "alpha", "w-bravo" -> "bravo"
   const truncateWorker = (worker: string) => {
+    // Remove common prefixes and get the last meaningful segment
     const parts = worker.split('-');
-    return parts[parts.length - 1];
+    const lastSegment = parts[parts.length - 1];
+
+    // If the last segment is a UUID or hash, try the second-to-last
+    if (lastSegment && lastSegment.length > 16) {
+      return parts.length > 1 ? parts[parts.length - 2] : worker.slice(0, 10);
+    }
+
+    return lastSegment || worker.slice(0, 8);
   };
 
+  // Generate block visualization for compact mode with color-coded log levels
+  const generateBlocksWithMetadata = useCallback((segments: TimelineSegment[], totalWidth: number) => {
+    // Divide timeline into blocks (each block represents ~30 seconds)
+    const blockCount = 60; // Number of blocks in the timeline
+    const blocks: { char: string; level: string; intensity: number }[] = [];
+    const now = effectiveCurrentTime;
+    const rangeStart = now - TIME_RANGE_MS[timeRange];
+
+    for (let i = 0; i < blockCount; i++) {
+      const blockStart = rangeStart + (i * TIME_RANGE_MS[timeRange]) / blockCount;
+      const blockEnd = blockStart + TIME_RANGE_MS[timeRange] / blockCount;
+
+      // Find segments that overlap with this block
+      const overlappingSegments = segments.filter(
+        s => s.start < blockEnd && s.end > blockStart
+      );
+
+      if (overlappingSegments.length === 0) {
+        blocks.push({ char: '░', level: 'none', intensity: 0 });
+      } else {
+        // Determine block character and color based on intensity and level
+        const totalIntensity = overlappingSegments.reduce((sum, s) => sum + s.intensity, 0);
+        const avgIntensity = totalIntensity / overlappingSegments.length;
+        const hasError = overlappingSegments.some(s => s.level === 'error');
+        const hasWarn = overlappingSegments.some(s => s.level === 'warn');
+        const hasInfo = overlappingSegments.some(s => s.level === 'info');
+
+        // Prioritize error > warn > info > debug for color coding
+        let dominantLevel = 'debug';
+        if (hasError) dominantLevel = 'error';
+        else if (hasWarn) dominantLevel = 'warn';
+        else if (hasInfo) dominantLevel = 'info';
+
+        // Choose block character based on intensity
+        let blockChar = '░';
+        if (avgIntensity > 0.7) blockChar = '█';
+        else if (avgIntensity > 0.4) blockChar = '▓';
+        else if (avgIntensity > 0.1) blockChar = '▒';
+
+        blocks.push({ char: blockChar, level: dominantLevel, intensity: avgIntensity });
+      }
+    }
+
+    return blocks;
+  }, [effectiveCurrentTime, timeRange]);
+
+  // Handle worker click
+  const handleWorkerClick = useCallback((workerId: string) => {
+    if (onWorkerClick) {
+      onWorkerClick(workerId);
+    }
+  }, [onWorkerClick]);
+
   return (
-    <div className="timeline-view">
+    <div className={`timeline-view ${style} ${compactMode ? 'compact' : ''}`}>
       <div className="timeline-header">
         <h3>Timeline (last {TIME_RANGE_LABELS[timeRange]})</h3>
-        <div className="time-range-selector">
-          {(Object.keys(TIME_RANGE_MS) as TimeRange[]).map(range => (
-            <button
-              key={range}
-              className={`time-range-button ${timeRange === range ? 'active' : ''}`}
-              onClick={() => setTimeRange(range)}
-            >
-              {TIME_RANGE_LABELS[range]}
-            </button>
-          ))}
+        <div className="timeline-header-controls">
+          <button
+            className={`style-toggle ${style === 'blocks' ? 'active' : ''}`}
+            onClick={() => setStyle(style === 'blocks' ? 'bars' : 'blocks')}
+            title={style === 'blocks' ? 'Switch to bar view' : 'Switch to block view'}
+          >
+            {style === 'blocks' ? '░░' : '▬▬'}
+          </button>
+          <div className="time-range-selector">
+            {(Object.keys(TIME_RANGE_MS) as TimeRange[]).map(range => (
+              <button
+                key={range}
+                className={`time-range-button ${timeRange === range ? 'active' : ''}`}
+                onClick={() => setTimeRange(range)}
+              >
+                {TIME_RANGE_LABELS[range]}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -271,54 +414,92 @@ const TimelineView: React.FC<TimelineViewProps> = ({
               No worker activity in this time range
             </div>
           ) : (
-            timelineData.workers.map(workerData => (
-              <div key={workerData.workerId} className="timeline-row">
-                <div className="timeline-worker-label">
-                  <span
-                    className={`worker-status-dot ${workerData.status}`}
-                    title={workerData.status}
-                  ></span>
-                  <span className="worker-name">{truncateWorker(workerData.workerId)}</span>
-                </div>
-                <div className="timeline-bar-container">
-                  {workerData.segments.map((segment, i) => (
-                    <div
-                      key={i}
-                      className="timeline-segment"
-                      style={{
-                        left: `${((segment.start - timelineData.rangeStart) / TIME_RANGE_MS[timeRange]) * 100}%`,
-                        width: `${((segment.end - segment.start) / TIME_RANGE_MS[timeRange]) * 100}%`,
-                        backgroundColor: LEVEL_COLORS[segment.level],
-                        opacity: STATUS_OPACITY[workerData.status],
-                      }}
-                      onMouseEnter={() => setHoveredSegment({ workerId: workerData.workerId, segment })}
-                      onMouseLeave={() => setHoveredSegment(null)}
-                      title={`${workerData.workerId}: ${segment.eventCount} events at ${new Date(segment.start).toLocaleTimeString()}`}
-                    />
-                  ))}
+            timelineData.workers.map(workerData => {
+              const blocks = generateBlocksWithMetadata(workerData.segments, 100);
+              return (
+                <div
+                  key={workerData.workerId}
+                  className={`timeline-row ${selectedWorker === workerData.workerId ? 'selected' : ''} ${newEventHighlights.has(workerData.workerId) ? 'new-activity' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleWorkerClick(workerData.workerId);
+                  }}
+                >
+                  <div className="timeline-worker-label">
+                    <span
+                      className={`worker-status-dot ${workerData.status}`}
+                      title={workerData.status}
+                    ></span>
+                    <span className="worker-name" title={workerData.workerId}>
+                      {truncateWorker(workerData.workerId)}
+                    </span>
+                    {workerData.totalEvents > 0 && (
+                      <span className="worker-event-count">({workerData.totalEvents})</span>
+                    )}
+                  </div>
+                  <div className="timeline-bar-container">
+                    {style === 'blocks' ? (
+                      <div className="timeline-blocks">
+                        <span className="block-visualization">
+                          {blocks.map((block, i) => (
+                            <span
+                              key={i}
+                              className={`block-char block-level-${block.level}`}
+                              style={{
+                                color: block.level === 'none' ? 'var(--text-tertiary)' : LEVEL_COLORS[block.level],
+                                opacity: block.level === 'none' ? 0.3 : 0.6 + block.intensity * 0.4,
+                              }}
+                              title={`Level: ${block.level}, Intensity: ${(block.intensity * 100).toFixed(0)}%`}
+                            >
+                              {block.char}
+                            </span>
+                          ))}
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        {workerData.segments.map((segment, i) => (
+                          <div
+                            key={i}
+                            className="timeline-segment"
+                            style={{
+                              left: `${((segment.start - timelineData.rangeStart) / TIME_RANGE_MS[timeRange]) * 100}%`,
+                              width: `${((segment.end - segment.start) / TIME_RANGE_MS[timeRange]) * 100}%`,
+                              backgroundColor: LEVEL_COLORS[segment.level],
+                              opacity: STATUS_OPACITY[workerData.status] * (0.6 + segment.intensity * 0.4),
+                            }}
+                            onMouseEnter={() => setHoveredSegment({ workerId: workerData.workerId, segment })}
+                            onMouseLeave={() => setHoveredSegment(null)}
+                            title={`${workerData.workerId}: ${segment.eventCount} events at ${new Date(segment.start).toLocaleTimeString()}`}
+                          />
+                        ))}
 
-                  {/* Hovered segment tooltip */}
-                  {hoveredSegment && hoveredSegment.workerId === workerData.workerId && (
-                    <div
-                      className="timeline-tooltip"
-                      style={{
-                        left: `${((hoveredSegment.segment.start - timelineData.rangeStart) / TIME_RANGE_MS[timeRange]) * 100}%`,
-                      }}
-                    >
-                      <div className="tooltip-time">
-                        {new Date(hoveredSegment.segment.start).toLocaleTimeString()}
-                      </div>
-                      <div className="tooltip-count">
-                        {hoveredSegment.segment.eventCount} events
-                      </div>
-                      <div className={`tooltip-level ${hoveredSegment.segment.level}`}>
-                        {hoveredSegment.segment.level}
-                      </div>
-                    </div>
-                  )}
+                        {/* Hovered segment tooltip */}
+                        {hoveredSegment && hoveredSegment.workerId === workerData.workerId && (
+                          <div
+                            className="timeline-tooltip"
+                            style={{
+                              left: `${Math.min(100, Math.max(0, ((hoveredSegment.segment.start - timelineData.rangeStart) / TIME_RANGE_MS[timeRange]) * 100))}%`,
+                              transform: 'translateX(-50%)',
+                            }}
+                          >
+                            <div className="tooltip-time">
+                              {new Date(hoveredSegment.segment.start).toLocaleTimeString()}
+                            </div>
+                            <div className="tooltip-count">
+                              {hoveredSegment.segment.eventCount} events
+                            </div>
+                            <div className={`tooltip-level ${hoveredSegment.segment.level}`}>
+                              {hoveredSegment.segment.level}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
@@ -328,12 +509,14 @@ const TimelineView: React.FC<TimelineViewProps> = ({
           style={{
             left: '100%',
           }}
-        ></div>
+        >
+          <span className="current-time-pulse"></span>
+        </div>
       </div>
 
       {onTimeSelect && (
         <div className="timeline-hint">
-          Click on timeline to jump to that time in activity stream
+          {style === 'blocks' ? 'Click a worker row to filter' : 'Click on timeline to jump to that time in activity stream'}
         </div>
       )}
     </div>
