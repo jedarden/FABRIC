@@ -62,84 +62,141 @@ export function needleStateToStatus(state: NeedleState): WorkerStatus {
 
 /**
  * All event types emitted by NEEDLE's telemetry pipeline.
- * Format: category.action — matches NEEDLE's _needle_telemetry_emit event_type argument.
+ * Format: category.action — matches NEEDLE's EventKind::event_type() mapping.
+ *
+ * Note: This is a non-exhaustive list of known event types for documentation.
+ * The parser accepts any string for event_type to forward-compat with new NEEDLE versions.
  */
 export type NeedleEventType =
   // Worker lifecycle
+  | 'worker.booting'
   | 'worker.started'
-  | 'worker.idle'
   | 'worker.stopped'
-  | 'worker.draining'
+  | 'worker.errored'
+  | 'worker.exhausted'
+  | 'worker.idle'
+  | 'worker.idle_sleep_completed'
+  | 'worker.idle_sleep_entered'
   | 'worker.state_transition'
-  // Bead lifecycle
-  | 'bead.claimed'
-  | 'bead.prompt_built'
-  | 'bead.agent_started'
-  | 'bead.agent_completed'
-  | 'bead.completed'
-  | 'bead.failed'
-  | 'bead.released'
-  | 'bead.claim_retry'
-  | 'bead.claim_exhausted'
-  // Bead mitosis
-  | 'bead.mitosis.check'
-  | 'bead.mitosis.started'
-  | 'bead.mitosis.child_created'
-  | 'bead.mitosis.complete'
-  | 'bead.mitosis.failed'
-  | 'bead.mitosis.skipped'
+  | 'worker.queue_empty'
+  | 'worker.boot.timeout'
+  | 'worker.handling.timeout'
+  | 'worker.upgrade.detected'
+  | 'worker.upgrade.completed'
+  // Initialization
+  | 'init.step.started'
+  | 'init.step.completed'
   // Strand lifecycle
-  | 'strand.started'
-  | 'strand.completed'
-  | 'strand.fallthrough'
+  | 'strand.evaluated'
   | 'strand.skipped'
-  // Hook lifecycle
-  | 'hook.started'
-  | 'hook.completed'
-  | 'hook.failed'
-  // Heartbeat
+  // Bead claim lifecycle
+  | 'bead.claim.attempted'
+  | 'bead.claim.succeeded'
+  | 'bead.claim.race_lost'
+  | 'bead.claim.race_lost_skipped'
+  | 'bead.claim.failed'
+  // Bead lifecycle
+  | 'bead.released'
+  | 'bead.release.failed'
+  | 'bead.completed'
+  | 'bead.orphaned'
+  // Bead mitosis
+  | 'bead.mitosis.evaluated'
+  | 'bead.mitosis.split'
+  | 'bead.mitosis.skipped'
+  // Bead unravel (alternatives)
+  | 'bead.unravel.analyzed'
+  | 'bead.unravel.skipped'
+  // Agent lifecycle
+  | 'agent.dispatched'
+  | 'agent.completed'
+  | 'agent.transform.spawned'
+  | 'agent.transform.exited'
+  | 'agent.transform.skipped'
+  // Build lifecycle
+  | 'build.timeout'
+  | 'build.heartbeat'
+  // Outcome handling
+  | 'outcome.classified'
+  | 'outcome.handled'
+  // Heartbeat & peer detection
   | 'heartbeat.emitted'
-  | 'heartbeat.stuck_detected'
-  | 'heartbeat.recovery'
-  // Mend (maintenance)
-  | 'mend.orphan_released'
-  | 'mend.heartbeat_cleaned'
-  | 'mend.logs_pruned'
-  | 'mend.completed'
-  // Unravel (alternatives)
-  | 'unravel.alternatives_created'
-  | 'unravel.alternative_created'
-  | 'unravel.analysis_started'
-  | 'unravel.analysis_completed'
-  // Weave (documentation gaps)
-  | 'weave.bead_created'
-  | 'weave.analysis_started'
-  | 'weave.analysis_completed'
-  // Pulse (health monitoring)
-  | 'pulse.bead_created'
-  | 'pulse.scan_started'
-  | 'pulse.scan_completed'
-  | 'pulse.issue_detected'
-  | 'pulse.detector_started'
-  | 'pulse.detector_completed'
-  // Error events
-  | 'error.claim_failed'
-  | 'error.agent_crash'
-  | 'error.timeout'
-  | 'error.release_failed'
+  | 'peer.stale'
+  | 'peer.crashed'
+  // Health checks
+  | 'health.check'
+  // Mend (maintenance cycle)
+  | 'mend.orphaned_lock_removed'
+  | 'mend.dependency_cleaned'
+  | 'mend.db_repaired'
+  | 'mend.db_rebuilt'
+  | 'mend.cycle_summary'
+  | 'mend.trace_cleanup'
+  | 'mend.learning_cleanup'
+  | 'mend.idle_worker_flagged'
+  | 'mend.worker_deregistered'
+  | 'mend.orphaned_heartbeat_removed'
+  | 'mend.dependency_removed'
+  | 'mend.bead_release_failed'
+  | 'mend.dependency_cleanup_failed'
+  | 'mend.lock_remove_failed'
+  | 'mend.rate_limit_cleaned'
+  | 'mend.rate_limit_provider_removed'
+  | 'mend.rate_limit_provider_reset'
+  | 'mend.zero_activity_log_cleaned'
   // Effort & budget
   | 'effort.recorded'
   | 'budget.warning'
-  | 'budget.exceeded'
-  | 'budget.per_bead_exceeded'
-  // File locks
-  | 'file.checkout'
-  | 'file.conflict'
-  | 'file.release'
-  | 'file.stale'
-  | 'lock.priority_bump'
-  | 'lock.priority_bump_received'
-  | 'lock.expired';
+  | 'budget.stop'
+  // Rate limiting
+  | 'rate_limit.wait'
+  | 'rate_limit.allowed'
+  // Verification
+  | 'verification.failed'
+  | 'verification.passed'
+  // Reflect (drift detection & decision mining)
+  | 'reflect.started'
+  | 'reflect.consolidated'
+  | 'reflect.skipped'
+  | 'reflect.transcripts_read'
+  | 'reflect.drift_detected'
+  | 'reflect.drift_promoted'
+  | 'reflect.decision_extracted'
+  | 'reflect.adr_created'
+  | 'reflect.learning_promoted'
+  | 'reflect.learning_deduplicated'
+  | 'reflect.claudemd_written'
+  // Drift detection
+  | 'drift.started'
+  | 'drift.completed'
+  | 'drift.skipped'
+  | 'drift.report_written'
+  // Decision detection
+  | 'decision.started'
+  | 'decision.completed'
+  | 'decision.skipped'
+  // Pulse (health monitoring)
+  | 'pulse.scanner_started'
+  | 'pulse.scanner_completed'
+  | 'pulse.scanner_failed'
+  | 'pulse.bead_created'
+  | 'pulse.skipped'
+  // Rollback
+  | 'rollback.completed'
+  // Canary deployment
+  | 'canary.started'
+  | 'canary.suite_completed'
+  | 'canary.promoted'
+  | 'canary.rejected'
+  // Transform lifecycle
+  | 'transform.started'
+  | 'transform.completed'
+  | 'transform.failed'
+  | 'transform.skipped'
+  // Telemetry internal
+  | 'telemetry.sink_error'
+  | 'telemetry.otlp.dropped'
+  | 'telemetry.otlp.shutdown_timeout';
 
 // ============================================
 // Canonical NeedleEvent (wire schema)
