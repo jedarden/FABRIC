@@ -294,4 +294,436 @@ describe('FileHeatmap Component', () => {
       });
     });
   });
+
+  describe('Treemap view', () => {
+    it('should have view mode toggle buttons', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const listButton = screen.getByRole('button', { name: /list/i });
+      const treemapButton = screen.getByRole('button', { name: /treemap/i });
+      expect(listButton).toBeTruthy();
+      expect(treemapButton).toBeTruthy();
+    });
+
+    it('should switch to treemap view when treemap button clicked', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const treemapButton = screen.getByRole('button', { name: /treemap/i });
+      fireEvent.click(treemapButton);
+
+      await waitFor(() => {
+        const treemapContainer = document.querySelector('.heatmap-treemap-container');
+        expect(treemapContainer).toBeTruthy();
+      });
+    });
+
+    it('should render treemap nodes', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const treemapButton = screen.getByRole('button', { name: /treemap/i });
+      fireEvent.click(treemapButton);
+
+      await waitFor(() => {
+        const treemapNodes = document.querySelectorAll('.treemap-node');
+        expect(treemapNodes.length).toBe(mockEntries.length);
+      });
+    });
+
+    it('should hide sort button in treemap mode', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      // Sort button should be visible in list mode
+      const sortButton = screen.getByRole('button', { name: /sort.*modifications/i });
+      expect(sortButton).toBeTruthy();
+
+      const treemapButton = screen.getByRole('button', { name: /treemap/i });
+      fireEvent.click(treemapButton);
+
+      // Sort button should be hidden in treemap mode
+      await waitFor(() => {
+        const sortButtonAfter = document.querySelector('button[title="Cycle sort mode"]');
+        expect(sortButtonAfter).toBeFalsy();
+      });
+    });
+
+    it('should show tooltip when hovering treemap node', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const treemapButton = screen.getByRole('button', { name: /treemap/i });
+      fireEvent.click(treemapButton);
+
+      await waitFor(() => {
+        const treemapNodes = document.querySelectorAll('.treemap-node');
+        expect(treemapNodes.length).toBeGreaterThan(0);
+      });
+
+      const firstNode = document.querySelector('.treemap-node');
+      expect(firstNode).toBeTruthy();
+
+      // Trigger mouse enter
+      fireEvent.mouseEnter(firstNode!);
+
+      await waitFor(() => {
+        const tooltip = document.querySelector('.treemap-tooltip');
+        expect(tooltip).toBeTruthy();
+      });
+
+      // Trigger mouse leave
+      fireEvent.mouseLeave(firstNode!);
+
+      await waitFor(() => {
+        const tooltip = document.querySelector('.treemap-tooltip');
+        expect(tooltip).toBeFalsy();
+      });
+    });
+  });
+
+  describe('Timelapse animation', () => {
+    const mockTimelapse = {
+      startTimestamp: Date.now() - 100000,
+      endTimestamp: Date.now(),
+      interval: 2000,
+      totalSnapshots: 5,
+      snapshots: [
+        {
+          timestamp: Date.now() - 100000,
+          entries: [
+            {
+              path: '/src/early.ts',
+              modifications: 2,
+              heatLevel: 'cold' as const,
+              workers: [{ workerId: 'w-alpha', modifications: 2, lastModified: Date.now() - 90000, percentage: 100 }],
+              firstModified: Date.now() - 100000,
+              lastModified: Date.now() - 90000,
+              hasCollision: false,
+              activeWorkers: 1,
+              avgModificationInterval: 5000,
+            },
+          ],
+          stats: {
+            totalFiles: 1,
+            totalModifications: 2,
+            collisionFiles: 0,
+            activeFiles: 1,
+            heatDistribution: { cold: 1, warm: 0, hot: 0, critical: 0 },
+            mostActiveDirectory: '/src',
+            avgModificationsPerFile: 2,
+          },
+        },
+        {
+          timestamp: Date.now() - 50000,
+          entries: [
+            {
+              path: '/src/early.ts',
+              modifications: 5,
+              heatLevel: 'warm' as const,
+              workers: [{ workerId: 'w-alpha', modifications: 5, lastModified: Date.now() - 50000, percentage: 100 }],
+              firstModified: Date.now() - 100000,
+              lastModified: Date.now() - 50000,
+              hasCollision: false,
+              activeWorkers: 1,
+              avgModificationInterval: 10000,
+            },
+            {
+              path: '/src/mid.ts',
+              modifications: 3,
+              heatLevel: 'warm' as const,
+              workers: [{ workerId: 'w-beta', modifications: 3, lastModified: Date.now() - 50000, percentage: 100 }],
+              firstModified: Date.now() - 60000,
+              lastModified: Date.now() - 50000,
+              hasCollision: false,
+              activeWorkers: 1,
+              avgModificationInterval: 5000,
+            },
+          ],
+          stats: {
+            totalFiles: 2,
+            totalModifications: 8,
+            collisionFiles: 0,
+            activeFiles: 2,
+            heatDistribution: { cold: 0, warm: 2, hot: 0, critical: 0 },
+            mostActiveDirectory: '/src',
+            avgModificationsPerFile: 4,
+          },
+        },
+      ],
+    };
+
+    it('should have timelapse view mode button', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      expect(timelapseButton).toBeTruthy();
+    });
+
+    it('should switch to timelapse view when timelapse button clicked', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockResolvedValueOnce(createMockResponse(mockTimelapse));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      // Should show timelapse controls after switching
+      await waitFor(() => {
+        const controls = document.querySelector('.timelapse-controls');
+        expect(controls).toBeTruthy();
+      });
+    });
+
+    it('should fetch timelapse data when entering timelapse mode', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockResolvedValueOnce(createMockResponse(mockTimelapse));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      // Should show timelapse controls after data loads
+      await waitFor(() => {
+        const controls = document.querySelector('.timelapse-controls');
+        expect(controls).toBeTruthy();
+      });
+    });
+
+    it('should display timelapse playback controls when data loaded', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockResolvedValueOnce(createMockResponse(mockTimelapse));
+
+      const { container } = render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      await waitFor(() => {
+        const playbackControls = container.querySelector('.timelapse-playback');
+        expect(playbackControls).toBeTruthy();
+      });
+    });
+
+    it('should have play/pause button in timelapse mode', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockResolvedValueOnce(createMockResponse(mockTimelapse));
+
+      const { container } = render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      await waitFor(() => {
+        const playButton = container.querySelector('.timelapse-playback button.primary');
+        expect(playButton).toBeTruthy();
+      });
+    });
+
+    it('should have speed controls in timelapse mode', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockResolvedValueOnce(createMockResponse(mockTimelapse));
+
+      const { container } = render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      await waitFor(() => {
+        const speedControls = container.querySelector('.timelapse-speed');
+        expect(speedControls).toBeTruthy();
+      });
+    });
+
+    it('should have timeline slider in timelapse mode', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockResolvedValueOnce(createMockResponse(mockTimelapse));
+
+      const { container } = render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      await waitFor(() => {
+        const timelineSlider = container.querySelector('.timeline-slider');
+        expect(timelineSlider).toBeTruthy();
+      });
+    });
+
+    it('should have loop checkbox in timelapse mode', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockResolvedValueOnce(createMockResponse(mockTimelapse));
+
+      const { container } = render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      await waitFor(() => {
+        const loopLabel = container.querySelector('.timelapse-loop');
+        expect(loopLabel).toBeTruthy();
+      });
+    });
+
+    it('should show timeline labels with time and progress', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockResolvedValueOnce(createMockResponse(mockTimelapse));
+
+      const { container } = render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      await waitFor(() => {
+        const timelineLabels = container.querySelector('.timeline-labels');
+        expect(timelineLabels).toBeTruthy();
+      });
+    });
+
+    it('should display loading state while fetching timelapse data', async () => {
+      let resolveFetch: (value: unknown) => void;
+      const fetchPromise = new Promise(resolve => {
+        resolveFetch = resolve;
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockReturnValueOnce(fetchPromise as any);
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      await waitFor(() => {
+        expect(screen.getByText(/generating timelapse/i)).toBeInTheDocument();
+      });
+
+      // Resolve the fetch
+      resolveFetch!(createMockResponse(mockTimelapse));
+
+      await waitFor(() => {
+        expect(screen.queryByText(/generating timelapse/i)).not.toBeInTheDocument();
+      });
+    });
+
+    it('should display error message on timelapse fetch failure', async () => {
+      mockFetch
+        .mockResolvedValueOnce(createMockResponse(mockEntries))
+        .mockResolvedValueOnce(createMockResponse(mockStats))
+        .mockRejectedValueOnce(new Error('Failed to fetch timelapse'));
+
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('File Heatmap')).toBeInTheDocument();
+      });
+
+      const timelapseButton = screen.getByRole('button', { name: /timelapse/i });
+      fireEvent.click(timelapseButton);
+
+      await waitFor(() => {
+        expect(screen.getByText(/failed to fetch timelapse/i)).toBeInTheDocument();
+      });
+    });
+  });
 });
