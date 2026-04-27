@@ -39,11 +39,13 @@ function sdNotify(state: string): void {
   const socketPath = process.env.NOTIFY_SOCKET;
   if (!socketPath) return;
   try {
+    // @ts-expect-error - unix_dgram is not in SocketType types but works at runtime
     const client = createSocket('unix_dgram');
     const msg = Buffer.from(state);
     // Abstract sockets start with '@' in systemd notation; replace with '\0'
     const addr = socketPath.startsWith('@') ? '\0' + socketPath.slice(1) : socketPath;
-    client.send(msg, 0, msg.length, addr, () => client.close());
+    // @ts-expect-error - send() signature for unix sockets differs from UDP
+    client.send(msg, addr, () => client.close());
   } catch {
     // Never crash the server due to a notify failure
   }
