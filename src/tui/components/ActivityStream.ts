@@ -43,6 +43,12 @@ export interface ActivityFilter {
 
   /** Filter by time range end (Unix timestamp in ms) */
   until?: number;
+
+  /** Filter by bead ID */
+  beadId?: string;
+
+  /** Filter by file pattern (glob-style) */
+  filePattern?: string;
 }
 
 /**
@@ -144,6 +150,18 @@ export class ActivityStream {
     if (this.filter.until && event.ts > this.filter.until) {
       return false;
     }
+    if (this.filter.beadId && event.bead !== this.filter.beadId) {
+      return false;
+    }
+    if (this.filter.filePattern) {
+      const pattern = this.filter.filePattern.toLowerCase();
+      const path = event.path?.toLowerCase() || '';
+      const msg = event.msg.toLowerCase();
+      // Match against file path or message containing file references
+      if (!path.includes(pattern) && !msg.includes(pattern)) {
+        return false;
+      }
+    }
     if (this.filter.search) {
       const searchLower = this.filter.search.toLowerCase();
       const matchesSearch =
@@ -209,6 +227,57 @@ export class ActivityStream {
   clearFilter(): void {
     this.filter = {};
     this.reRender();
+  }
+
+  /**
+   * Set time filter (show events since cutoff time)
+   */
+  setTimeFilter(cutoffTime: number): void {
+    this.filter.since = cutoffTime;
+    this.reRender();
+  }
+
+  /**
+   * Scroll to a specific timestamp in the log
+   */
+  scrollToTimestamp(timestamp: number): void {
+    // Find the event closest to the target timestamp
+    let closestIndex = -1;
+    let closestDiff = Infinity;
+
+    for (let i = 0; i < this.events.length; i++) {
+      const diff = Math.abs(this.events[i].ts - timestamp);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        closestIndex = i;
+      }
+    }
+
+    if (closestIndex >= 0) {
+      // Re-render with context around the target
+      this.log.setContent('');
+
+      // Show 50 events before the target and 50 after
+      const start = Math.max(0, closestIndex - 50);
+      const end = Math.min(this.events.length, closestIndex + 51);
+
+      for (let i = start; i < end; i++) {
+        if (this.passesFilter(this.events[i])) {
+          const formatted = this.formatEvent(this.events[i]);
+          const isTarget = i === closestIndex;
+          if (isTarget) {
+            // Add indicator for the target event
+            this.log.log(`{yellow-fg}➜{/} ${formatted}`);
+          } else {
+            this.log.log(formatted);
+          }
+        }
+      }
+
+      // Scroll to make the target visible
+      this.log.setScroll((closestIndex - start) - 10);
+      this.log.screen.render();
+    }
   }
 
   /**

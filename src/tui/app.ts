@@ -5,7 +5,7 @@
  */
 
 import blessed from 'blessed';
-import { LogEvent, WorkerInfo, WorkerStatus } from '../types.js';
+import { LogEvent, WorkerInfo, WorkerStatus, EventFilter } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { colors, getStatusColor, getThemeManager, ThemeName } from './utils/colors.js';
 import { WorkerGrid } from './components/WorkerGrid.js';
@@ -40,12 +40,15 @@ export interface TuiOptions {
 
   /** Refresh interval in ms */
   refreshInterval?: number;
+
+  /** CLI filter for worker/level */
+  filter?: EventFilter;
 }
 
 export class FabricTuiApp {
   private screen: blessed.Widgets.Screen;
   private store: InMemoryEventStore;
-  private options: Required<TuiOptions>;
+  private options: TuiOptions;
   private isRunning = false;
 
   // View mode
@@ -94,11 +97,10 @@ export class FabricTuiApp {
 
   constructor(store: InMemoryEventStore, options: TuiOptions = {}) {
     this.store = store;
-    this.options = {
-      logPath: options.logPath || '',
-      maxEvents: options.maxEvents || 1000,
-      refreshInterval: options.refreshInterval || 100,
-    };
+    this.options = options;
+    if (!this.options.maxEvents) this.options.maxEvents = 1000;
+    if (!this.options.refreshInterval) this.options.refreshInterval = 100;
+    if (!this.options.logPath) this.options.logPath = '';
 
     // Initialize theme
     const themeManager = getThemeManager();
@@ -140,6 +142,18 @@ export class FabricTuiApp {
 
     // Build worker count badge with colored status indicators
     let badge = ' FABRIC - Worker Activity Monitor';
+
+    // Add filter indicator if CLI filters are active
+    if (this.options.filter?.worker || this.options.filter?.level) {
+      const filterParts: string[] = [];
+      if (this.options.filter.worker) {
+        filterParts.push(`worker:${this.options.filter.worker.slice(0, 8)}`);
+      }
+      if (this.options.filter.level) {
+        filterParts.push(`level:${this.options.filter.level}`);
+      }
+      badge += `  {yellow-fg}[FILTER: ${filterParts.join(' ')}]{/}`;
+    }
 
     if (stats.total > 0) {
       badge += '  {bold}[';
@@ -644,12 +658,19 @@ export class FabricTuiApp {
       this.toggleAnalyticsView();
     } else if (cmd === 'budget') {
       this.toggleBudgetView();
+    } else if (cmd === 'transcript') {
+      this.toggleTranscriptView();
+    } else if (cmd === 'xref') {
+      this.toggleXrefView();
     } else if (cmd.startsWith('filter:worker:')) {
       const workerId = cmd.replace('filter:worker:', '');
       this.activityStream.setFilter({ workerId });
     } else if (cmd.startsWith('filter:level:')) {
       const level = cmd.replace('filter:level:', '');
       this.activityStream.setFilter({ level });
+    } else if (cmd.startsWith('filter:last:')) {
+      const duration = cmd.replace('filter:last:', '');
+      this.handleTimeFilter(duration);
     } else if (cmd === 'theme' || cmd === 'theme:toggle') {
       this.toggleTheme();
     } else if (cmd === 'theme:dark') {
@@ -686,7 +707,365 @@ export class FabricTuiApp {
           this.screen.render();
         }, 3000);
       }
+    } else if (cmd === 'export' || cmd === 'export:file') {
+      this.handleExportToFile();
+    } else if (cmd === 'export:link') {
+      this.handleExportLink();
+    } else if (cmd === 'export:import') {
+      this.handleExportImport();
+    } else if (cmd.startsWith('worker:')) {
+      const workerId = cmd.replace('worker:', '').trim();
+      this.handleJumpToWorker(workerId);
+    } else if (cmd.startsWith('bead:')) {
+      const beadId = cmd.replace('bead:', '').trim();
+      this.handleShowBeadEvents(beadId);
+    } else if (cmd.startsWith('file:')) {
+      const pattern = cmd.replace('file:', '').trim();
+      this.handleShowFileOperations(pattern);
+    } else if (cmd.startsWith('goto:')) {
+      const timestamp = cmd.replace('goto:', '').trim();
+      this.handleJumpToTimestamp(timestamp);
     }
+  }
+
+  /**
+   * Handle export to file command
+   */
+  private handleExportToFile(): void {
+    const events = this.store.queryOrdered();
+    if (events.length === 0) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(' {yellow-fg}No events to export{/}');
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 2000);
+      return;
+    }
+
+    try {
+      const { exportToJson, generateExportFilename } = require('../utils/replayExport.js');
+      const fs = require('fs');
+      const path = require('path');
+      const os = require('os');
+
+      const exportData = {
+        version: '1.0',
+        exportedAt: Date.now(),
+        eventCount: events.length,
+        events: events,
+        metadata: {
+          sessionStart: Math.min(...events.map((e: LogEvent) => e.ts)),
+          sessionEnd: Math.max(...events.map((e: LogEvent) => e.ts)),
+          workerCount: new Set(events.map((e: LogEvent) => e.worker)).size,
+        },
+      };
+
+      const filename = `session-${new Date(exportData.metadata.sessionStart).toISOString().split('T')[0]}.fabric-replay`;
+      const exportPath = path.join(os.homedir(), 'Downloads', filename);
+
+      fs.writeFileSync(exportPath, JSON.stringify(exportData, null, 2), 'utf-8');
+
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(` {green-fg}Exported ${events.length} events to ${filename}{/}`);
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 3000);
+    } catch (err) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(` {red-fg}Export failed: ${(err as Error).message}{/}`);
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 3000);
+    }
+  }
+
+  /**
+   * Handle export shareable link command (shows message for TUI)
+   */
+  private handleExportLink(): void {
+    const events = this.store.queryOrdered();
+    if (events.length === 0) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(' {yellow-fg}No events to export{/}');
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 2000);
+      return;
+    }
+
+    try {
+      const { exportToBase64 } = require('../utils/replayExport.js');
+      const base64Data = exportToBase64(events);
+
+      // In TUI mode, we can't copy to clipboard easily, so show the data
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(' {yellow-fg}Shareable link generated (web mode only). See logs.{/}');
+      this.screen.render();
+
+      // Log the shareable URL format
+      console.log('\n=== Shareable Replay Link ===');
+      console.log('Web UI URL format:');
+      console.log(`https://fabric.example.com/?replay=${base64Data.substring(0, 50)}...`);
+      console.log('Full base64 data logged to ~/.fabric/last-export.txt\n');
+
+      // Save to file for reference
+      const fs = require('fs');
+      const path = require('path');
+      const os = require('os');
+      const exportPath = path.join(os.homedir(), '.fabric', 'last-export.txt');
+      fs.mkdirSync(path.join(os.homedir(), '.fabric'), { recursive: true });
+      fs.writeFileSync(exportPath, base64Data, 'utf-8');
+
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 3000);
+    } catch (err) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(` {red-fg}Export failed: ${(err as Error).message}{/}`);
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 3000);
+    }
+  }
+
+  /**
+   * Handle import replay command
+   */
+  private handleExportImport(): void {
+    const originalContent = this.headerBox.getContent();
+    this.headerBox.setContent(' {yellow-fg}Import: Use "fabric replay --file <path>" CLI command{/}');
+    this.screen.render();
+    setTimeout(() => {
+      this.headerBox.setContent(originalContent);
+      this.updateHeader();
+      this.screen.render();
+    }, 4000);
+  }
+
+  /**
+   * Parse duration string (e.g., "5m", "1h", "30s") to milliseconds
+   */
+  private parseDuration(duration: string): number | null {
+    const match = duration.match(/^(\d+)([smh])$/i);
+    if (!match) return null;
+
+    const value = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+
+    switch (unit) {
+      case 's': return value * 1000;
+      case 'm': return value * 60 * 1000;
+      case 'h': return value * 60 * 60 * 1000;
+      default: return null;
+    }
+  }
+
+  /**
+   * Handle time filter command (e.g., "5m", "1h", "30s")
+   */
+  private handleTimeFilter(duration: string): void {
+    const ms = this.parseDuration(duration);
+    if (ms === null) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(` {red-fg}Invalid duration: ${duration}. Use format like 5m, 1h, 30s{/}`);
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 3000);
+      return;
+    }
+
+    const cutoffTime = Date.now() - ms;
+    this.activityStream.setTimeFilter(cutoffTime);
+
+    const originalContent = this.headerBox.getContent();
+    this.headerBox.setContent(` {cyan-fg}Filtered to last ${duration}{/}`);
+    this.screen.render();
+    setTimeout(() => {
+      this.headerBox.setContent(originalContent);
+      this.updateHeader();
+      this.screen.render();
+    }, 2000);
+  }
+
+  /**
+   * Handle jump to worker command
+   */
+  private handleJumpToWorker(workerId: string): void {
+    if (!workerId) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(' {red-fg}Worker ID required{/}');
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 2000);
+      return;
+    }
+
+    // Find worker by partial ID match
+    const workers = this.store.getWorkers();
+    const matchedWorker = workers.find(w => w.id.startsWith(workerId) || w.id.includes(workerId));
+
+    if (!matchedWorker) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(` {red-fg}Worker not found: ${workerId}{/}`);
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 2000);
+      return;
+    }
+
+    // Show worker detail panel
+    this.showWorkerDetail(matchedWorker);
+
+    // Set filter to this worker
+    this.activityStream.setFilter({ workerId: matchedWorker.id });
+
+    const originalContent = this.headerBox.getContent();
+    this.headerBox.setContent(` {green-fg}Jumped to worker: ${matchedWorker.id.slice(0, 8)}{/}`);
+    this.screen.render();
+    setTimeout(() => {
+      this.headerBox.setContent(originalContent);
+      this.updateHeader();
+      this.screen.render();
+    }, 1500);
+  }
+
+  /**
+   * Handle show bead events command
+   */
+  private handleShowBeadEvents(beadId: string): void {
+    if (!beadId) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(' {red-fg}Bead ID required{/}');
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 2000);
+      return;
+    }
+
+    // Set filter to show events for this bead
+    this.activityStream.setFilter({ beadId });
+
+    const originalContent = this.headerBox.getContent();
+    this.headerBox.setContent(` {cyan-fg}Showing events for bead: ${beadId}{/}`);
+    this.screen.render();
+    setTimeout(() => {
+      this.headerBox.setContent(originalContent);
+      this.updateHeader();
+      this.screen.render();
+    }, 2000);
+  }
+
+  /**
+   * Handle show file operations command
+   */
+  private handleShowFileOperations(pattern: string): void {
+    if (!pattern) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(' {red-fg}File pattern required{/}');
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 2000);
+      return;
+    }
+
+    // Set filter to show events for files matching pattern
+    this.activityStream.setFilter({ filePattern: pattern });
+
+    const originalContent = this.headerBox.getContent();
+    this.headerBox.setContent(` {cyan-fg}Showing operations on files matching: ${pattern}{/}`);
+    this.screen.render();
+    setTimeout(() => {
+      this.headerBox.setContent(originalContent);
+      this.updateHeader();
+      this.screen.render();
+    }, 2000);
+  }
+
+  /**
+   * Parse timestamp string (e.g., "14:30", "14:30:45", ISO date) to timestamp
+   */
+  private parseTimestamp(timestamp: string): number | null {
+    // Try HH:MM format (assume today)
+    const timeMatch = timestamp.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (timeMatch) {
+      const now = new Date();
+      const hours = parseInt(timeMatch[1], 10);
+      const minutes = parseInt(timeMatch[2], 10);
+      const seconds = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+      const targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, seconds);
+      return targetDate.getTime();
+    }
+
+    // Try ISO date string
+    const isoDate = new Date(timestamp);
+    if (!isNaN(isoDate.getTime())) {
+      return isoDate.getTime();
+    }
+
+    return null;
+  }
+
+  /**
+   * Handle jump to timestamp command
+   */
+  private handleJumpToTimestamp(timestamp: string): void {
+    const ts = this.parseTimestamp(timestamp);
+    if (ts === null) {
+      const originalContent = this.headerBox.getContent();
+      this.headerBox.setContent(` {red-fg}Invalid timestamp: ${timestamp}. Use format like 14:30 or 14:30:45{/}`);
+      this.screen.render();
+      setTimeout(() => {
+        this.headerBox.setContent(originalContent);
+        this.updateHeader();
+        this.screen.render();
+      }, 3000);
+      return;
+    }
+
+    // Navigate to the timestamp in activity stream
+    this.activityStream.scrollToTimestamp(ts);
+
+    const originalContent = this.headerBox.getContent();
+    const timeStr = new Date(ts).toLocaleTimeString();
+    this.headerBox.setContent(` {cyan-fg}Jumped to timestamp: ${timeStr}{/}`);
+    this.screen.render();
+    setTimeout(() => {
+      this.headerBox.setContent(originalContent);
+      this.updateHeader();
+      this.screen.render();
+    }, 1500);
   }
 
   /**

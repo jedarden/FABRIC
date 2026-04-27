@@ -46,19 +46,47 @@ const RECENT_COMMANDS_FILE = join(homedir(), '.fabric', 'recent-commands.json');
  * Default command suggestions
  */
 const DEFAULT_SUGGESTIONS: CommandSuggestion[] = [
+  // View commands
+  { label: 'Show file heatmap', category: 'View', action: 'heatmap' },
+  { label: 'Show dependency DAG', category: 'View', action: 'dag' },
+  { label: 'Show session replay', category: 'View', action: 'replay' },
+  { label: 'Show error groups', category: 'View', action: 'errors' },
+  { label: 'Show session digest', category: 'View', action: 'digest' },
+  { label: 'Show collision alerts', category: 'View', action: 'collisions' },
+  { label: 'Show git integration', category: 'View', action: 'git' },
+  { label: 'Show semantic narrative', category: 'View', action: 'narrative' },
+  { label: 'Show worker analytics', category: 'View', action: 'analytics' },
+  { label: 'Show budget dashboard', category: 'View', action: 'budget' },
+  { label: 'Show conversation transcript', category: 'View', action: 'transcript' },
+  { label: 'Show cross references', category: 'View', action: 'xref' },
+  // Filter commands
   { label: 'Filter by worker', category: 'Filter', action: 'filter:worker:' },
   { label: 'Filter by level', category: 'Filter', action: 'filter:level:' },
   { label: 'Filter by bead', category: 'Filter', action: 'filter:bead:' },
+  { label: 'Filter by time (last:Nm/Nh)', category: 'Filter', action: 'filter:last:' },
   { label: 'Clear filters', category: 'Action', action: 'clear' },
+  // Navigation commands
+  { label: 'Jump to worker', category: 'Navigation', action: 'worker:' },
+  { label: 'Show bead events', category: 'Navigation', action: 'bead:' },
+  { label: 'Show file operations', category: 'Navigation', action: 'file:' },
+  { label: 'Jump to timestamp', category: 'Navigation', action: 'goto:' },
+  { label: 'Help', category: 'Navigation', action: 'help' },
+  { label: 'Quit', category: 'Navigation', action: 'quit' },
+  // Action commands
   { label: 'Toggle pause', category: 'Action', action: 'pause' },
   { label: 'Refresh', category: 'Action', action: 'refresh' },
+  // Theme commands
   { label: 'Toggle theme', category: 'Theme', action: 'theme:toggle' },
   { label: 'Dark theme', category: 'Theme', action: 'theme:dark' },
   { label: 'Light theme', category: 'Theme', action: 'theme:light' },
+  // Focus preset commands
   { label: 'Save focus preset', category: 'Focus Preset', action: 'preset:save' },
   { label: 'List focus presets', category: 'Focus Preset', action: 'preset:list' },
-  { label: 'Help', category: 'Navigation', action: 'help' },
-  { label: 'Quit', category: 'Navigation', action: 'quit' },
+  // Export commands
+  { label: 'Export current view', category: 'Export', action: 'export' },
+  { label: 'Export to file', category: 'Export', action: 'export:file' },
+  { label: 'Export shareable link', category: 'Export', action: 'export:link' },
+  { label: 'Import replay', category: 'Export', action: 'export:import' },
 ];
 
 /**
