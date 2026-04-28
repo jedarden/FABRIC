@@ -1,6 +1,14 @@
 import React, { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { LogEvent, WorkerInfo } from '../types';
 
+interface BlockEventPopup {
+  x: number;
+  y: number;
+  workerId: string;
+  events: LogEvent[];
+  time: number;
+}
+
 export type TimeRange = '5m' | '10m' | '30m' | '1h';
 export type TimelineStyle = 'blocks' | 'bars';
 
@@ -78,6 +86,8 @@ const TimelineView: React.FC<TimelineViewProps> = ({
   const [style, setStyle] = useState<TimelineStyle>(timelineStyle);
   const [hoveredSegment, setHoveredSegment] = useState<{ workerId: string; segment: TimelineSegment } | null>(null);
   const [hoveredBlock, setHoveredBlock] = useState<{ workerId: string; time: number; eventCount: number; level: string } | null>(null);
+  const [blockEventPopup, setBlockEventPopup] = useState<BlockEventPopup | null>(null);
+  const [focusedBlockIndex, setFocusedBlockIndex] = useState<number | null>(null);
   const [localCurrentTime, setLocalCurrentTime] = useState<number>(Date.now());
   const [newEventHighlights, setNewEventHighlights] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,6 +111,45 @@ const TimelineView: React.FC<TimelineViewProps> = ({
       }
     };
   }, [propCurrentTime]);
+
+  // Keyboard navigation for blocks
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (focusedBlockIndex !== null && style === 'blocks') {
+        const blockCount = 60; // Match the block count in generateBlocksWithMetadata
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          setFocusedBlockIndex(prev => (prev === null ? 0 : Math.min(blockCount - 1, prev + 1)));
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          setFocusedBlockIndex(prev => (prev === null ? 0 : Math.max(0, prev - 1)));
+        } else if (e.key === 'Enter' && onTimeSelect) {
+          e.preventDefault();
+          const now = effectiveCurrentTime;
+          const rangeStart = now - TIME_RANGE_MS[timeRange];
+          const blockTime = rangeStart + (focusedBlockIndex * TIME_RANGE_MS[timeRange]) / blockCount;
+          onTimeSelect(blockTime);
+        } else if (e.key === 'Escape') {
+          setFocusedBlockIndex(null);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [focusedBlockIndex, style, timeRange, effectiveCurrentTime, onTimeSelect]);
+
+  // Close popup when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (blockEventPopup && containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setBlockEventPopup(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [blockEventPopup]);
 
   // Detect new events for highlight animation
   useEffect(() => {
@@ -308,7 +357,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
   };
 
   // Generate block visualization for compact mode with color-coded log levels
-  const generateBlocksWithMetadata = useCallback((segments: TimelineSegment[], totalWidth: number) => {
+  const generateBlocksWithMetadata = useCallback((segments: TimelineSegment[]) => {
     // Divide timeline into blocks (each block represents ~30 seconds)
     const blockCount = 60; // Number of blocks in the timeline
     const blocks: { char: string; level: string; intensity: number }[] = [];
@@ -359,6 +408,37 @@ const TimelineView: React.FC<TimelineViewProps> = ({
       onWorkerClick(workerId);
     }
   }, [onWorkerClick]);
+
+  // Handle click on individual block to jump to that time and show events
+  const handleBlockClick = useCallback((blockIndex: number, workerId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const now = effectiveCurrentTime;
+    const rangeStart = now - TIME_RANGE_MS[timeRange];
+    const blockCount = 60;
+    const blockStart = rangeStart + (blockIndex * TIME_RANGE_MS[timeRange]) / blockCount;
+    const blockEnd = blockStart + TIME_RANGE_MS[timeRange] / blockCount;
+
+    // Find events in this time range for this worker
+    const blockEvents = filteredEvents.filter(event => {
+      const eventTime = new Date(event.timestamp).getTime();
+      return event.worker === workerId && eventTime >= blockStart && eventTime < blockEnd;
+    });
+
+    // Set popup with event details
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setBlockEventPopup({
+      x: rect.left + rect.width / 2,
+      y: rect.top,
+      workerId,
+      events: blockEvents,
+      time: blockStart,
+    });
+
+    // Also trigger time selection if callback provided
+    if (onTimeSelect) {
+      onTimeSelect(blockStart);
+    }
+  }, [effectiveCurrentTime, timeRange, filteredEvents, onTimeSelect]);
 
   return (
     <div className={`timeline-view ${style} ${compactMode ? 'compact' : ''}`}>
@@ -415,7 +495,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
             </div>
           ) : (
             timelineData.workers.map(workerData => {
-              const blocks = generateBlocksWithMetadata(workerData.segments, 100);
+              const blocks = generateBlocksWithMetadata(workerData.segments);
               return (
                 <div
                   key={workerData.workerId}
@@ -441,19 +521,48 @@ const TimelineView: React.FC<TimelineViewProps> = ({
                     {style === 'blocks' ? (
                       <div className="timeline-blocks">
                         <span className="block-visualization">
-                          {blocks.map((block, i) => (
-                            <span
-                              key={i}
-                              className={`block-char block-level-${block.level}`}
-                              style={{
-                                color: block.level === 'none' ? 'var(--text-tertiary)' : LEVEL_COLORS[block.level],
-                                opacity: block.level === 'none' ? 0.3 : 0.6 + block.intensity * 0.4,
-                              }}
-                              title={`Level: ${block.level}, Intensity: ${(block.intensity * 100).toFixed(0)}%`}
-                            >
-                              {block.char}
-                            </span>
-                          ))}
+                          {blocks.map((block, i) => {
+                            const now = effectiveCurrentTime;
+                            const rangeStart = now - TIME_RANGE_MS[timeRange];
+                            const blockCount = 60;
+                            const blockStart = rangeStart + (i * TIME_RANGE_MS[timeRange]) / blockCount;
+                            const blockEnd = blockStart + TIME_RANGE_MS[timeRange] / blockCount;
+
+                            // Find events in this time range for this worker
+                            const blockEvents = filteredEvents.filter(event => {
+                              const eventTime = new Date(event.timestamp).getTime();
+                              return event.worker === workerData.workerId && eventTime >= blockStart && eventTime < blockEnd;
+                            });
+
+                            return (
+                              <span
+                                key={i}
+                                className={`block-char block-level-${block.level} ${focusedBlockIndex === i ? 'block-focused' : ''}`}
+                                style={{
+                                  color: block.level === 'none' ? 'var(--text-tertiary)' : LEVEL_COLORS[block.level],
+                                  opacity: block.level === 'none' ? 0.3 : 0.6 + block.intensity * 0.4,
+                                }}
+                                title={`Level: ${block.level}, Intensity: ${(block.intensity * 100).toFixed(0)}%${blockEvents.length > 0 ? `, ${blockEvents.length} event${blockEvents.length > 1 ? 's' : ''}` : ''}`}
+                                onClick={(e) => handleBlockClick(i, workerData.workerId, e)}
+                                onMouseEnter={() => {
+                                  if (blockEvents.length > 0) {
+                                    setHoveredBlock({
+                                      workerId: workerData.workerId,
+                                      time: blockStart,
+                                      eventCount: blockEvents.length,
+                                      level: block.level,
+                                    });
+                                  }
+                                }}
+                                onMouseLeave={() => setHoveredBlock(null)}
+                                tabIndex={0}
+                                role="button"
+                                aria-label={`Time block ${i}: ${block.level} level, ${blockEvents.length} events`}
+                              >
+                                {block.char}
+                              </span>
+                            );
+                          })}
                         </span>
                       </div>
                     ) : (
@@ -516,7 +625,76 @@ const TimelineView: React.FC<TimelineViewProps> = ({
 
       {onTimeSelect && (
         <div className="timeline-hint">
-          {style === 'blocks' ? 'Click a worker row to filter' : 'Click on timeline to jump to that time in activity stream'}
+          {style === 'blocks' ? 'Click blocks to see events • Arrow keys to navigate • Enter to select' : 'Click on timeline to jump to that time in activity stream'}
+        </div>
+      )}
+
+      {/* Block event popup */}
+      {blockEventPopup && (
+        <div
+          className="timeline-block-popup"
+          style={{
+            left: `${Math.min(window.innerWidth - 300, Math.max(50, blockEventPopup.x))}px`,
+            top: `${Math.max(10, blockEventPopup.y - 20)}px`,
+          }}
+        >
+          <div className="timeline-block-popup-header">
+            <span className="popup-worker-name">{truncateWorker(blockEventPopup.workerId)}</span>
+            <button
+              className="popup-close"
+              onClick={() => setBlockEventPopup(null)}
+              aria-label="Close popup"
+            >
+              ×
+            </button>
+          </div>
+          <div className="timeline-block-popup-time">
+            {new Date(blockEventPopup.time).toLocaleTimeString()}
+          </div>
+          <div className="timeline-block-popup-events">
+            {blockEventPopup.events.length === 0 ? (
+              <div className="popup-no-events">No events in this time block</div>
+            ) : (
+              blockEventPopup.events.slice(0, 10).map((event, i) => (
+                <div
+                  key={i}
+                  className={`popup-event-item popup-event-${event.level}`}
+                  onClick={() => {
+                    if (onTimeSelect) {
+                      onTimeSelect(new Date(event.timestamp).getTime());
+                    }
+                    setBlockEventPopup(null);
+                  }}
+                >
+                  <span className="popup-event-time">
+                    {new Date(event.timestamp).toLocaleTimeString()}
+                  </span>
+                  <span className="popup-event-level">{event.level.toUpperCase()}</span>
+                  <span className="popup-event-message">{event.message}</span>
+                </div>
+              ))
+            )}
+            {blockEventPopup.events.length > 10 && (
+              <div className="popup-more-events">
+                +{blockEventPopup.events.length - 10} more events
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Hover tooltip for blocks */}
+      {hoveredBlock && style === 'blocks' && (
+        <div
+          className="timeline-block-tooltip"
+          style={{
+            left: `${((hoveredBlock.time - timelineData.rangeStart) / TIME_RANGE_MS[timeRange]) * 100}%`,
+            top: '50%',
+          }}
+        >
+          <div className="tooltip-time">{new Date(hoveredBlock.time).toLocaleTimeString()}</div>
+          <div className="tooltip-count">{hoveredBlock.eventCount} events</div>
+          <div className={`tooltip-level ${hoveredBlock.level}`}>{hoveredBlock.level}</div>
         </div>
       )}
     </div>
