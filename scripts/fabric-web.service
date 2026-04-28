@@ -6,12 +6,23 @@ After=network.target
 Type=notify
 NotifyAccess=all
 WorkingDirectory=/home/coding/FABRIC
-ExecStart=/usr/bin/node dist/cli.js web --port 3000 --source /home/coding/.needle/logs --otlp-http :4318
+# Run with 1GB heap limit, enable heap snapshots for leak detection
+ExecStart=/usr/bin/node --max-old-space-size=1024 dist/cli.js web --port 3000 --source /home/coding/.needle/logs --otlp-http :4318 --heap-snapshots --snapshot-interval 30
 Restart=on-failure
 RestartSec=5
+# Rate limit restarts: 5 times within 2 minutes before entering failed state
+StartLimitInterval=120s
+StartLimitBurst=5
+# Watchdog: service must ping systemd via sd_notify WATCHDOG=1 every 15s (half of 30s WatchdogSec)
+# Implemented in src/web/server.ts with dynamic interval calculation
 WatchdogSec=30
 EnvironmentFile=/home/coding/.config/fabric/secrets.env
 Environment=NODE_ENV=production
+# Memory limits: 1.5GB max, will trigger OOM if exceeded
+MemoryMax=1536M
+MemoryHigh=1200M
+# CPU limit: max 2 cores (200%)
+CPUQuota=200%
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=fabric-web
