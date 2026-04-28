@@ -971,6 +971,69 @@ export interface FileHeatmapStats {
   avgModificationsPerFile: number;
 }
 
+/**
+ * Heatmap snapshot at a specific point in time
+ */
+export interface HeatmapSnapshot {
+  /** Timestamp of this snapshot */
+  timestamp: number;
+
+  /** Heatmap entries at this point in time */
+  entries: FileHeatmapEntry[];
+
+  /** Statistics at this point in time */
+  stats: FileHeatmapStats;
+}
+
+/**
+ * Time-series heatmap data for animation
+ */
+export interface HeatmapTimelapse {
+  /** Start timestamp of the timelapse */
+  startTimestamp: number;
+
+  /** End timestamp of the timelapse */
+  endTimestamp: number;
+
+  /** Time interval between snapshots (ms) */
+  interval: number;
+
+  /** Total number of snapshots */
+  totalSnapshots: number;
+
+  /** Array of heatmap snapshots */
+  snapshots: HeatmapSnapshot[];
+}
+
+/**
+ * Options for generating timelapse data
+ */
+export interface TimelapseOptions {
+  /** Start timestamp (defaults to oldest modification) */
+  startTimestamp?: number;
+
+  /** End timestamp (defaults to now) */
+  endTimestamp?: number;
+
+  /** Number of snapshots to generate (default 30) */
+  snapshotCount?: number;
+
+  /** Minimum modifications to be included */
+  minModifications?: number;
+
+  /** Maximum entries per snapshot */
+  maxEntries?: number;
+
+  /** Sort mode for snapshots */
+  sortBy?: 'modifications' | 'recent' | 'workers' | 'collisions';
+
+  /** Filter by directory prefix */
+  directoryFilter?: string;
+
+  /** Only show files with collisions */
+  collisionsOnly?: boolean;
+}
+
 // ============================================
 // File Anomaly Detection Types
 // ============================================
@@ -2321,6 +2384,53 @@ export interface WorkerAnalyticsStore {
 
   /** Get analytics summary as formatted string */
   getSummary(options?: WorkerAnalyticsOptions): string;
+}
+
+/**
+ * Worker comparison result - side-by-side comparison of two workers
+ */
+export interface WorkerComparison {
+  /** First worker metrics */
+  worker1: WorkerMetrics;
+
+  /** Second worker metrics */
+  worker2: WorkerMetrics;
+
+  /** Metric differences (worker1 - worker2, positive means worker1 is higher) */
+  differences: {
+    beadsCompleted: number;
+    beadsPerHour: number;
+    avgCompletionTimeMs: number;
+    errorRate: number;
+    costPerBead: number;
+    efficiencyScore: number;
+  };
+
+  /** Percentage differences (worker1 relative to worker2) */
+  percentDifferences: {
+    beadsCompleted: number;
+    beadsPerHour: number;
+    avgCompletionTimeMs: number;
+    errorRate: number;
+    costPerBead: number;
+    efficiencyScore: number;
+  };
+
+  /** Which worker is better for each metric */
+  betterWorker: {
+    beadsCompleted: 'worker1' | 'worker2' | 'tie';
+    beadsPerHour: 'worker1' | 'worker2' | 'tie';
+    avgCompletionTimeMs: 'worker1' | 'worker2' | 'tie';
+    errorRate: 'worker1' | 'worker2' | 'tie';
+    costPerBead: 'worker1' | 'worker2' | 'tie';
+    efficiencyScore: 'worker1' | 'worker2' | 'tie';
+  };
+
+  /** Overall winner based on majority of metrics */
+  overallWinner: 'worker1' | 'worker2' | 'tie';
+
+  /** Score tally for determining overall winner */
+  score: { worker1: number; worker2: number };
 }
 
 // ============================================

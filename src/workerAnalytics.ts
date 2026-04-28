@@ -19,6 +19,7 @@ import {
   WorkerAnalyticsOptions,
   WorkerAnalyticsStore,
   TimeWindow,
+  WorkerComparison,
 } from './types.js';
 import { CostTracker } from './tui/utils/costTracking.js';
 import { getHistoricalStore, HistoricalStore, WorkerComparisonMetrics } from './historicalStore.js';
@@ -227,6 +228,12 @@ const MAX_ERROR_TIMESTAMPS = 500;
 const MAX_ACTIVITY_PERIODS = 500;
 const MAX_BEAD_COMPLETION_TIMES = 500;
 
+/** Maximum number of workers to track in analytics (LRU eviction). */
+const MAX_WORKERS = 1000;
+
+/** Maximum age (ms) for inactive workers before pruning from analytics. */
+const STALE_WORKER_MAX_AGE_MS = 3_600_000; // 1 hour
+
 /**
  * Internal tracking data for a worker
  */
@@ -266,6 +273,8 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
   private timeSeriesInterval: number;
   private lastSnapshotTime: number = 0;
   private metricAccumulator: MetricAccumulator;
+  private workerLRU: string[] = []; // Least recently used at front
+  private eventCountForCleanup: number = 0;
 
   constructor(costTracker?: CostTracker, timeSeriesInterval: number = 3600000) {
     this.costTracker = costTracker || new CostTracker();
@@ -283,8 +292,16 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     // Get or create worker tracking data
     let worker = this.workers.get(event.worker);
     if (!worker) {
+      // Enforce worker cap with LRU eviction
+      if (this.workers.size >= MAX_WORKERS) {
+        this.evictLRUWorker();
+      }
       worker = this.createWorkerTrackingData(event.worker, event.ts);
       this.workers.set(event.worker, worker);
+      this.workerLRU.push(event.worker);
+    } else {
+      // Update LRU order (move to end)
+      this.touchWorkerLRU(event.worker);
     }
 
     // Update activity tracking
@@ -320,6 +337,13 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     // Feed OTLP metric events to the accumulator
     if (event.msg?.startsWith('metric.')) {
       this.metricAccumulator.processEvent(event);
+    }
+
+    // Periodic cleanup of stale workers (every 1000 events)
+    this.eventCountForCleanup++;
+    if (this.eventCountForCleanup >= 1000) {
+      this.cleanupStaleWorkers();
+      this.eventCountForCleanup = 0;
     }
 
     // Periodic time-series snapshot
@@ -597,6 +621,45 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     }
 
     return lines.join('\n');
+  }
+
+  /**
+   * Update worker LRU order (move to end when accessed).
+   */
+  private touchWorkerLRU(workerId: string): void {
+    const idx = this.workerLRU.indexOf(workerId);
+    if (idx !== -1) {
+      this.workerLRU.splice(idx, 1);
+    }
+    this.workerLRU.push(workerId);
+  }
+
+  /**
+   * Evict least recently used worker when over cap.
+   */
+  private evictLRUWorker(): void {
+    const lruWorkerId = this.workerLRU.shift();
+    if (lruWorkerId) {
+      this.workers.delete(lruWorkerId);
+    }
+  }
+
+  /**
+   * Periodic cleanup of stale workers.
+   */
+  private cleanupStaleWorkers(): void {
+    const now = Date.now();
+    const staleWorkerCutoff = now - STALE_WORKER_MAX_AGE_MS;
+
+    for (const [workerId, worker] of this.workers) {
+      if (worker.lastActivity < staleWorkerCutoff) {
+        this.workers.delete(workerId);
+        const lruIdx = this.workerLRU.indexOf(workerId);
+        if (lruIdx !== -1) {
+          this.workerLRU.splice(lruIdx, 1);
+        }
+      }
+    }
   }
 
   // ============================================
@@ -924,6 +987,97 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
     newestSession: number | null;
   } {
     return getHistoricalStore().getStats();
+  }
+
+  /**
+   * Compare two workers side-by-side
+   */
+  compareWorkers(worker1Id: string, worker2Id: string, options: WorkerAnalyticsOptions = {}): WorkerComparison | null {
+    const worker1 = this.getWorkerMetrics(worker1Id, options);
+    const worker2 = this.getWorkerMetrics(worker2Id, options);
+
+    if (!worker1 || !worker2) {
+      return null;
+    }
+
+    // Calculate raw differences (worker1 - worker2)
+    const differences = {
+      beadsCompleted: worker1.beadsCompleted - worker2.beadsCompleted,
+      beadsPerHour: worker1.beadsPerHour - worker2.beadsPerHour,
+      avgCompletionTimeMs: worker1.avgCompletionTimeMs - worker2.avgCompletionTimeMs,
+      errorRate: worker1.errorRate - worker2.errorRate,
+      costPerBead: worker1.costPerBead - worker2.costPerBead,
+      efficiencyScore: worker1.efficiencyScore - worker2.efficiencyScore,
+    };
+
+    // Calculate percentage differences
+    const percentDifferences = {
+      beadsCompleted: worker2.beadsCompleted > 0
+        ? ((worker1.beadsCompleted - worker2.beadsCompleted) / worker2.beadsCompleted) * 100
+        : (worker1.beadsCompleted > 0 ? 100 : 0),
+      beadsPerHour: worker2.beadsPerHour > 0
+        ? ((worker1.beadsPerHour - worker2.beadsPerHour) / worker2.beadsPerHour) * 100
+        : 0,
+      avgCompletionTimeMs: worker2.avgCompletionTimeMs > 0
+        ? ((worker1.avgCompletionTimeMs - worker2.avgCompletionTimeMs) / worker2.avgCompletionTimeMs) * 100
+        : 0,
+      errorRate: worker2.errorRate > 0
+        ? ((worker1.errorRate - worker2.errorRate) / worker2.errorRate) * 100
+        : 0,
+      costPerBead: worker2.costPerBead > 0
+        ? ((worker1.costPerBead - worker2.costPerBead) / worker2.costPerBead) * 100
+        : 0,
+      efficiencyScore: worker2.efficiencyScore > 0
+        ? ((worker1.efficiencyScore - worker2.efficiencyScore) / worker2.efficiencyScore) * 100
+        : 0,
+    };
+
+    // Determine which worker is better for each metric
+    const EPSILON = 0.0001; // Small value for floating point comparison
+    const betterWorker = {
+      beadsCompleted: Math.abs(differences.beadsCompleted) < EPSILON
+        ? 'tie' as const
+        : (differences.beadsCompleted > 0 ? 'worker1' as const : 'worker2' as const),
+      beadsPerHour: Math.abs(differences.beadsPerHour) < EPSILON
+        ? 'tie' as const
+        : (differences.beadsPerHour > 0 ? 'worker1' as const : 'worker2' as const),
+      avgCompletionTimeMs: Math.abs(differences.avgCompletionTimeMs) < EPSILON
+        ? 'tie' as const
+        : (differences.avgCompletionTimeMs < 0 ? 'worker1' as const : 'worker2' as const), // Lower is better
+      errorRate: Math.abs(differences.errorRate) < EPSILON
+        ? 'tie' as const
+        : (differences.errorRate < 0 ? 'worker1' as const : 'worker2' as const), // Lower is better
+      costPerBead: Math.abs(differences.costPerBead) < EPSILON
+        ? 'tie' as const
+        : (differences.costPerBead < 0 ? 'worker1' as const : 'worker2' as const), // Lower is better
+      efficiencyScore: Math.abs(differences.efficiencyScore) < EPSILON
+        ? 'tie' as const
+        : (differences.efficiencyScore > 0 ? 'worker1' as const : 'worker2' as const),
+    };
+
+    // Calculate score tally
+    let worker1Score = 0;
+    let worker2Score = 0;
+
+    Object.values(betterWorker).forEach(winner => {
+      if (winner === 'worker1') worker1Score++;
+      else if (winner === 'worker2') worker2Score++;
+    });
+
+    // Determine overall winner
+    const overallWinner: 'worker1' | 'worker2' | 'tie' =
+      worker1Score > worker2Score ? 'worker1' :
+      worker2Score > worker1Score ? 'worker2' : 'tie';
+
+    return {
+      worker1,
+      worker2,
+      differences,
+      percentDifferences,
+      betterWorker,
+      overallWinner,
+      score: { worker1: worker1Score, worker2: worker2Score },
+    };
   }
 }
 

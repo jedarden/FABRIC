@@ -6,7 +6,7 @@
  */
 
 import blessed from 'blessed';
-import { WorkerMetrics, AggregatedAnalytics, MetricsDataPoint } from '../../types.js';
+import { WorkerMetrics, AggregatedAnalytics, MetricsDataPoint, WorkerComparison } from '../../types.js';
 
 /** Inline trend type from WorkerMetrics */
 type InlineTrend = {
@@ -107,6 +107,47 @@ function getStatusColor(errorRate: number): string {
 }
 
 /**
+ * Render a comparison row with values, difference, and winner indicator
+ */
+function renderComparisonRow(
+  label: string,
+  value1: string | number,
+  value2: string | number,
+  diff: number,
+  percentDiff: number,
+  better: 'worker1' | 'worker2' | 'tie',
+  lowerIsBetter: boolean
+): string {
+  const v1Str = String(value1).padStart(12);
+  const v2Str = String(value2).padStart(12);
+
+  // Format difference
+  let diffStr = '';
+  if (Math.abs(diff) < 0.001) {
+    diffStr = '        0';
+  } else {
+    const sign = diff > 0 ? '+' : '';
+    const color = (lowerIsBetter ? diff < 0 : diff > 0) ? 'green' : 'red';
+    diffStr = `{${color}-fg}${sign}${diff.toFixed(2)}{/}`;
+  }
+
+  // Format percentage difference
+  let percentStr = '';
+  if (Math.abs(percentDiff) < 0.1) {
+    percentStr = '     0.0%';
+  } else {
+    const sign = percentDiff > 0 ? '+' : '';
+    const color = (lowerIsBetter ? percentDiff < 0 : percentDiff > 0) ? 'green' : 'red';
+    percentStr = `{${color}-fg}${sign}${percentDiff.toFixed(1)}%{/}`;
+  }
+
+  // Winner indicator
+  const winner = better === 'worker1' ? '{green-fg}←{/}' : better === 'worker2' ? '{green-fg}→{/}' : ' ';
+
+  return `  ${label.padEnd(15)} ${v1Str}  ${v2Str}  ${diffStr}  ${percentStr}  ${winner}`;
+}
+
+/**
  * WorkerAnalyticsPanel displays worker performance metrics
  */
 export class WorkerAnalyticsPanel {
@@ -116,10 +157,12 @@ export class WorkerAnalyticsPanel {
   private metrics: WorkerMetrics[] = [];
   private aggregated: AggregatedAnalytics | null = null;
   private selectedIndex = 0;
-  private viewMode: 'list' | 'detail' | 'aggregated' = 'list';
+  private secondSelectedIndex = 1; // For comparison mode
+  private viewMode: 'list' | 'detail' | 'aggregated' | 'comparison' = 'list';
   private sortMode: 'beads' | 'errorRate' | 'cost' | 'efficiency' = 'beads';
   private onSelect?: (workerId: string) => void;
   private analyticsManager: WorkerAnalytics;
+  private comparisonResult: WorkerComparison | null = null;
 
   constructor(options: WorkerAnalyticsPanelOptions) {
     this.onSelect = options.onSelect;
@@ -188,11 +231,35 @@ export class WorkerAnalyticsPanel {
    */
   private bindKeys(): void {
     this.list.key(['up', 'k'], () => {
-      this.selectPrevious();
+      if (this.viewMode === 'comparison') {
+        this.selectPreviousComparison();
+      } else {
+        this.selectPrevious();
+      }
     });
 
     this.list.key(['down', 'j'], () => {
-      this.selectNext();
+      if (this.viewMode === 'comparison') {
+        this.selectNextComparison();
+      } else {
+        this.selectNext();
+      }
+    });
+
+    this.list.key(['left', 'h'], () => {
+      if (this.viewMode === 'comparison') {
+        // Move to first worker selection
+        this.selectedIndexChanged(this.selectedIndex);
+        this.render();
+      }
+    });
+
+    this.list.key(['right', 'l'], () => {
+      if (this.viewMode === 'comparison') {
+        // Move to second worker selection
+        this.secondSelectedIndexChanged(this.secondSelectedIndex);
+        this.render();
+      }
     });
 
     this.list.key(['enter', 'space'], () => {
@@ -201,6 +268,10 @@ export class WorkerAnalyticsPanel {
 
     this.list.key(['a'], () => {
       this.toggleAggregated();
+    });
+
+    this.list.key(['c'], () => {
+      this.toggleComparison();
     });
 
     this.list.key(['s'], () => {
@@ -312,6 +383,99 @@ export class WorkerAnalyticsPanel {
       this.viewMode = 'aggregated';
     }
     this.render();
+  }
+
+  /**
+   * Toggle comparison view
+   */
+  toggleComparison(): void {
+    if (this.metrics.length < 2) {
+      // Need at least 2 workers to compare
+      return;
+    }
+
+    if (this.viewMode === 'comparison') {
+      this.viewMode = 'list';
+    } else {
+      this.viewMode = 'comparison';
+      // Ensure both indices are valid
+      if (this.secondSelectedIndex >= this.metrics.length) {
+        this.secondSelectedIndex = (this.selectedIndex + 1) % this.metrics.length;
+      }
+      // Update comparison result
+      this.updateComparisonResult();
+    }
+    this.render();
+  }
+
+  /**
+   * Select next worker in comparison mode (cycles both selections together)
+   */
+  selectNextComparison(): void {
+    if (this.metrics.length === 0) return;
+    this.selectedIndex = (this.selectedIndex + 1) % this.metrics.length;
+    this.secondSelectedIndex = (this.secondSelectedIndex + 1) % this.metrics.length;
+    this.updateComparisonResult();
+    this.render();
+  }
+
+  /**
+   * Select previous worker in comparison mode
+   */
+  selectPreviousComparison(): void {
+    if (this.metrics.length === 0) return;
+    this.selectedIndex = this.selectedIndex === 0
+      ? this.metrics.length - 1
+      : this.selectedIndex - 1;
+    this.secondSelectedIndex = this.secondSelectedIndex === 0
+      ? this.metrics.length - 1
+      : this.secondSelectedIndex - 1;
+    this.updateComparisonResult();
+    this.render();
+  }
+
+  /**
+   * Change primary selection index
+   */
+  selectedIndexChanged(newIndex: number): void {
+    if (this.metrics.length === 0) return;
+    this.selectedIndex = newIndex;
+    this.updateComparisonResult();
+    this.render();
+  }
+
+  /**
+   * Change secondary selection index
+   */
+  secondSelectedIndexChanged(newIndex: number): void {
+    if (this.metrics.length === 0) return;
+    this.secondSelectedIndex = newIndex;
+    this.updateComparisonResult();
+    this.render();
+  }
+
+  /**
+   * Update the comparison result based on current selections
+   */
+  private updateComparisonResult(): void {
+    if (this.metrics.length < 2) {
+      this.comparisonResult = null;
+      return;
+    }
+
+    const worker1 = this.metrics[this.selectedIndex];
+    const worker2 = this.metrics[this.secondSelectedIndex];
+
+    if (!worker1 || !worker2) {
+      this.comparisonResult = null;
+      return;
+    }
+
+    // Use the analytics manager's compareWorkers method
+    this.comparisonResult = this.analyticsManager.compareWorkers(
+      worker1.workerId,
+      worker2.workerId
+    );
   }
 
   /**
@@ -495,6 +659,152 @@ export class WorkerAnalyticsPanel {
   }
 
   /**
+   * Render comparison view
+   */
+  private renderComparison(): void {
+    if (!this.comparisonResult || this.metrics.length < 2) {
+      this.detailBox.setContent('{gray-fg}Need at least 2 workers to compare{/}');
+      this.list.hide();
+      this.detailBox.top = 0;
+      this.detailBox.height = '100%-2';
+      return;
+    }
+
+    const c = this.comparisonResult;
+    const w1 = c.worker1;
+    const w2 = c.worker2;
+    const lines: string[] = [];
+
+    lines.push('{bold}=== WORKER COMPARISON ==={/}');
+    lines.push('');
+
+    // Header with worker IDs
+    const w1Short = w1.workerId.slice(0, 15);
+    const w2Short = w2.workerId.slice(0, 15);
+    const winnerIndicator = c.overallWinner === 'worker1' ? '{green-fg}★{/}' : c.overallWinner === 'worker2' ? '{green-fg}  ★{/}' : '  =';
+
+    lines.push(`{bold}Worker 1:${/} {cyan-fg}${w1Short.padEnd(15)}{/}  {bold}Worker 2:{/} {cyan-fg}${w2Short.padEnd(15)}{/}  ${winnerIndicator}`);
+    lines.push('{bold}' + '-'.repeat(60) + '{/}');
+    lines.push('');
+
+    // Performance metrics
+    lines.push('{bold}Performance Metrics:{/}');
+    lines.push(renderComparisonRow(
+      'Beads Completed',
+      w1.beadsCompleted,
+      w2.beadsCompleted,
+      c.differences.beadsCompleted,
+      c.percentDifferences.beadsCompleted,
+      c.betterWorker.beadsCompleted,
+      false // higher is better
+    ));
+    lines.push(renderComparisonRow(
+      'Beads/Hour',
+      w1.beadsPerHour.toFixed(2),
+      w2.beadsPerHour.toFixed(2),
+      c.differences.beadsPerHour,
+      c.percentDifferences.beadsPerHour,
+      c.betterWorker.beadsPerHour,
+      false // higher is better
+    ));
+    lines.push(renderComparisonRow(
+      'Avg Completion',
+      formatDuration(w1.avgCompletionTimeMs),
+      formatDuration(w2.avgCompletionTimeMs),
+      c.differences.avgCompletionTimeMs,
+      c.percentDifferences.avgCompletionTimeMs,
+      c.betterWorker.avgCompletionTimeMs,
+      true // lower is better
+    ));
+    lines.push('');
+
+    // Error and cost metrics
+    lines.push('{bold}Error & Cost Metrics:{/}');
+    lines.push(renderComparisonRow(
+      'Error Rate',
+      formatPercent(w1.errorRate),
+      formatPercent(w2.errorRate),
+      c.differences.errorRate,
+      c.percentDifferences.errorRate,
+      c.betterWorker.errorRate,
+      true // lower is better
+    ));
+    lines.push(renderComparisonRow(
+      'Cost Per Bead',
+      formatCost(w1.costPerBead),
+      formatCost(w2.costPerBead),
+      c.differences.costPerBead,
+      c.percentDifferences.costPerBead,
+      c.betterWorker.costPerBead,
+      true // lower is better
+    ));
+    lines.push(renderComparisonRow(
+      'Total Cost',
+      formatCost(w1.totalCostUsd),
+      formatCost(w2.totalCostUsd),
+      w1.totalCostUsd - w2.totalCostUsd,
+      (w1.totalCostUsd - w2.totalCostUsd) / (w2.totalCostUsd || 0.01) * 100,
+      w1.totalCostUsd < w2.totalCostUsd ? 'worker1' : w1.totalCostUsd > w2.totalCostUsd ? 'worker2' : 'tie',
+      true // lower is better
+    ));
+    lines.push('');
+
+    // Efficiency metrics
+    lines.push('{bold}Efficiency Metrics:{/}');
+    lines.push(renderComparisonRow(
+      'Efficiency Score',
+      formatPercent(w1.efficiencyScore),
+      formatPercent(w2.efficiencyScore),
+      c.differences.efficiencyScore,
+      c.percentDifferences.efficiencyScore,
+      c.betterWorker.efficiencyScore,
+      false // higher is better
+    ));
+    lines.push(renderComparisonRow(
+      'Active Time',
+      formatDuration(w1.activeTimeMs),
+      formatDuration(w2.activeTimeMs),
+      w1.activeTimeMs - w2.activeTimeMs,
+      (w1.activeTimeMs - w2.activeTimeMs) / (w2.activeTimeMs || 1) * 100,
+      w1.activeTimeMs > w2.activeTimeMs ? 'worker1' : w1.activeTimeMs < w2.activeTimeMs ? 'worker2' : 'tie',
+      false // higher is better (more active time)
+    ));
+    lines.push(renderComparisonRow(
+      'Idle Percentage',
+      formatPercent(w1.idlePercentage),
+      formatPercent(w2.idlePercentage),
+      w1.idlePercentage - w2.idlePercentage,
+      (w1.idlePercentage - w2.idlePercentage) / (w2.idlePercentage || 0.01) * 100,
+      w1.idlePercentage < w2.idlePercentage ? 'worker1' : w1.idlePercentage > w2.idlePercentage ? 'worker2' : 'tie',
+      true // lower is better
+    ));
+    lines.push('');
+
+    // Overall score
+    lines.push('{bold}Overall Score:{/}');
+    lines.push(`  Worker 1: {cyan-fg}${c.score.worker1}{/} metrics won`);
+    lines.push(`  Worker 2: {cyan-fg}${c.score.worker2}{/} metrics won`);
+    lines.push('');
+
+    const overallText = c.overallWinner === 'worker1'
+      ? '{green-fg}Worker 1 wins overall{/}'
+      : c.overallWinner === 'worker2'
+      ? '{green-fg}Worker 2 wins overall{/}'
+      : '{yellow-fg}Overall tie{/}';
+    lines.push(`  Result: ${overallText}`);
+
+    lines.push('');
+    lines.push('{gray-fg}[↑/↓] Next pair  [←/→] Swap workers  [Esc] Back{/}');
+
+    // Hide list in comparison view
+    this.list.hide();
+    this.detailBox.top = 0;
+    this.detailBox.height = '100%-2';
+
+    this.detailBox.setContent(lines.join('\n'));
+  }
+
+  /**
    * Render the component
    */
   render(): void {
@@ -504,6 +814,8 @@ export class WorkerAnalyticsPanel {
 
     if (this.viewMode === 'aggregated') {
       this.renderAggregated();
+    } else if (this.viewMode === 'comparison') {
+      this.renderComparison();
     } else {
       // Show list and detail side by side
       this.list.show();
