@@ -13,6 +13,7 @@ import {
   importFromBase64Browser,
   exportToJsonWeb,
   importFromJsonWeb,
+  exportToMarkdown,
   ReplayExportWeb,
 } from '../utils/replayExport';
 
@@ -195,6 +196,28 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showExportMenu]);
+
+  // Check for replay data in URL on mount
+  useEffect(() => {
+    const checkUrlForReplay = () => {
+      try {
+        const replayParam = new URLSearchParams(window.location.search).get('replay');
+        if (replayParam) {
+          const importData = importFromBase64Browser(replayParam);
+          if (importData.events.length > 0) {
+            onImport?.(importData.events, importData.metadata);
+            setExportSuccess(`Imported ${importData.eventCount} events from URL`);
+            setTimeout(() => setExportSuccess(null), 3000);
+          }
+        }
+      } catch (err) {
+        setImportError(`Failed to import from URL: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setTimeout(() => setImportError(null), 5000);
+      }
+    };
+
+    checkUrlForReplay();
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -457,6 +480,90 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
     fileInputRef.current?.click();
   }, []);
 
+  /**
+   * Export as Markdown file
+   */
+  const handleExportMarkdown = useCallback(() => {
+    if (filteredEvents.length === 0) {
+      setImportError('No events to export');
+      return;
+    }
+
+    try {
+      // Convert web LogEvent format to core LogEvent format for exportToMarkdown
+      const coreEvents = filteredEvents.map(e => ({
+        ts: new Date(e.timestamp).getTime(),
+        worker: e.worker,
+        level: e.level,
+        msg: e.message,
+        tool: e.tool,
+        path: e.path,
+        bead: e.bead,
+        sequence: e.sequence,
+      }));
+
+      const markdown = exportToMarkdown(coreEvents);
+      const blob = new Blob([markdown], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+
+      // Generate filename with timestamp
+      const date = new Date();
+      const dateStr = date.toISOString().split('T')[0];
+      const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-');
+      const filename = `session-${dateStr}-${timeStr}.md`;
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setExportSuccess(`Exported as ${filename}`);
+      setTimeout(() => setExportSuccess(null), 3000);
+      setShowExportMenu(false);
+    } catch (err) {
+      setImportError(`Failed to export markdown: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setTimeout(() => setImportError(null), 5000);
+    }
+  }, [filteredEvents]);
+
+  /**
+   * Import from URL
+   */
+  const handleImportUrl = useCallback(() => {
+    const url = prompt('Enter replay URL or paste the base64 data:');
+    if (!url) return;
+
+    try {
+      // Check if it's a full URL or just base64 data
+      let base64Data = url;
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        const parsedUrl = new URL(url);
+        const replayParam = parsedUrl.searchParams.get('replay');
+        if (!replayParam) {
+          throw new Error('No replay data found in URL');
+        }
+        base64Data = replayParam;
+      }
+
+      const importData = importFromBase64Browser(base64Data);
+      if (importData.events.length === 0) {
+        setImportError('No events found in import data');
+        return;
+      }
+
+      onImport?.(importData.events, importData.metadata);
+      setExportSuccess(`Imported ${importData.eventCount} events`);
+      setTimeout(() => setExportSuccess(null), 3000);
+      setShowExportMenu(false);
+    } catch (err) {
+      setImportError(`Failed to import from URL: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setTimeout(() => setImportError(null), 5000);
+    }
+  }, [onImport]);
+
   // Format event for display
   const formatEvent = (event: LogEvent): React.ReactNode => {
     const time = new Date(event.timestamp).toLocaleTimeString();
@@ -617,7 +724,15 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
                   disabled={filteredEvents.length === 0}
                   title="Download as .fabric-replay file"
                 >
-                  💾 Export File
+                  💾 Export JSON
+                </button>
+                <button
+                  className="replay-dropdown-item"
+                  onClick={handleExportMarkdown}
+                  disabled={filteredEvents.length === 0}
+                  title="Export as Markdown file"
+                >
+                  📝 Export Markdown
                 </button>
                 <button
                   className="replay-dropdown-item"
@@ -625,6 +740,13 @@ const SessionReplay: React.FC<SessionReplayProps> = ({
                   title="Import from .fabric-replay file"
                 >
                   📂 Import File
+                </button>
+                <button
+                  className="replay-dropdown-item"
+                  onClick={handleImportUrl}
+                  title="Import from URL or base64 data"
+                >
+                  🌐 Import from URL
                 </button>
               </div>
             )}

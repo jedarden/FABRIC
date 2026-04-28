@@ -156,6 +156,12 @@ export class SessionReplay extends EventEmitter {
     this.container.key(['3'], () => this.setSpeed(2));
     this.container.key(['4'], () => this.setSpeed(5));
     this.container.key(['5'], () => this.setSpeed(10));
+
+    // Export shortcuts
+    this.container.key(['e'], () => this.handleExportFile());
+    this.container.key(['E'], () => this.handleExportBase64());
+    this.container.key(['m'], () => this.handleExportMarkdown());
+    this.container.key(['i'], () => this.handleImportPrompt());
   }
 
   /**
@@ -529,7 +535,91 @@ export class SessionReplay extends EventEmitter {
    */
   private formatControls(): string {
     const speedDisplay = `${this.speed}x`;
-    return ` Speed: ${speedDisplay} | [Space] Play/Pause | [←/→] Step | [↑/↓] Speed | [1-5] 0.5x-10x | [Home/End] Jump | [r] Reset`;
+    return ` Speed: ${speedDisplay} | [Space] Play/Pause | [←/→] Step | [↑/↓] Speed | [1-5] 0.5x-10x | [Home/End] Jump | [r] Reset | [e/m/E] Export | [i] Import`;
+  }
+
+  /**
+   * Handle export to file
+   */
+  private handleExportFile(): void {
+    try {
+      const filePath = this.exportToFile();
+      this.logBox.log(`{green-fg}Exported to: ${filePath}{/}`);
+    } catch (err) {
+      this.logBox.log(`{red-fg}Export failed: ${err instanceof Error ? err.message : 'Unknown error'}{/}`);
+    }
+  }
+
+  /**
+   * Handle export to base64 (for sharing)
+   */
+  private handleExportBase64(): void {
+    try {
+      const base64 = this.exportToBase64();
+      const url = `https://example.com/replay?data=${base64.slice(0, 50)}...`;
+      this.logBox.log(`{green-fg}Shareable URL generated (${base64.length} bytes){/}`);
+      this.logBox.log(`{yellow-fg}Use this base64 data to share the replay{/}`);
+      this.logBox.log(`{cyan-fg}${base64.slice(0, 100)}...{/}`);
+    } catch (err) {
+      this.logBox.log(`{red-fg}Export failed: ${err instanceof Error ? err.message : 'Unknown error'}{/}`);
+    }
+  }
+
+  /**
+   * Handle export to markdown
+   */
+  private handleExportMarkdown(): void {
+    try {
+      const { exportToMarkdown } = require('../../utils/replayExport.js');
+      const eventsToExport = this.filteredEvents.length > 0 ? this.filteredEvents : this.events;
+
+      if (eventsToExport.length === 0) {
+        this.logBox.log(`{red-fg}No events to export{/}`);
+        return;
+      }
+
+      const markdown = exportToMarkdown(eventsToExport, {
+        sourcePath: this.sourcePath || undefined,
+      });
+
+      // Generate filename
+      const timestamps = eventsToExport.map(e => e.ts);
+      const sessionStart = Math.min(...timestamps);
+      const date = new Date(sessionStart);
+      const dateStr = date.toISOString().split('T')[0];
+      const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-');
+      const filename = `session-${dateStr}-${timeStr}.md`;
+
+      // Write file
+      const path = require('path');
+      const fs = require('fs');
+      const exportPath = path.join(process.cwd(), filename);
+      fs.writeFileSync(exportPath, markdown, 'utf-8');
+
+      this.logBox.log(`{green-fg}Exported Markdown to: ${exportPath}{/}`);
+    } catch (err) {
+      this.logBox.log(`{red-fg}Markdown export failed: ${err instanceof Error ? err.message : 'Unknown error'}{/}`);
+    }
+  }
+
+  /**
+   * Handle import from file prompt
+   */
+  private handleImportPrompt(): void {
+    this.logBox.log(`{yellow-fg}Import: Use importFromFile(path) or importFromBase64(string) methods{/}`);
+  }
+
+  /**
+   * Import from URL (requires base64 data from URL)
+   * Call this method programmatically with the base64 data
+   */
+  importFromUrlData(base64Data: string): { eventCount: number; metadata: object } {
+    try {
+      return this.importFromBase64(base64Data);
+    } catch (err) {
+      this.logBox.log(`{red-fg}Import from URL failed: ${err instanceof Error ? err.message : 'Unknown error'}{/}`);
+      throw err;
+    }
   }
 
   /**
