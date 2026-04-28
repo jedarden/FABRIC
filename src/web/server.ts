@@ -13,7 +13,6 @@ import { createSocket } from 'dgram';
 import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus, SemanticNarrative, NarrativeSegment } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
-import { SemanticNarrativeGenerator } from '../semanticNarrative.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
 import { normalizeToLogEvent, EventDeduplicator } from '../normalizer.js';
 import { computeFleetAnalytics } from '../analytics.js';
@@ -22,6 +21,26 @@ import { ServerMetrics } from '../serverMetrics.js';
 import { SessionDigestGenerator, formatDigestAsMarkdown } from '../sessionDigest.js';
 import { parseGitEvents } from '../gitParser.js';
 import { generatePRPreview } from '../tui/utils/prPreview.js';
+import { getMemoryProfiler } from '../memoryProfiler.js';
+import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport } from '../heapDiff.js';
+
+/** Get the v8 module (available in Node.js) */
+function getV8() {
+  try {
+    // @ts-ignore - v8 module exists in Node.js but not in TypeScript types
+    return require('v8');
+  } catch {
+    return null;
+  }
+}
+
+/** Format bytes to human readable string. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)}GB`;
+}
 
 /** Maximum payload size for POST requests (64KB) */
 const MAX_PAYLOAD_SIZE = 64 * 1024;
@@ -63,6 +82,8 @@ export interface WebServerOptions {
   maxEventCount?: number;
   /** Shared deduplicator — exposes dedup_dropped in /api/health. */
   deduplicator?: EventDeduplicator;
+  /** CLI filter for worker/level - applied at tailer level */
+  cliFilter?: import('../types.js').EventFilter;
 }
 
 export interface WebServer extends EventEmitter {
@@ -79,7 +100,7 @@ export interface WebServer extends EventEmitter {
  * Create the FABRIC web server
  */
 export function createWebServer(options: WebServerOptions): WebServer {
-  const { port, logPath, store, authToken, otlpHttpPort, maxEventCount, deduplicator } = options;
+  const { port, logPath, store, authToken, otlpHttpPort, maxEventCount, deduplicator, cliFilter } = options;
   const emitter = new EventEmitter();
   const metrics = new ServerMetrics();
 
@@ -153,7 +174,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
         data: {
           workers: store.getWorkers(),
           recentEvents: store.query().slice(-50),
-          collisions: store.getCollisions()
+          collisions: store.getCollisions(),
+          filter: cliFilter ? { worker: cliFilter.worker, level: cliFilter.level } : undefined,
         }
       }));
 
@@ -176,6 +198,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const snap = metrics.snapshot();
       const overloaded = maxEventCount != null && store.size > maxEventCount;
       if (overloaded) snap.status = 'overloaded';
+
+      // Add memory stats from profiler
+      const profiler = getMemoryProfiler();
+      const memoryStats = profiler.getStats();
+
       res.status(overloaded ? 503 : 200).json({
         status: snap.status,
         uptime_sec: snap.uptime_sec,
@@ -186,6 +213,17 @@ export function createWebServer(options: WebServerOptions): WebServer {
         tailer_files_watched: snap.tailer_files_watched,
         dedup_dropped: snap.dedup_dropped,
         process_resident_memory_bytes: snap.process_resident_memory_bytes,
+        memory: {
+          rss: memoryStats.current.rss,
+          heap_used: memoryStats.current.heapUsed,
+          heap_total: memoryStats.current.heapTotal,
+          external: memoryStats.current.external,
+          array_buffers: memoryStats.current.arrayBuffers,
+          trend: memoryStats.trend,
+          avg_rss: memoryStats.avgRss,
+          max_rss: memoryStats.maxRss,
+          min_rss: memoryStats.minRss,
+        },
       });
     });
 
@@ -198,6 +236,135 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const overloaded = maxEventCount != null && store.size > maxEventCount;
       if (overloaded) snap.status = 'overloaded';
       res.type('text/plain').send(metrics.toPrometheus(snap));
+    });
+
+    // ============================================
+    // Memory Profiling API Endpoints
+    // ============================================
+
+    // Get current memory usage stats
+    app.get('/api/memory/stats', (_req: Request, res: Response) => {
+      const profiler = getMemoryProfiler();
+      const stats = profiler.getStats();
+      res.json(stats);
+    });
+
+    // Capture a memory snapshot
+    app.post('/api/memory/capture', (_req: Request, res: Response) => {
+      const profiler = getMemoryProfiler();
+      const snapshot = profiler.capture();
+      res.json({
+        timestamp: snapshot.timestamp,
+        rss: snapshot.rss,
+        heapUsed: snapshot.heapUsed,
+        heapTotal: snapshot.heapTotal,
+        formatted: profiler.formatMemory(snapshot),
+      });
+    });
+
+    // Get memory diff from baseline
+    app.get('/api/memory/diff', (_req: Request, res: Response) => {
+      const profiler = getMemoryProfiler();
+      const diff = profiler.diffFromBaseline();
+      if (!diff) {
+        res.status(404).json({ error: 'No baseline set' });
+        return;
+      }
+      res.json(diff);
+    });
+
+    // Set baseline for future comparisons
+    app.post('/api/memory/baseline', (_req: Request, res: Response) => {
+      const profiler = getMemoryProfiler();
+      const baseline = profiler.setBaseline();
+      res.json({
+        timestamp: baseline.timestamp,
+        formatted: profiler.formatMemory(baseline),
+      });
+    });
+
+    // Write heap snapshot to disk (admin only - requires auth)
+    app.post('/api/memory/heap-snapshot', (req: Request, res: Response) => {
+      try {
+        const profiler = getMemoryProfiler();
+        profiler.writeHeapSnapshot().then(filepath => {
+          res.json({
+            success: true,
+            filepath,
+            message: `Heap snapshot written to ${filepath}`,
+          });
+        }).catch(err => {
+          res.status(500).json({
+            error: 'Failed to write heap snapshot',
+            message: err instanceof Error ? err.message : 'Unknown error',
+          });
+        });
+      } catch (err) {
+        res.status(500).json({
+          error: 'Failed to write heap snapshot',
+          message: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
+    });
+
+    // Get recent memory snapshots
+    app.get('/api/memory/snapshots', (req: Request, res: Response) => {
+      const count = parseInt(req.query.count as string) || 10;
+      const profiler = getMemoryProfiler();
+      const snapshots = profiler.getRecent(count);
+      res.json({
+        count: snapshots.length,
+        snapshots: snapshots.map(s => ({
+          timestamp: s.timestamp,
+          rss: s.rss,
+          heapUsed: s.heapUsed,
+          heapTotal: s.heapTotal,
+        })),
+      });
+    });
+
+    // ============================================
+    // Heap Diff Analysis API Endpoints
+    // ============================================
+
+    // Get recent heap diff analysis
+    app.get('/api/memory/diff-analysis', (_req: Request, res: Response) => {
+      const diff = getRecentHeapDiff();
+      if (!diff) {
+        res.status(404).json({ error: 'Insufficient snapshots for diff analysis' });
+        return;
+      }
+      res.json(diff);
+    });
+
+    // Get full trend analysis across all snapshots
+    app.get('/api/memory/trend', (_req: Request, res: Response) => {
+      const trend = analyzeTrend();
+      res.json(trend);
+    });
+
+    // Get trend analysis as markdown report
+    app.get('/api/memory/trend.md', (_req: Request, res: Response) => {
+      const trend = analyzeTrend();
+      if (trend.overallAssessment === 'insufficient-data') {
+        res.status(404).json({ error: 'Insufficient snapshots for trend analysis' });
+        return;
+      }
+      res.type('text/markdown').send(formatTrendAsMarkdown(trend));
+    });
+
+    // Generate and save a trend report
+    app.post('/api/memory/trend/save', (req: Request, res: Response) => {
+      const filepath = saveTrendReport();
+      if (!filepath) {
+        res.status(404).json({ error: 'Insufficient snapshots for trend report' });
+        return;
+      }
+      res.json({
+        success: true,
+        filepath,
+        message: `Trend report saved to ${filepath}`,
+      });
     });
 
     // Get all workers
@@ -390,6 +557,45 @@ export function createWebServer(options: WebServerOptions): WebServer {
     app.get('/api/heatmap/stats', (_req: Request, res: Response) => {
       const stats = store.getFileHeatmapStats();
       res.json(stats);
+    });
+
+    // Get heatmap timelapse data for animation
+    app.get('/api/heatmap/timelapse', (req: Request, res: Response) => {
+      try {
+        const startTimestamp = req.query.startTimestamp
+          ? parseInt(req.query.startTimestamp as string)
+          : undefined;
+        const endTimestamp = req.query.endTimestamp
+          ? parseInt(req.query.endTimestamp as string)
+          : undefined;
+        const snapshotCount = req.query.snapshotCount
+          ? parseInt(req.query.snapshotCount as string)
+          : 30;
+        const minModifications = req.query.minModifications
+          ? parseInt(req.query.minModifications as string)
+          : 1;
+        const maxEntries = req.query.maxEntries
+          ? parseInt(req.query.maxEntries as string)
+          : 50;
+        const sortBy = req.query.sortBy as 'modifications' | 'recent' | 'workers' | 'collisions' || undefined;
+        const directoryFilter = req.query.directoryFilter as string | undefined;
+        const collisionsOnly = req.query.collisionsOnly === 'true';
+
+        const timelapse = store.getHeatmapTimelapse({
+          startTimestamp,
+          endTimestamp,
+          snapshotCount,
+          minModifications,
+          maxEntries,
+          sortBy,
+          directoryFilter,
+          collisionsOnly,
+        });
+
+        res.json(timelapse);
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
+      }
     });
 
     // ============================================
@@ -848,12 +1054,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
         const narratives = [];
 
         for (const worker of workers) {
-          const events = store.query({ worker: worker.id });
-          if (events.length === 0) continue;
-
-          const generator = new SemanticNarrativeGenerator();
-          events.forEach(e => generator.processEvent(e));
-          const narrative = generator.generateNarrative(worker.id);
+          // Use store's getSemanticNarrativeManager getter to access the manager
+          const narrative = store.getSemanticNarrativeManager().generateNarrative(worker.id);
           narratives.push(serializeNarrative(narrative));
         }
 
@@ -868,12 +1070,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
     app.get('/api/narrative/:workerId', (req: Request, res: Response) => {
       try {
         const workerId = req.params.workerId as string;
-        const events = store.query({ worker: workerId });
-
-        const generator = new SemanticNarrativeGenerator();
-        events.forEach(e => generator.processEvent(e));
-        const narrative = generator.generateNarrative(workerId);
-
+        // Use store's getSemanticNarrativeManager getter to access the manager
+        const narrative = store.getSemanticNarrativeManager().generateNarrative(workerId);
         res.json(serializeNarrative(narrative));
       } catch (err) {
         console.error('Error generating narrative:', err);
@@ -967,6 +1165,29 @@ export function createWebServer(options: WebServerOptions): WebServer {
         }
       }, 10_000);
     }
+
+    // Memory pressure monitoring: log warnings when approaching heap limit
+    let lastMemoryLog = 0;
+    const memoryCheckInterval = setInterval(() => {
+      const mem = process.memoryUsage();
+      const v8 = getV8();
+      const heapLimitBytes = v8?.getHeapStatistics?.().heap_size_limit ?? 1024 * 1024 * 1024; // 1GB default
+      const heapUsagePercent = (mem.heapUsed / heapLimitBytes) * 100;
+      const profiler = getMemoryProfiler();
+      profiler.capture();
+
+      // Log memory stats every 5 minutes
+      const now = Date.now();
+      if (!lastMemoryLog || now - lastMemoryLog > 5 * 60 * 1000) {
+        console.error(`Memory: RSS=${formatBytes(mem.rss)}, Heap=${formatBytes(mem.heapUsed)}/${formatBytes(mem.heapTotal)} (${heapUsagePercent.toFixed(1)}%), external=${formatBytes(mem.external)}, arrayBuffers=${formatBytes(mem.arrayBuffers)}`);
+        lastMemoryLog = now;
+      }
+
+      // Warn when approaching heap limit (>80%)
+      if (heapUsagePercent > 80) {
+        console.warn(`Memory pressure warning: heap usage at ${heapUsagePercent.toFixed(1)}% of limit`);
+      }
+    }, 30_000);
   }
 
   function stop() {
@@ -1002,23 +1223,32 @@ export function createWebServer(options: WebServerOptions): WebServer {
   }
 
   function broadcast(event: LogEvent): void {
+    // Serialize once, reuse for all clients (reduces JSON.stringify overhead)
     const message = JSON.stringify({ type: 'event', data: event });
+    const terminatedClients: WebSocket[] = [];
+
     for (const client of clients) {
       if (client.readyState === WebSocket.OPEN) {
         // Backpressure: terminate clients whose send buffer exceeds the limit
         if (client.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
           console.warn(`WebSocket client buffer exceeded ${WS_MAX_BUFFERED_BYTES} bytes — terminating`);
           client.close(1013, 'Send buffer overflow');
-          clients.delete(client);
+          terminatedClients.push(client);
           continue;
         }
         client.send(message);
       }
     }
+
+    // Clean up terminated clients from the set
+    for (const client of terminatedClients) {
+      clients.delete(client);
+    }
   }
 
   function broadcastCollisions(): void {
     const collisions = store.getCollisions();
+    // Serialize once, reuse for all clients
     const message = JSON.stringify({
       type: 'collision',
       data: {
@@ -1026,15 +1256,21 @@ export function createWebServer(options: WebServerOptions): WebServer {
         workers: store.getWorkers()
       }
     });
+    const terminatedClients: WebSocket[] = [];
+
     for (const client of clients) {
       if (client.readyState === WebSocket.OPEN) {
         if (client.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
           client.close(1013, 'Send buffer overflow');
-          clients.delete(client);
+          terminatedClients.push(client);
           continue;
         }
         client.send(message);
       }
+    }
+
+    for (const client of terminatedClients) {
+      clients.delete(client);
     }
   }
 
