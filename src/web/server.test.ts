@@ -190,6 +190,73 @@ describe('Web Server API Endpoints', () => {
         expect(match![1]).toMatch(/^fabric_[a-z_]+$/);
       }
     });
+
+    it('should include all documented metrics', async () => {
+      const response = await fetchApi('/api/metrics');
+      const text = await response.text();
+
+      // All metrics documented in docs/metrics.md should be present
+      const documentedMetrics = [
+        'fabric_status',
+        'fabric_uptime_seconds',
+        'fabric_info',
+        'fabric_event_count',
+        'fabric_ingest_rate_per_second',
+        'fabric_websocket_clients',
+        'fabric_tailer_files_watched',
+        'fabric_dedup_dropped_total',
+        'fabric_process_resident_memory_bytes',
+      ];
+
+      for (const metric of documentedMetrics) {
+        expect(text).toContain(metric);
+      }
+    });
+
+    it('should include HELP and TYPE comments for each metric', async () => {
+      const response = await fetchApi('/api/metrics');
+      const text = await response.text();
+
+      // Each metric should have both HELP and TYPE comments
+      const documentedMetrics = [
+        'fabric_status',
+        'fabric_uptime_seconds',
+        'fabric_info',
+        'fabric_event_count',
+        'fabric_ingest_rate_per_second',
+        'fabric_websocket_clients',
+        'fabric_tailer_files_watched',
+        'fabric_dedup_dropped_total',
+        'fabric_process_resident_memory_bytes',
+      ];
+
+      for (const metric of documentedMetrics) {
+        expect(text).toContain(`# HELP ${metric}`);
+        expect(text).toContain(`# TYPE ${metric}`);
+      }
+    });
+
+    it('should export memory metrics in bytes', async () => {
+      const response = await fetchApi('/api/metrics');
+      const text = await response.text();
+
+      // Memory metric should be a positive number (bytes)
+      const match = text.match(/fabric_process_resident_memory_bytes (\d+)/);
+      expect(match).toBeTruthy();
+      const bytes = parseInt(match![1], 10);
+      expect(bytes).toBeGreaterThan(0);
+    });
+
+    it('should export uptime in seconds', async () => {
+      const response = await fetchApi('/api/metrics');
+      const text = await response.text();
+
+      // Uptime should be a non-negative number
+      const match = text.match(/fabric_uptime_seconds (\d+)/);
+      expect(match).toBeTruthy();
+      const uptime = parseInt(match![1], 10);
+      expect(uptime).toBeGreaterThanOrEqual(0);
+    });
   });
 
   describe('GET /api/workers', () => {

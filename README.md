@@ -287,4 +287,5 @@ NEEDLE's `otlp_metric_sink` is enabled in `~/.needle/config.yaml`, pushing aggre
 ## Documentation
 
 - [NeedleEvent Schema](docs/schema.md) — canonical wire format shared with NEEDLE
+- [Metrics Export](docs/metrics.md) — Prometheus-compatible metrics for monitoring
 - [Implementation Plan](docs/plan.md)
