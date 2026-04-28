@@ -774,3 +774,267 @@ describe('MetricAccumulator', () => {
     });
   });
 });
+
+describe('WorkerAnalytics - Worker Comparison', () => {
+  let analytics: WorkerAnalytics;
+  let costTracker: CostTracker;
+  const baseTime = Date.now();
+
+  beforeEach(() => {
+    costTracker = new CostTracker();
+    analytics = new WorkerAnalytics(costTracker, 3600000);
+  });
+
+  it('should return null when comparing non-existent workers', () => {
+    const result = analytics.compareWorkers('nonexistent-1', 'nonexistent-2');
+    expect(result).toBeNull();
+  });
+
+  it('should compare two workers side-by-side', () => {
+    const events: LogEvent[] = [
+      // Worker 1: Better performance, higher cost
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1', input_tokens: 1000, output_tokens: 500 },
+      { ts: baseTime + 2000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+      { ts: baseTime + 3000, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-2', input_tokens: 800, output_tokens: 400 },
+      { ts: baseTime + 5000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-2' },
+
+      // Worker 2: Slower but cheaper, more errors
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-3', input_tokens: 500, output_tokens: 200 },
+      { ts: baseTime + 3000, worker: 'w-2', level: 'error', msg: 'Error!' },
+      { ts: baseTime + 4000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-3' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    expect(result).not.toBeNull();
+    expect(result?.worker1.workerId).toBe('w-1');
+    expect(result?.worker2.workerId).toBe('w-2');
+  });
+
+  it('should calculate raw differences correctly', () => {
+    const events: LogEvent[] = [
+      // Worker 1: 2 beads
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+      { ts: baseTime + 2000, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-2' },
+      { ts: baseTime + 3000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-2' },
+
+      // Worker 2: 1 bead
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-3' },
+      { ts: baseTime + 2000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-3' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    expect(result?.differences.beadsCompleted).toBe(1); // 2 - 1 = 1
+    expect(result?.betterWorker.beadsCompleted).toBe('worker1');
+  });
+
+  it('should calculate percentage differences correctly', () => {
+    const events: LogEvent[] = [
+      // Worker 1: 4 beads
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+      { ts: baseTime + 2000, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-2' },
+      { ts: baseTime + 3000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-2' },
+      { ts: baseTime + 4000, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-3' },
+      { ts: baseTime + 5000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-3' },
+      { ts: baseTime + 6000, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-4' },
+      { ts: baseTime + 7000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-4' },
+
+      // Worker 2: 2 beads
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-5' },
+      { ts: baseTime + 2000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-5' },
+      { ts: baseTime + 3000, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-6' },
+      { ts: baseTime + 5000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-6' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    // Worker 1 has 4 beads, Worker 2 has 2 beads
+    // Difference: 4 - 2 = 2
+    // Percentage: (4 - 2) / 2 * 100 = 100%
+    expect(result?.percentDifferences.beadsCompleted).toBeCloseTo(100, 0);
+  });
+
+  it('should handle zero division in percentage calculations', () => {
+    const events: LogEvent[] = [
+      // Worker 1: 1 bead
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+      // Worker 2: 0 beads
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Just watching' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    // When worker2 has 0 beads, percentage should be 100% (worker1 has all the beads)
+    expect(result?.percentDifferences.beadsCompleted).toBe(100);
+  });
+
+  it('should determine better worker for each metric', () => {
+    const events: LogEvent[] = [
+      // Worker 1: More beads, no errors
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+
+      // Worker 2: Same beads, has errors
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-2' },
+      { ts: baseTime + 500, worker: 'w-2', level: 'error', msg: 'Error!' },
+      { ts: baseTime + 1000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-2' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    expect(result?.betterWorker.beadsCompleted).toBe('tie'); // Both have 1 bead
+    expect(result?.betterWorker.errorRate).toBe('worker1'); // Lower is better, worker1 has 0 errors
+  });
+
+  it('should detect ties when metrics are equal', () => {
+    const events: LogEvent[] = [
+      // Both workers complete 1 bead in same time
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-2' },
+      { ts: baseTime + 1000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-2' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    expect(result?.betterWorker.beadsCompleted).toBe('tie');
+    expect(result?.betterWorker.avgCompletionTimeMs).toBe('tie');
+  });
+
+  it('should calculate overall winner based on metric score', () => {
+    const events: LogEvent[] = [
+      // Worker 1: Better at most metrics
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1', input_tokens: 1000 },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+      { ts: baseTime + 2000, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-2', input_tokens: 800 },
+      { ts: baseTime + 3000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-2' },
+
+      // Worker 2: Worse performance
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-3', input_tokens: 500 },
+      { ts: baseTime + 2000, worker: 'w-2', level: 'error', msg: 'Error!' },
+      { ts: baseTime + 3000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-3' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    expect(result?.overallWinner).toBe('worker1');
+    expect(result?.score.worker1).toBeGreaterThan(result?.score.worker2 || 0);
+  });
+
+  it('should respect lower-is-better metrics', () => {
+    const events: LogEvent[] = [
+      // Worker 1: Faster completion (lower time is better)
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+
+      // Worker 2: Slower completion
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-2' },
+      { ts: baseTime + 3000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-2' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    // Lower completion time is better
+    expect(result?.betterWorker.avgCompletionTimeMs).toBe('worker1');
+  });
+
+  it('should handle cost comparison correctly', () => {
+    const events: LogEvent[] = [
+      // Worker 1: Higher cost per bead
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1', input_tokens: 2000, output_tokens: 1000 },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+
+      // Worker 2: Lower cost per bead
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-2', input_tokens: 500, output_tokens: 200 },
+      { ts: baseTime + 1000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-2' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    // Lower cost is better, so worker2 should win
+    expect(result?.betterWorker.costPerBead).toBe('worker2');
+  });
+
+  it('should compare efficiency scores', () => {
+    const events: LogEvent[] = [
+      // Worker 1: More active time
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Event 1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Event 2' },
+      { ts: baseTime + 2000, worker: 'w-1', level: 'info', msg: 'Event 3' },
+
+      // Worker 2: Less active time
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Event' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    // Higher efficiency (more active) is better
+    expect(result?.betterWorker.efficiencyScore).toBe('worker1');
+  });
+
+  it('should use time window options for comparison', () => {
+    const events: LogEvent[] = [
+      // Worker 1: Bead at start of window
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+
+      // Worker 2: Bead later in window
+      { ts: baseTime + 50000, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-2' },
+      { ts: baseTime + 51000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-2' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    // Compare with limited time window
+    const result = analytics.compareWorkers('w-1', 'w-2', {
+      startTime: baseTime,
+      endTime: baseTime + 10000,  // Only first 10 seconds - w-1's bead is in, w-2's is out
+    });
+
+    // Both workers show 1 bead because beadsCompleted is cumulative
+    // But the time-based metrics like beadsPerHour will differ
+    expect(result?.worker1.beadsCompleted).toBe(1);
+    expect(result?.worker2.beadsCompleted).toBe(1);
+  });
+
+  it('should handle epsilon for floating point comparison', () => {
+    const events: LogEvent[] = [
+      // Create exactly identical metrics
+      { ts: baseTime, worker: 'w-1', level: 'info', msg: 'Start', bead: 'bd-1' },
+      { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'Done', bead: 'bd-1' },
+      { ts: baseTime, worker: 'w-2', level: 'info', msg: 'Start', bead: 'bd-2' },
+      { ts: baseTime + 1000, worker: 'w-2', level: 'info', msg: 'Done', bead: 'bd-2' },
+    ];
+
+    events.forEach(e => analytics.processEvent(e));
+
+    const result = analytics.compareWorkers('w-1', 'w-2');
+
+    // With identical completion times, should be a tie
+    expect(result?.betterWorker.avgCompletionTimeMs).toBe('tie');
+  });
+});

@@ -6,6 +6,10 @@
 
 import { VERSION } from './index.js';
 
+import type { RetentionState } from './logPruner.js';
+
+export type { RetentionState };
+
 export interface ServerMetricsSnapshot {
   status: string;
   uptime_sec: number;
@@ -16,6 +20,7 @@ export interface ServerMetricsSnapshot {
   tailer_files_watched: number;
   dedup_dropped: number;
   process_resident_memory_bytes: number;
+  retention?: RetentionState;
 }
 
 export class ServerMetrics {
@@ -45,6 +50,12 @@ export class ServerMetrics {
 
   set eventCount(count: number) {
     this._eventCount = count;
+  }
+
+  private _retentionState: RetentionState | undefined;
+
+  set retentionState(state: RetentionState | undefined) {
+    this._retentionState = state;
   }
 
   reset(): void {
@@ -82,6 +93,7 @@ export class ServerMetrics {
       tailer_files_watched: this._tailerFilesWatched,
       dedup_dropped: this._dedupDropped,
       process_resident_memory_bytes: rss,
+      retention: this._retentionState,
     };
   }
 
