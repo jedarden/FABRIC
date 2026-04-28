@@ -9,7 +9,7 @@ import { createServer, Server as HttpServer } from 'http';
 import { EventEmitter } from 'events';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { createSocket } from 'dgram';
+import * as systemdNotify from 'systemd-notify';
 import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus, SemanticNarrative, NarrativeSegment } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
@@ -23,6 +23,7 @@ import { parseGitEvents } from '../gitParser.js';
 import { generatePRPreview } from '../tui/utils/prPreview.js';
 import { getMemoryProfiler } from '../memoryProfiler.js';
 import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport } from '../heapDiff.js';
+import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } from '../logPruner.js';
 
 /** Get the v8 module (available in Node.js) */
 function getV8() {
@@ -53,18 +54,10 @@ const WS_MAX_BUFFERED_BYTES = 1024 * 1024; // 1 MB
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** Send a systemd sd_notify message via the NOTIFY_SOCKET Unix datagram socket. */
+/** Send a systemd sd_notify message. */
 function sdNotify(state: string): void {
-  const socketPath = process.env.NOTIFY_SOCKET;
-  if (!socketPath) return;
   try {
-    // @ts-expect-error - unix_dgram is not in SocketType types but works at runtime
-    const client = createSocket('unix_dgram');
-    const msg = Buffer.from(state);
-    // Abstract sockets start with '@' in systemd notation; replace with '\0'
-    const addr = socketPath.startsWith('@') ? '\0' + socketPath.slice(1) : socketPath;
-    // @ts-expect-error - send() signature for unix sockets differs from UDP
-    client.send(msg, addr, () => client.close());
+    systemdNotify.notify(state);
   } catch {
     // Never crash the server due to a notify failure
   }
@@ -236,6 +229,100 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const overloaded = maxEventCount != null && store.size > maxEventCount;
       if (overloaded) snap.status = 'overloaded';
       res.type('text/plain').send(metrics.toPrometheus(snap));
+    });
+
+    // ============================================
+    // Log Retention API Endpoints
+    // ============================================
+
+    // Get current log retention state
+    app.get('/api/retention', (_req: Request, res: Response) => {
+      const policy = {
+        archiveAfterDays: 3,
+        maxAgeDays: 7,
+        archiveRetentionDays: 30,
+      };
+      const state = computeRetentionState(logPath, policy);
+
+      // Find the most recent mend.logs_pruned event from the store
+      const pruneEvents = store.query().filter(e => e.msg === 'mend.logs_pruned');
+      const lastPrune = pruneEvents.length > 0 ? pruneEvents[pruneEvents.length - 1] : null;
+
+      res.json({
+        current: {
+          fileCount: state.fileCount,
+          totalSizeBytes: state.totalSizeBytes,
+          oldestFileAgeDays: Math.round(state.oldestFileAgeDays * 10) / 10,
+          formattedSize: formatBytes(state.totalSizeBytes),
+        },
+        archives: {
+          count: state.archiveCount,
+          totalSizeBytes: state.archiveSizeBytes,
+          formattedSize: formatBytes(state.archiveSizeBytes),
+        },
+        policy: state.policy,
+        lastPrune: lastPrune ? {
+          timestamp: lastPrune.timestamp,
+          filesArchived: (lastPrune as Record<string, unknown>).files_archived,
+          filesDeleted: (lastPrune as Record<string, unknown>).files_deleted,
+          bytesFreed: (lastPrune as Record<string, unknown>).bytes_freed,
+        } : null,
+      });
+    });
+
+    // Trigger manual log pruning (requires auth)
+    app.post('/api/retention/prune', (req: Request, res: Response) => {
+      if (authToken) {
+        const authHeader = req.headers.authorization;
+        if (!authHeader?.startsWith('Bearer ') || authHeader.slice(7) !== authToken) {
+          res.status(401).json({ error: 'Unauthorized' });
+          return;
+        }
+      }
+
+      // Parse optional overrides from request body
+      const options: Partial<PruneOptions> = { logDir: logPath };
+      if (req.body) {
+        if (typeof req.body.archiveAfterDays === 'number') {
+          options.archiveAfterDays = req.body.archiveAfterDays;
+        }
+        if (typeof req.body.archiveRetentionDays === 'number') {
+          options.archiveRetentionDays = req.body.archiveRetentionDays;
+        }
+        if (typeof req.body.maxAgeDays === 'number') {
+          options.maxAgeDays = req.body.maxAgeDays;
+        }
+        if (typeof req.body.dryRun === 'boolean') {
+          options.dryRun = req.body.dryRun;
+        }
+      }
+
+      try {
+        const result = pruneLogs(options);
+        res.json({
+          success: true,
+          result: {
+            filesScanned: result.filesScanned,
+            filesArchived: result.filesArchived,
+            filesDeleted: result.filesDeleted,
+            archivesCreated: result.archivesCreated,
+            archivesDeleted: result.archivesDeleted,
+            bytesFreed: result.bytesFreed,
+            fileCountBefore: result.fileCountBefore,
+            fileCountAfter: result.fileCountAfter,
+            archivesBefore: result.archivesBefore,
+            archivesAfter: result.archivesAfter,
+            durationMs: result.durationMs,
+            formattedBytesFreed: formatBytes(result.bytesFreed),
+          },
+          summary: formatPruneResult(result, options.dryRun ?? false),
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     });
 
     // ============================================

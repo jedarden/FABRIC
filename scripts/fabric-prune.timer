@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily FABRIC log pruning timer
+
+[Timer]
+# Run daily at 3 AM UTC (low traffic time)
+OnCalendar=03:00 UTC
+# Run immediately on first boot if timer was missed
+Persistent=true
+
+[Install]
+WantedBy=timers.target

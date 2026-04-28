@@ -110,53 +110,52 @@ function ensureArchiveDir(logDir: string): string {
   return archiveDir;
 }
 
-/** Create a tar.gz archive from a list of files. Returns the archive path. */
+/** Create a tar.gz archive from a list of files. Returns the archive path.
+ * If archive exists, extracts it, adds new files, and recreates the tarball.
+ */
 function createTarball(archiveDir: string, date: string, files: string[], dryRun: boolean): string {
   const tarballPath = path.join(archiveDir, `${date}.tar.gz`);
+  const extractDir = path.join(archiveDir, `.tmp-${date}`);
+  const logDir = path.dirname(files[0]);
 
-  if (fs.existsSync(tarballPath)) {
-    const tmpTar = path.join(archiveDir, `${date}.tmp.tar`);
-    try {
-      if (!dryRun) {
-        execFileSync('gzip', ['-d', '-k', '-f', tarballPath], { timeout: 60000 });
-        const gzPath = `${tarballPath.slice(0, -3)}`;
-        fs.renameSync(gzPath, tmpTar);
+  if (!dryRun) {
+    fs.mkdirSync(extractDir, { recursive: true });
 
-        const fileArgs = files.map(f => path.basename(f));
-        execFileSync('tar', ['-rf', tmpTar, ...fileArgs], {
-          cwd: path.dirname(files[0]),
-          timeout: 60000,
-        });
-
-        execFileSync('gzip', ['-f', tmpTar], { timeout: 60000 });
-        fs.renameSync(`${tmpTar}.gz`, tarballPath);
-      }
-    } catch {
-      if (!dryRun) {
-        if (fs.existsSync(tmpTar)) fs.unlinkSync(tmpTar);
-        if (fs.existsSync(`${tmpTar}.gz`)) fs.unlinkSync(`${tmpTar}.gz`);
-        const fileArgs = files.map(f => path.basename(f));
-        execFileSync('tar', ['-czf', tarballPath, ...fileArgs], {
-          cwd: path.dirname(files[0]),
-          timeout: 60000,
-        });
+    // Extract existing archive if present
+    if (fs.existsSync(tarballPath)) {
+      try {
+        execFileSync('tar', ['-xzf', tarballPath, '-C', extractDir], { timeout: 60000 });
+      } catch {
+        // If extraction fails, archive might be corrupted - start fresh
       }
     }
-  } else {
-    if (!dryRun) {
-      const fileArgs = files.map(f => path.basename(f));
-      execFileSync('tar', ['-czf', tarballPath, ...fileArgs], {
-        cwd: path.dirname(files[0]),
-        timeout: 60000,
-      });
+
+    // Copy new files into extract dir (preserving relative paths from logDir)
+    for (const f of files) {
+      const destName = path.basename(f);
+      const destPath = path.join(extractDir, destName);
+      // Don't fail if file already exists in archive (same file from same date)
+      if (!fs.existsSync(destPath)) {
+        fs.copyFileSync(f, destPath);
+      }
     }
+
+    // Create new tarball from merged content
+    // Use '.' to archive entire directory (avoids ARG_MAX limit with many files)
+    execFileSync('tar', ['-czf', tarballPath, '.'], {
+      cwd: extractDir,
+      timeout: 60000,
+    });
+
+    // Clean up extract dir
+    fs.rmSync(extractDir, { recursive: true, force: true });
   }
 
   return tarballPath;
 }
 
 /** Compute current retention state for a log directory. */
-function computeRetentionState(logDir: string, policy: RetentionState['policy']): RetentionState {
+export function computeRetentionState(logDir: string, policy: RetentionState['policy']): RetentionState {
   const archiveDir = path.join(logDir, 'archive');
   let fileCount = 0;
   let totalSizeBytes = 0;

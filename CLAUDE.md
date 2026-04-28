@@ -34,6 +34,50 @@ To re-apply after a reset: `./scripts/setup-tailscale-serve.sh`.
 - GET endpoints (dashboard UI, workers, events read) are open — read-only, no secret data
 - Tailscale provides network-level access control (tailnet membership required)
 
+## Log Retention Policy
+
+FABRIC automatically manages NEEDLE log file retention to prevent unbounded growth.
+
+### Policy
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `archiveAfterDays` | 3 | Files older than this are archived to `~/.needle/logs/archive/` |
+| `maxAgeDays` | 7 | Files older than this are deleted (even if not archived) |
+| `archiveRetentionDays` | 30 | Archive tarballs older than this are deleted |
+
+### Automatic Execution
+
+A systemd timer runs pruning daily at 03:00 UTC:
+
+```bash
+systemctl --user status fabric-prune.timer   # check timer status
+systemctl --user start fabric-prune.timer    # enable automatic pruning
+journalctl --user -u fabric-prune.service    # view prune logs
+```
+
+### Manual Pruning
+
+```bash
+# CLI
+fabric prune --dry-run                    # preview what would be pruned
+fabric prune --archive-after 7            # customize policy
+
+# API (requires auth)
+curl -X POST http://localhost:3000/api/retention/prune \
+  -H "Authorization: Bearer $FABRIC_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"dryRun": true}'
+```
+
+### Retention State API
+
+```bash
+curl http://localhost:3000/api/retention
+```
+
+Returns current file count, archive size, and last prune results.
+
 ## Build & Test
 
 ```bash
@@ -52,6 +96,9 @@ npx tsc --noEmit        # type-check without emitting
 | `src/web/frontend/` | React SPA (Vite build) |
 | `src/directoryTailer.ts` | Watches `~/.needle/logs/`, hot-adds new JSONL files |
 | `src/store.ts` | In-memory event store + SQLite persistence |
-| `scripts/fabric-web.service` | systemd unit file |
+| `src/logPruner.ts` | Log retention policy implementation |
+| `scripts/fabric-web.service` | systemd unit file for web dashboard |
+| `scripts/fabric-prune.service` | systemd unit file for log pruning |
+| `scripts/fabric-prune.timer` | systemd timer for daily log pruning |
 | `scripts/setup-tailscale-serve.sh` | One-time Tailscale Serve setup |
 | `docs/plan.md` | Full architecture and phase roadmap |
