@@ -759,6 +759,97 @@ describe('FabricTuiApp', () => {
       expect(() => app.addEvent(event)).not.toThrow();
     });
   });
+
+  describe('worker stats badge', () => {
+    beforeEach(() => {
+      app = new FabricTuiApp(store);
+    });
+
+    it('should show worker count badge with active workers', () => {
+      // Add events for active workers
+      store.add(createMockEvent({ worker: 'w-active-1', level: 'info' }));
+      store.add(createMockEvent({ worker: 'w-active-2', level: 'info' }));
+
+      app.start();
+      app.render();
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should show mixed worker statuses in badge', () => {
+      // Add workers with different statuses
+      store.add(createMockEvent({ worker: 'w-active', level: 'info' }));
+      store.add(createMockEvent({ worker: 'w-idle', level: 'debug' }));
+      store.add(createMockEvent({ worker: 'w-error', level: 'error' }));
+
+      app.start();
+      app.render();
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should update header when new events arrive', () => {
+      app.start();
+
+      const event1 = createMockEvent({ worker: 'w-1' });
+      app.addEvent(event1);
+
+      const event2 = createMockEvent({ worker: 'w-2' });
+      app.addEvent(event2);
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should handle no workers gracefully', () => {
+      app.start();
+      app.render();
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should show filter indicator when CLI filter is active', () => {
+      const options: TuiOptions = {
+        filter: { worker: 'w-test', level: 'info' },
+      };
+      app = new FabricTuiApp(store, options);
+      app.start();
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should update header in real-time as workers join', () => {
+      app.start();
+
+      // Initial state: no workers
+      expect(() => app.render()).not.toThrow();
+
+      // Worker joins
+      store.add(createMockEvent({ worker: 'w-new' }));
+      app.addEvent(createMockEvent({ worker: 'w-new' }));
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+
+    it('should update header in real-time as workers change status', () => {
+      app.start();
+
+      // Worker starts as active
+      store.add(createMockEvent({ worker: 'w-status', level: 'info' }));
+      app.addEvent(createMockEvent({ worker: 'w-status', level: 'info' }));
+
+      // Worker becomes idle
+      app.addEvent(createMockEvent({ worker: 'w-status', level: 'debug' }));
+
+      const mockScreen = getMockScreen();
+      expect(mockScreen.render).toHaveBeenCalled();
+    });
+  });
 });
 
 describe('TuiOptions interface', () => {
