@@ -149,6 +149,57 @@ program
         console.error(`Tailer error: ${err.message}`);
       });
 
+      // Setup workers.log tailer for hot reload (monitors the main aggregated log file)
+      const workersLogPath = `${HOME}/.needle/logs/workers.log`;
+      const workersLogDir = `${HOME}/.needle/logs`;
+      let workersLogTailer: LogTailer | undefined;
+      let workersLogDirWatcher: fs.FSWatcher | undefined;
+
+      const startWorkersLogTailer = () => {
+        if (workersLogTailer) return; // Already running
+
+        workersLogTailer = new LogTailer({
+          path: workersLogPath,
+          parseJson: true,
+          follow: true,
+          lines: 0, // Start from end, only watch for new lines
+          deduplicator,
+        });
+
+        workersLogTailer.on('event', (event) => {
+          // Apply filters before processing event
+          if (filter.worker && event.worker !== filter.worker) return;
+          if (filter.level && event.level !== filter.level) return;
+
+          store.add(event);
+          app.addEvent(event);
+        });
+
+        workersLogTailer.on('error', (err) => {
+          console.error(`workers.log tailer error: ${err.message}`);
+        });
+
+        workersLogTailer.start();
+        console.error(`Watching workers.log for hot reload: ${workersLogPath}`);
+      };
+
+      // Start tailer immediately if file exists, otherwise watch for its creation
+      if (fs.existsSync(workersLogPath)) {
+        startWorkersLogTailer();
+      } else {
+        // Watch the directory for workers.log to be created
+        if (fs.existsSync(workersLogDir)) {
+          workersLogDirWatcher = fs.watch(workersLogDir, (eventType, filename) => {
+            if (filename === 'workers.log' && !workersLogTailer) {
+              startWorkersLogTailer();
+              // Stop directory watcher once we've started the file tailer
+              workersLogDirWatcher?.close();
+              workersLogDirWatcher = undefined;
+            }
+          });
+        }
+      }
+
       // Start OTLP/gRPC receiver if requested
       let otlpReceiver: import('./otlpGrpcReceiver.js').OtlpGrpcReceiver | undefined;
       if (options.otlpGrpc) {
@@ -185,6 +236,8 @@ program
       // Handle graceful shutdown
       process.on('SIGINT', () => {
         tailer.stop();
+        workersLogTailer?.stop();
+        workersLogDirWatcher?.close();
         otlpReceiver?.stop();
         otlpHttpServer?.close();
         app.stop();
