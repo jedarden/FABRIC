@@ -426,8 +426,8 @@ describe('Real NEEDLE Log Integration', () => {
 
     it('should cover multiple distinct event types across files', () => {
       const files = readdirSync(logsDir)
-        .filter((f) => f.endsWith('.jsonl'))
-        .slice(0, 20);
+        .filter((f) => f.endsWith('.jsonl') && !f.startsWith('-test-worker-'))
+        .slice(0, 50);
 
       const eventTypes = new Set<string>();
       for (const file of files) {
