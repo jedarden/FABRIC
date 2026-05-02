@@ -92,6 +92,10 @@ function createMockNarrative(overrides: Partial<SemanticNarrative> = {}): Semant
     summary: 'Test summary',
     fullNarrative: 'Full narrative text',
     timeline: ['Event 1', 'Event 2', 'Event 3'],
+    workerId: 'w-test',
+    startTime: Date.now() - 20000,
+    endTime: Date.now(),
+    durationMs: 20000,
     segments: [
       {
         id: 'seg-1',
@@ -103,10 +107,11 @@ function createMockNarrative(overrides: Partial<SemanticNarrative> = {}): Semant
         confidence: 0.9,
         isActive: true,
         beadId: 'bd-test',
+        workerId: 'w-test',
+        events: [],
         entities: {
           files: ['/test.ts'],
           tools: ['Edit'],
-          workers: ['w-test'],
           errors: [],
         },
       },
@@ -119,10 +124,11 @@ function createMockNarrative(overrides: Partial<SemanticNarrative> = {}): Semant
         durationMs: 10000,
         confidence: 0.8,
         isActive: false,
+        workerId: 'w-test',
+        events: [],
         entities: {
           files: [],
           tools: ['Read'],
-          workers: ['w-test'],
           errors: [],
         },
       },
@@ -537,6 +543,8 @@ describe('SemanticNarrativePanel', () => {
             durationMs: 10000,
             confidence: 0.8,
             isActive: true,
+            workerId: 'w-test',
+            events: [],
             entities: {},
           }],
         });
@@ -558,6 +566,8 @@ describe('SemanticNarrativePanel', () => {
           durationMs: 500,
           confidence: 0.9,
           isActive: true,
+          workerId: 'w-test',
+          events: [],
           entities: {},
         }],
       });
@@ -578,6 +588,8 @@ describe('SemanticNarrativePanel', () => {
           durationMs: 5000,
           confidence: 0.9,
           isActive: true,
+          workerId: 'w-test',
+          events: [],
           entities: {},
         }],
       });
@@ -598,6 +610,8 @@ describe('SemanticNarrativePanel', () => {
           durationMs: 120000,
           confidence: 0.9,
           isActive: true,
+          workerId: 'w-test',
+          events: [],
           entities: {},
         }],
       });
@@ -620,10 +634,11 @@ describe('SemanticNarrativePanel', () => {
           durationMs: 10000,
           confidence: 0.9,
           isActive: true,
+          workerId: 'w-test',
+          events: [],
           entities: {
             files: ['/file1.ts', '/file2.ts', '/file3.ts', '/file4.ts', '/file5.ts', '/file6.ts'],
             tools: [],
-            workers: [],
             errors: [],
           },
         }],
@@ -645,11 +660,12 @@ describe('SemanticNarrativePanel', () => {
           durationMs: 10000,
           confidence: 0.9,
           isActive: true,
+          workerId: 'w-test',
+          events: [],
           beadId: 'bd-test',
           entities: {
             files: [],
             tools: ['Read', 'Edit', 'Write'],
-            workers: [],
             errors: [],
           },
         }],
@@ -671,10 +687,11 @@ describe('SemanticNarrativePanel', () => {
           durationMs: 10000,
           confidence: 0.9,
           isActive: true,
+          workerId: 'w-test',
+          events: [],
           entities: {
             files: [],
             tools: [],
-            workers: [],
             errors: ['Error 1', 'Error 2'],
           },
         }],
@@ -701,10 +718,14 @@ describe('SemanticNarrativePanel', () => {
     it('should handle narrative with no segments', () => {
       const narrative: SemanticNarrative = {
         id: 'empty',
+        workerId: 'w-test',
         title: 'Empty',
         summary: 'No segments',
         fullNarrative: 'None',
         timeline: [],
+        startTime: Date.now() - 10000,
+        endTime: Date.now(),
+        durationMs: 10000,
         segments: [],
       };
 

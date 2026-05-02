@@ -1171,7 +1171,7 @@ export class InMemoryEventStore implements EventStore {
           lastModified: Math.min(tracker.lastModified, snapshotTime),
           hasCollision,
           activeWorkers,
-          avgModificationInterval: tracker.avgModificationInterval,
+          avgModificationInterval: tracker.avgModificationInterval ?? 0,
         });
       }
 
