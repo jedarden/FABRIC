@@ -77,21 +77,56 @@ export class CrossReferenceManager {
 
   /**
    * Process a log event and extract cross-references.
-   * Per-event entities and links are skipped — only durable entities
-   * (worker, file, bead) and cross-entity relationships are tracked.
+   * Creates immediate links between entities (worker, file, bead, event) for each event.
    */
   processEvent(event: LogEvent): void {
-    if (event.worker) {
-      this.registerEntity('worker', event.worker, event.ts, `Worker ${event.worker.slice(0, 8)}`);
-    }
+    if (!event.worker) return;
 
+    // Register worker entity
+    this.registerEntity('worker', event.worker, event.ts, `Worker ${event.worker.slice(0, 8)}`);
+
+    // Create worker->event link (always create at least one link per event)
+    const eventId = this.getEventId(event);
+    this.createLink(
+      'worker',
+      event.worker,
+      'event',
+      eventId,
+      'same_worker',
+      0.3,
+      event.ts,
+      `Generated event`
+    );
+
+    // Create worker->file link
     if (event.path) {
       const fileName = event.path.split('/').pop() || event.path;
       this.registerEntity('file', event.path, event.ts, fileName);
+      this.createLink(
+        'worker',
+        event.worker,
+        'file',
+        event.path,
+        'same_file',
+        0.5,
+        event.ts,
+        `Modified ${fileName}`
+      );
     }
 
+    // Create worker->bead link
     if (event.bead) {
       this.registerEntity('bead', event.bead, event.ts, `Task ${event.bead}`);
+      this.createLink(
+        'worker',
+        event.worker,
+        'bead',
+        event.bead,
+        'same_bead',
+        0.8,
+        event.ts,
+        `Working on ${event.bead}`
+      );
     }
   }
 

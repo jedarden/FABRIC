@@ -192,9 +192,10 @@ export class InMemoryEventStore implements EventStore {
     }
     this.scheduleBatchProcessing();
 
-    // Trim in batches when over limit (amortises O(n) splice cost)
-    if (this.events.length > this.maxEvents + TRIM_BATCH_SIZE) {
-      const removed = this.events.splice(0, this.events.length - this.maxEvents);
+    // Trim events when exceeding the limit (keeps most recent)
+    if (this.events.length > this.maxEvents) {
+      const removeCount = this.events.length - this.maxEvents;
+      const removed = this.events.splice(0, removeCount);
       // Prune sequenceIndex entries for the evicted events
       for (const ev of removed) {
         if (ev.sequence != null && ev.sequence >= 0) {
@@ -1133,17 +1134,23 @@ export class InMemoryEventStore implements EventStore {
     const workerId = event.worker;
 
     // Check if any other worker is currently assigned to this bead
+    // AND was recently active (within collision time window)
     const otherWorkersOnBead: string[] = [];
     for (const [wId, worker] of this.workers) {
       if (wId !== workerId && worker.activeBead === beadId) {
-        otherWorkersOnBead.push(wId);
+        // Only consider it a collision if the other worker was recently active
+        const timeSinceActivity = event.ts - worker.lastActivity;
+        if (timeSinceActivity <= BEAD_COLLISION_WINDOW_MS) {
+          otherWorkersOnBead.push(wId);
+        }
       }
     }
 
     if (otherWorkersOnBead.length > 0) {
       // Bead collision detected!
       const collisionKey = `bead:${beadId}`;
-      const workers = new Set<string>([workerId]);
+      // Include ALL workers involved: current worker + other workers on same bead
+      const workers = new Set<string>([workerId, ...otherWorkersOnBead]);
       const collisionEvents: LogEvent[] = [event];
 
       const allTools = collisionEvents.map(e => e.tool).filter(Boolean);
