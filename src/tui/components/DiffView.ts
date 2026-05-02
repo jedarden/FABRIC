@@ -58,10 +58,14 @@ export interface DiffHunk {
  */
 export function parseDiff(diffText: string): DiffLine[] {
   const lines: DiffLine[] = [];
+  // Handle empty input - split returns [''] for empty string
+  if (diffText === '') {
+    return lines;
+  }
   const rawLines = diffText.split('\n');
 
-  let oldLineNum = 0;
-  let newLineNum = 0;
+  let oldLineNum = 1;
+  let newLineNum = 1;
 
   for (const line of rawLines) {
     // Hunk header @@ -a,b +c,d @@

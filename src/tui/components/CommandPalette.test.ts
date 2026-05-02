@@ -99,7 +99,7 @@ describe('CommandPalette', () => {
       // The list should be populated with all default suggestions
       const setItemsCalls = mockList.setItems.mock.calls;
       const lastCall = setItemsCalls[setItemsCalls.length - 1];
-      expect(lastCall[0].length).toBe(13); // 13 default suggestions
+      expect(lastCall[0].length).toBe(34); // 34 default suggestions
     });
 
     it('should fuzzy match on partial input', () => {
@@ -128,7 +128,7 @@ describe('CommandPalette', () => {
         const lastCall = setItemsCalls[setItemsCalls.length - 1];
         // "fltr" should fuzzy match "Filter by worker", "Filter by level", etc.
         expect(lastCall[0].length).toBeGreaterThan(0);
-        expect(lastCall[0].length).toBeLessThan(13);
+        expect(lastCall[0].length).toBeLessThan(34);
       }
     });
 
@@ -280,7 +280,7 @@ describe('CommandPalette', () => {
         inputHandlers['keypress']('', { name: 'up' });
         const selectCalls = mockList.select.mock.calls;
         if (selectCalls.length > 0) {
-          expect(selectCalls[selectCalls.length - 1][0]).toBe(12); // last of 13 items
+          expect(selectCalls[selectCalls.length - 1][0]).toBe(33); // last of 34 items (0-indexed)
         }
       }
     });
@@ -293,7 +293,8 @@ describe('CommandPalette', () => {
 
       const setItemsCalls = mockList.setItems.mock.calls;
       const lastCall = setItemsCalls[setItemsCalls.length - 1];
-      expect(lastCall[0].length).toBe(14); // 13 defaults + 1 custom
+      // 34 defaults + 1 custom = 35 total
+      expect(lastCall[0].length).toBe(35);
     });
 
     it('should clear custom suggestions', () => {
@@ -303,7 +304,7 @@ describe('CommandPalette', () => {
 
       const setItemsCalls = mockList.setItems.mock.calls;
       const lastCall = setItemsCalls[setItemsCalls.length - 1];
-      expect(lastCall[0].length).toBe(13); // Back to defaults
+      expect(lastCall[0].length).toBe(34); // Back to defaults
     });
 
     it('should set suggestions', () => {
@@ -315,7 +316,7 @@ describe('CommandPalette', () => {
 
       const setItemsCalls = mockList.setItems.mock.calls;
       const lastCall = setItemsCalls[setItemsCalls.length - 1];
-      expect(lastCall[0].length).toBe(15); // 13 defaults + 2 extra
+      expect(lastCall[0].length).toBe(36); // 34 defaults + 2 extra
     });
   });
 });

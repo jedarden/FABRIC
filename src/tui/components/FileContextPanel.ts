@@ -264,7 +264,7 @@ export class FileContextPanel {
    */
   private getOperationType(event: LogEvent): FileOperation['type'] {
     const tool = event.tool?.toLowerCase() || '';
-    const msg = event.msg.toLowerCase();
+    const msg = (event.msg || '').toLowerCase();
 
     if (tool === 'read') return 'read';
     if (['edit', 'notebookedit'].includes(tool)) return 'edit';

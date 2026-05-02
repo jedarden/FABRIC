@@ -1,10 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { SpanNode, SpanDagResponse } from '../types';
 
 interface SpanDagProps {
   visible: boolean;
   onClose: () => void;
 }
+
+/** Zoom limits */
+const MIN_ZOOM = 25;
+const MAX_ZOOM = 400;
+const ZOOM_STEP = 25;
 
 const getSpanStatusColor = (status: string): string => {
   switch (status) {
@@ -95,6 +100,13 @@ const SpanDag: React.FC<SpanDagProps> = ({ visible, onClose }) => {
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [selectedSpan, setSelectedSpan] = useState<SpanNode | null>(null);
 
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(100);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const treeContainerRef = useRef<HTMLDivElement>(null);
+
   const fetchSpanDag = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -139,6 +151,70 @@ const SpanDag: React.FC<SpanDagProps> = ({ visible, onClose }) => {
     }
   };
 
+  // Reset zoom and pan to default
+  const resetZoomPan = useCallback(() => {
+    setZoom(100);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Zoom in handler
+  const zoomIn = useCallback(() => {
+    setZoom(prev => Math.min(MAX_ZOOM, prev + ZOOM_STEP));
+  }, []);
+
+  // Zoom out handler
+  const zoomOut = useCallback(() => {
+    setZoom(prev => Math.max(MIN_ZOOM, prev - ZOOM_STEP));
+  }, []);
+
+  // Mouse wheel zoom handler
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      zoomIn();
+    } else {
+      zoomOut();
+    }
+  }, [zoomIn, zoomOut]);
+
+  // Mouse down - start dragging
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Allow dragging with left mouse button (button 0) or middle mouse button (button 1)
+    if (e.button === 0 || e.button === 1) {
+      setIsDragging(true);
+      setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  }, [pan]);
+
+  // Mouse move - pan
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isDragging) {
+      setPan({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y,
+      });
+    }
+  }, [isDragging, dragStart]);
+
+  // Mouse up or leave - stop dragging
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Get cursor style based on zoom/pan state
+  const getCursorStyle = (): string => {
+    if (isDragging) return 'grabbing';
+    if (zoom !== 100 || pan.x !== 0 || pan.y !== 0) return 'grab';
+    return 'default';
+  };
+
+  // Check if reset button should be visible
+  const showResetButton = zoom !== 100 || pan.x !== 0 || pan.y !== 0;
+
   if (!visible) return null;
 
   const totalSpans = dagData ? countSpans(dagData.roots) : 0;
@@ -152,6 +228,35 @@ const SpanDag: React.FC<SpanDagProps> = ({ visible, onClose }) => {
           {dagData && <span className="dag-count">{totalSpans}</span>}
         </h2>
         <div className="dag-header-actions">
+          {/* Zoom controls */}
+          <div className="dag-zoom-controls">
+            <button
+              className="dag-btn dag-btn-secondary"
+              onClick={zoomOut}
+              disabled={zoom <= MIN_ZOOM}
+              title="Zoom out (- or − key)"
+            >
+              −
+            </button>
+            <span className="dag-zoom-level">{zoom}%</span>
+            <button
+              className="dag-btn dag-btn-secondary"
+              onClick={zoomIn}
+              disabled={zoom >= MAX_ZOOM}
+              title="Zoom in (+ or = key)"
+            >
+              +
+            </button>
+            {showResetButton && (
+              <button
+                className="dag-btn dag-btn-secondary"
+                onClick={resetZoomPan}
+                title="Reset zoom and pan (0 key)"
+              >
+                ↺
+              </button>
+            )}
+          </div>
           <button className="dag-btn dag-btn-secondary" onClick={fetchSpanDag}>
             Refresh
           </button>
@@ -177,7 +282,7 @@ const SpanDag: React.FC<SpanDagProps> = ({ visible, onClose }) => {
             {/* Trace filter */}
             {dagData.traces.length > 1 && (
               <div className="span-dag-trace-filter">
-                <span className="span-dag-trace-label">Traces:</span>
+                <span className="span-dag-trace-label">Filter:</span>
                 <button
                   className={`span-dag-trace-btn ${!selectedTraceId ? 'active' : ''}`}
                   onClick={() => setSelectedTraceId(null)}
@@ -213,7 +318,20 @@ const SpanDag: React.FC<SpanDagProps> = ({ visible, onClose }) => {
             </div>
 
             {/* Span tree */}
-            <div className="dag-tree-container">
+            <div
+              ref={treeContainerRef}
+              className="dag-tree-container"
+              style={{
+                transform: `scale(${zoom / 100}) translate(${pan.x}px, ${pan.y}px)`,
+                transformOrigin: 'top left',
+                cursor: getCursorStyle(),
+              }}
+              onWheel={handleWheel}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
+            >
               {dagData.roots.length === 0 ? (
                 <div className="dag-empty">
                   No OTLP spans received yet. Start an instrumented worker to see span data.

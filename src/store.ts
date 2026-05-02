@@ -41,6 +41,9 @@ import {
   FileAnomaly,
   AnomalyDetectionOptions,
   AnomalyStats,
+  TimelapseOptions,
+  HeatmapTimelapse,
+  HeatmapSnapshot,
   compareEventsBySequence,
 } from './types.js';
 import { isWorkerStuck } from './tui/utils/stuckDetection.js';
@@ -83,6 +86,7 @@ interface FileModificationTracker {
   lastModified: number;
   workerModifications: Map<string, { count: number; lastModified: number }>;
   timestamps: number[];
+  avgModificationInterval?: number;
 }
 
 /** Max events stored in collision records before trimming. */
@@ -1048,6 +1052,193 @@ export class InMemoryEventStore implements EventStore {
     }
 
     // Find most active directory
+    let mostActiveDirectory = '/';
+    let maxCount = 0;
+    for (const [dir, count] of directoryCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostActiveDirectory = dir;
+      }
+    }
+
+    return {
+      totalFiles: entries.length,
+      totalModifications,
+      collisionFiles,
+      activeFiles,
+      heatDistribution,
+      mostActiveDirectory,
+      avgModificationsPerFile: entries.length > 0
+        ? Math.round(totalModifications / entries.length * 10) / 10
+        : 0,
+    };
+  }
+
+  /**
+   * Get heatmap timelapse data for animation
+   */
+  getHeatmapTimelapse(options: TimelapseOptions = {}): HeatmapTimelapse {
+    const {
+      startTimestamp,
+      endTimestamp,
+      snapshotCount = 30,
+      minModifications = 1,
+      maxEntries = 50,
+      sortBy = 'modifications',
+      directoryFilter,
+      collisionsOnly = false,
+    } = options;
+
+    // Determine time range
+    let oldestTimestamp = Date.now();
+    let newestTimestamp = Date.now();
+
+    for (const tracker of this.fileModifications.values()) {
+      if (tracker.firstModified < oldestTimestamp) {
+        oldestTimestamp = tracker.firstModified;
+      }
+      if (tracker.lastModified > newestTimestamp) {
+        newestTimestamp = tracker.lastModified;
+      }
+    }
+
+    const start = startTimestamp ?? oldestTimestamp;
+    const end = endTimestamp ?? newestTimestamp;
+    const interval = Math.max(1, Math.floor((end - start) / snapshotCount));
+
+    // Generate snapshots
+    const snapshots: HeatmapSnapshot[] = [];
+    for (let i = 0; i <= snapshotCount; i++) {
+      const snapshotTime = start + (i * interval);
+      if (snapshotTime > end) break;
+
+      // Get heatmap state at this point in time
+      const entries: FileHeatmapEntry[] = [];
+      for (const tracker of this.fileModifications.values()) {
+        // Skip files that didn't exist yet or don't meet threshold
+        if (tracker.firstModified > snapshotTime) continue;
+        if (tracker.modifications < minModifications) continue;
+
+        // Apply directory filter
+        if (directoryFilter && !tracker.path.startsWith(directoryFilter)) {
+          continue;
+        }
+
+        // Check for collisions at this point in time
+        const hasCollision = this.collisions.has(tracker.path) &&
+          this.collisions.get(tracker.path)!.isActive;
+
+        if (collisionsOnly && !hasCollision) continue;
+
+        // Count active workers at this point in time
+        let activeWorkers = 0;
+        const workerMods: WorkerFileContribution[] = [];
+        let totalModsAtTime = 0;
+
+        for (const [workerId, modData] of tracker.workerModifications) {
+          if (modData.lastModified <= snapshotTime) {
+            activeWorkers++;
+            const mods = modData.count;
+            totalModsAtTime += mods;
+            workerMods.push({
+              workerId,
+              modifications: mods,
+              lastModified: modData.lastModified,
+              percentage: 0, // Will be calculated
+            });
+          }
+        }
+
+        if (totalModsAtTime === 0) continue;
+
+        // Calculate percentages
+        for (const w of workerMods) {
+          w.percentage = Math.round((w.modifications / totalModsAtTime) * 100);
+        }
+
+        // Calculate heat level based on modifications at this point in time
+        let heatLevel: HeatLevel = 'cold';
+        if (totalModsAtTime >= 20) heatLevel = 'critical';
+        else if (totalModsAtTime >= 10) heatLevel = 'hot';
+        else if (totalModsAtTime >= 5) heatLevel = 'warm';
+
+        entries.push({
+          path: tracker.path,
+          modifications: totalModsAtTime,
+          heatLevel,
+          workers: workerMods,
+          firstModified: tracker.firstModified,
+          lastModified: Math.min(tracker.lastModified, snapshotTime),
+          hasCollision,
+          activeWorkers,
+          avgModificationInterval: tracker.avgModificationInterval,
+        });
+      }
+
+      // Sort entries
+      const sortedEntries = this.sortHeatmapEntries(entries, sortBy).slice(0, maxEntries);
+
+      // Calculate stats for this snapshot
+      const stats = this.calculateStatsForEntries(sortedEntries);
+
+      snapshots.push({
+        timestamp: snapshotTime,
+        entries: sortedEntries,
+        stats,
+      });
+    }
+
+    return {
+      startTimestamp: start,
+      endTimestamp: end,
+      interval,
+      totalSnapshots: snapshots.length,
+      snapshots,
+    };
+  }
+
+  /**
+   * Sort heatmap entries by the specified mode
+   */
+  private sortHeatmapEntries(entries: FileHeatmapEntry[], sortBy: string): FileHeatmapEntry[] {
+    switch (sortBy) {
+      case 'recent':
+        return [...entries].sort((a, b) => b.lastModified - a.lastModified);
+      case 'workers':
+        return [...entries].sort((a, b) => b.workers.length - a.workers.length);
+      case 'collisions':
+        return [...entries].sort((a, b) => (b.hasCollision ? 1 : 0) - (a.hasCollision ? 1 : 0));
+      default: // modifications
+        return [...entries].sort((a, b) => b.modifications - a.modifications);
+    }
+  }
+
+  /**
+   * Calculate stats for a set of heatmap entries
+   */
+  private calculateStatsForEntries(entries: FileHeatmapEntry[]): FileHeatmapStats {
+    let totalModifications = 0;
+    let collisionFiles = 0;
+    let activeFiles = 0;
+    const heatDistribution: Record<HeatLevel, number> = {
+      cold: 0,
+      warm: 0,
+      hot: 0,
+      critical: 0,
+    };
+
+    const directoryCounts: Map<string, number> = new Map();
+
+    for (const entry of entries) {
+      totalModifications += entry.modifications;
+      heatDistribution[entry.heatLevel]++;
+      if (entry.hasCollision) collisionFiles++;
+      if (entry.activeWorkers > 0) activeFiles++;
+
+      const dir = entry.path.substring(0, entry.path.lastIndexOf('/')) || '/';
+      directoryCounts.set(dir, (directoryCounts.get(dir) || 0) + entry.modifications);
+    }
+
     let mostActiveDirectory = '/';
     let maxCount = 0;
     for (const [dir, count] of directoryCounts) {

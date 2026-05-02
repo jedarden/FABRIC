@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { LogEvent } from '../types.js';
 import {
   createReplayExport,
   exportToJson,
@@ -17,7 +18,6 @@ import {
   formatAsMarkdown,
   REPLAY_EXPORT_VERSION,
   type ReplayExport,
-  type LogEvent,
 } from './replayExport.js';
 
 describe('replayExport', () => {
@@ -346,17 +346,17 @@ describe('replayExport', () => {
     });
 
     it('should reject missing version', () => {
-      const invalid = { version: undefined } as ReplayExport;
+      const invalid = { version: undefined } as unknown as ReplayExport;
       expect(validateReplayExport(invalid)).toBe(false);
     });
 
     it('should reject missing events array', () => {
-      const invalid = { version: '1.0', events: 'not array' } as ReplayExport;
+      const invalid = { version: '1.0', events: 'not array' } as unknown as ReplayExport;
       expect(validateReplayExport(invalid)).toBe(false);
     });
 
     it('should reject missing metadata', () => {
-      const invalid = { version: '1.0', events: [], metadata: null } as ReplayExport;
+      const invalid = { version: '1.0', events: [], metadata: null } as unknown as ReplayExport;
       expect(validateReplayExport(invalid)).toBe(false);
     });
 
@@ -371,7 +371,7 @@ describe('replayExport', () => {
           sessionEnd: 2000,
           workerCount: 1,
         },
-      } as ReplayExport;
+      } as unknown as ReplayExport;
 
       expect(validateReplayExport(invalid)).toBe(false);
     });
