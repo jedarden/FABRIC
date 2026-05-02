@@ -71,10 +71,10 @@ vi.mock('../utils/colors.js', () => ({
   },
 }));
 
-// Mock workerAnalytics module - define the class inside the factory
-vi.mock('../../workerAnalytics.js', () => {
-  class MockWorkerAnalytics {
-    compareWorkers = () => ({
+// Mock workerAnalytics module - use vi.hoisted to properly handle class factory
+const { MockWorkerAnalytics } = vi.hoisted(() => {
+  class MockWorkerAnalyticsClass {
+    compareWorkers = vi.fn(() => ({
       worker1: { workerId: 'w-1', beadsCompleted: 10, beadsPerHour: 5, avgCompletionTimeMs: 1000, errorRate: 0.1, costPerBead: 0.5, totalCostUsd: 5, efficiencyScore: 0.8, activeTimeMs: 10000, idlePercentage: 0.2, errorCount: 1, totalTokens: 1000, trend: undefined },
       worker2: { workerId: 'w-2', beadsCompleted: 15, beadsPerHour: 7, avgCompletionTimeMs: 800, errorRate: 0.05, costPerBead: 0.3, totalCostUsd: 4.5, efficiencyScore: 0.9, activeTimeMs: 15000, idlePercentage: 0.1, errorCount: 0, totalTokens: 900, trend: undefined },
       differences: { beadsCompleted: -5, beadsPerHour: -2, avgCompletionTimeMs: 200, errorRate: 0.05, costPerBead: 0.2, efficiencyScore: -0.1, activeTimeMs: -5000, idlePercentage: 0.1, totalCostUsd: 0.5, totalTokens: 100 },
@@ -82,12 +82,14 @@ vi.mock('../../workerAnalytics.js', () => {
       betterWorker: { beadsCompleted: 'worker2', beadsPerHour: 'worker2', avgCompletionTimeMs: 'worker2', errorRate: 'worker2', costPerBead: 'worker2', efficiencyScore: 'worker2', activeTimeMs: 'worker2', idlePercentage: 'worker2', totalCostUsd: 'worker2' },
       score: { worker1: 0, worker2: 9 },
       overallWinner: 'worker2',
-    });
+    }));
   }
-  return {
-    WorkerAnalytics: MockWorkerAnalytics,
-  };
+  return { MockWorkerAnalytics: MockWorkerAnalyticsClass };
 });
+
+vi.mock('../../workerAnalytics.js', () => ({
+  WorkerAnalytics: MockWorkerAnalytics,
+}));
 
 // Import after mocking
 import { WorkerAnalyticsPanel } from './WorkerAnalyticsPanel.js';
