@@ -1,30 +1,16 @@
-# bf-5r8a: memoryProfiler.ts Already Implemented
+# bf-5r8a Retrospective
 
-## Issue
-Bead bf-5r8a reported that `src/memoryProfiler.ts` was missing, causing `src/web/server.ts` import failures and blocking web server tests.
+Created src/memoryProfiler.ts implementing real-time memory profiling and leak detection.
 
-## Investigation
-The file `src/memoryProfiler.ts` **already exists** and was implemented in commit `233e381` (feat(bf-5r8a): add memoryProfiler module for real-time memory profiling).
+## What worked
+Analyzing server.ts and heapDiff.ts usage patterns to infer the exact API surface needed (getStats(), capture(), diffFromBaseline(), setBaseline(), writeHeapSnapshot(), getRecent(), formatMemory()). Reading cli.ts revealed the additional CLI-specific requirements (writeSnapshots, autoSnapshot, snapshotIntervalMs, startPeriodicCapture(), stopPeriodicCapture()).
 
-## Verification
-1. File exists at `/home/coding/FABRIC/src/memoryProfiler.ts`
-2. All 90 web server tests pass:
-   ```
-   Test Files  1 passed (1)
-        Tests  90 passed (90)
-   ```
-3. The module exports `getMemoryProfiler()` as expected
-4. `server.ts` imports work correctly
+## What didn't
+Initially missed the CLI-specific configuration properties and periodic capture methods that cli.ts expects — discovered via TypeScript compilation errors.
 
-## Implementation Details
-The memory profiler provides:
-- `capture()` - Capture current memory state
-- `getStats()` - Get memory stats with trend analysis
-- `setBaseline()` - Set baseline for comparisons
-- `diffFromBaseline()` - Get diff from baseline
-- `formatMemory(snapshot)` - Format memory as human-readable string
-- `writeHeapSnapshot()` - Write V8 heap snapshot to disk
-- `getRecent(count)` - Get recent snapshots
+## Surprise
+The module was planned in bd-ch6.7 but the source file was never created, yet server.ts already had full import and usage code. This suggests incomplete feature rollout or partial implementation.
 
-## Conclusion
-No action needed. The issue was resolved prior to this bead being assigned.
+## Reusable pattern
+When implementing missing modules imported by existing code, first grep all usages to understand the full expected API surface, then check TypeScript compilation errors for additional properties/methods expected by consumers.
+
