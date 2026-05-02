@@ -585,7 +585,7 @@ describe('FileHeatmap Component', () => {
       fireEvent.click(timelapseButton);
 
       await waitFor(() => {
-        const playButton = container.querySelector('.timelapse-playback button.primary');
+        const playButton = container.querySelector('.timelapse-playback button');
         expect(playButton).toBeTruthy();
       });
     });
@@ -627,8 +627,8 @@ describe('FileHeatmap Component', () => {
       fireEvent.click(timelapseButton);
 
       await waitFor(() => {
-        const timelineSlider = container.querySelector('.timeline-slider');
-        expect(timelineSlider).toBeTruthy();
+        const timelapseSlider = container.querySelector('.timelapse-slider');
+        expect(timelapseSlider).toBeTruthy();
       });
     });
 
@@ -669,8 +669,8 @@ describe('FileHeatmap Component', () => {
       fireEvent.click(timelapseButton);
 
       await waitFor(() => {
-        const timelineLabels = container.querySelector('.timeline-labels');
-        expect(timelineLabels).toBeTruthy();
+        const timelapseLabels = container.querySelector('.timelapse-labels');
+        expect(timelapseLabels).toBeTruthy();
       });
     });
 
