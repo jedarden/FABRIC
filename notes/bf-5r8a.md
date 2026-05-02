@@ -1,24 +1,32 @@
-# bf-5r8a: MemoryProfiler Implementation - Already Complete
+# Bead bf-5r8a: Memory Profiler Implementation
 
-## Status
-This bead was **already closed** when picked up. The work was completed by a previous agent.
+## Status: Already Complete
 
-## What Was Done
-The `src/memoryProfiler.ts` file was already created with a complete implementation:
-- `MemoryProfiler` class with singleton pattern
-- Methods: `getStats()`, `capture()`, `diffFromBaseline()`, `setBaseline()`, `writeHeapSnapshot()`, `getRecent()`
-- Automatic snapshot capture every 30 seconds
-- Integration with server.ts for `/api/memory/*` endpoints
+The bead description claimed `src/memoryProfiler.ts` was missing and blocking web server tests. Upon investigation:
 
-## Verification
-- All 90 web server tests pass
-- File exists at `src/memoryProfiler.ts`
-- Git commits already on origin/main:
-  - `f824c2e feat(bf-5r8a): add memoryProfiler module for real-time memory profiling`
-  - `4198f5b docs(bf-5r8a): verify all web server tests pass (90/90)`
+### What Was Found
 
-## Retrospective
-- **What worked:** The previous implementation was complete and correct
-- **What didn't:** N/A (work already done)
-- **Surprise:** Bead was already closed despite being assigned
-- **Reusable pattern:** When picking up a bead, first verify if it's already closed and the work is complete
+1. **File exists**: `src/memoryProfiler.ts` is fully implemented (254 lines)
+2. **Tests pass**: All 90 web server tests pass successfully
+3. **Already committed**: Implementation was completed in commit `f824c2e` on 2026-05-02
+
+### Implementation Details (from f824c2e)
+
+The MemoryProfiler class provides:
+- Real-time memory usage tracking and trend analysis
+- Baseline/diff functionality for leak detection
+- V8 heap snapshot capture to disk
+- In-memory snapshot ring buffer (max 100)
+- Periodic capture support with configurable intervals
+
+Used by server.ts endpoints:
+- GET /api/memory/stats
+- POST /api/memory/capture
+- GET /api/memory/diff
+- POST /api/memory/baseline
+- POST /api/memory/heap-snapshot
+- GET /api/memory/snapshots
+
+### Conclusion
+
+No action required. The bead was created retroactively for work that was already complete.
