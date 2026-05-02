@@ -43,6 +43,8 @@ Fixed one failing test:
 - 4 skipped
 - 0 failed
 
-## Conclusion
-
-The genesis bead description was based on outdated information. All claimed implementation gaps were already complete. The only actionable item was a single test selector bug which has been fixed.
+## Retrospective
+- **What worked:** The investigation approach — running tests first, then checking specific files mentioned in gaps — efficiently revealed all gaps were already closed.
+- **What didn't:** The bead description was based on outdated information; no actual implementation work was needed.
+- **Surprise:** The genesis bead tracked work completed days earlier; this highlights the importance of validating gap claims before starting implementation.
+- **Reusable pattern:** For gap closure tasks, always run the full test suite first — passing tests immediately invalidate implementation gap claims.
