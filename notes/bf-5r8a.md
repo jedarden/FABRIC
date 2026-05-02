@@ -14,3 +14,8 @@ The module was planned in bd-ch6.7 but the source file was never created, yet se
 ## Reusable pattern
 When implementing missing modules imported by existing code, first grep all usages to understand the full expected API surface, then check TypeScript compilation errors for additional properties/methods expected by consumers.
 
+---
+
+## Addendum (2026-05-02)
+Bead was re-triggered but work was already complete. The file exists at src/memoryProfiler.ts, all 90 tests pass, and the implementation was already committed in f824c2e. No new work required.
+
