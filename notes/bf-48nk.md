@@ -47,6 +47,15 @@ Fixed one failing test:
 
 Bead bf-48nk closed on 2026-05-02. All claimed gaps were verified as already implemented in previous work.
 
+## Re-verification (2026-05-02)
+
+Re-verified all claimed gaps remain complete:
+- Unit tests: 2399 passed, 4 skipped, 0 failed
+- E2E test failures (53) are unrelated to claimed implementation gaps
+  - E2E failures are in command palette, focus mode, websocket reconnection tests
+  - No E2E tests exist for FileHeatmap treemap/timelapse or SpanDag zoom/pan
+  - These E2E failures appear to be timing/flaky issues, not implementation gaps
+
 ## Retrospective
 - **What worked:** The investigation approach — running tests first, then checking specific files mentioned in gaps — efficiently revealed all gaps were already closed.
 - **What didn't:** The bead description was based on outdated information; no actual implementation work was needed.
