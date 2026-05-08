@@ -1341,11 +1341,11 @@ fabric logs --worker w-abc123           # Filter by worker
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure
-- [ ] Log tailer that watches `~/.needle/logs/`
-- [ ] JSON line parser
-- [ ] Event emitter for parsed events
-- [ ] In-memory event index (by worker, bead, file, timestamp)
-- [ ] Conversation transcript parser (extract full conversation from logs)
+- [x] Log tailer that watches `~/.needle/logs/`
+- [x] JSON line parser
+- [x] Event emitter for parsed events
+- [x] In-memory event index (by worker, bead, file, timestamp)
+- [x] Conversation transcript parser (extract full conversation from logs)
 
 ### Phase 2: TUI Display
 - [ ] Worker list panel
