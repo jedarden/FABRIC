@@ -1166,6 +1166,100 @@ export function createWebServer(options: WebServerOptions): WebServer {
       }
     });
 
+    // ============================================
+    // Conversation Transcript API
+    // ============================================
+
+    // Get all conversation sessions
+    app.get('/api/conversations/sessions', (_req: Request, res: Response) => {
+      try {
+        const sessions = store.getConversationSessions();
+        res.json(sessions);
+      } catch (err) {
+        console.error('Error getting conversation sessions:', err);
+        res.status(500).json({ error: 'Failed to get conversation sessions' });
+      }
+    });
+
+    // Get conversation sessions for a specific worker
+    app.get('/api/conversations/workers/:workerId', (req: Request, res: Response) => {
+      try {
+        const workerId = req.params.workerId as string;
+        const sessions = store.getWorkerConversationSessions(workerId);
+        res.json(sessions);
+      } catch (err) {
+        console.error('Error getting worker conversation sessions:', err);
+        res.status(500).json({ error: 'Failed to get worker conversation sessions' });
+      }
+    });
+
+    // Get conversation session for a specific bead
+    app.get('/api/conversations/beads/:beadId', (req: Request, res: Response) => {
+      try {
+        const beadId = req.params.beadId as string;
+        const session = store.getBeadConversationSession(beadId);
+        if (!session) {
+          res.status(404).json({ error: 'Conversation session not found' });
+          return;
+        }
+        res.json(session);
+      } catch (err) {
+        console.error('Error getting bead conversation session:', err);
+        res.status(500).json({ error: 'Failed to get bead conversation session' });
+      }
+    });
+
+    // Get a specific conversation session by ID
+    app.get('/api/conversations/:sessionId', (req: Request, res: Response) => {
+      try {
+        const sessionId = req.params.sessionId as string;
+        const session = store.getConversationSession(sessionId);
+        if (!session) {
+          res.status(404).json({ error: 'Conversation session not found' });
+          return;
+        }
+        res.json(session);
+      } catch (err) {
+        console.error('Error getting conversation session:', err);
+        res.status(500).json({ error: 'Failed to get conversation session' });
+      }
+    });
+
+    // Get all conversation events across all sessions
+    app.get('/api/conversations/events', (_req: Request, res: Response) => {
+      try {
+        const events = store.getConversationEvents();
+        res.json(events);
+      } catch (err) {
+        console.error('Error getting conversation events:', err);
+        res.status(500).json({ error: 'Failed to get conversation events' });
+      }
+    });
+
+    // Get conversation events for a specific worker
+    app.get('/api/conversations/workers/:workerId/events', (req: Request, res: Response) => {
+      try {
+        const workerId = req.params.workerId as string;
+        const events = store.getWorkerConversationEvents(workerId);
+        res.json(events);
+      } catch (err) {
+        console.error('Error getting worker conversation events:', err);
+        res.status(500).json({ error: 'Failed to get worker conversation events' });
+      }
+    });
+
+    // Get conversation events for a specific bead
+    app.get('/api/conversations/beads/:beadId/events', (req: Request, res: Response) => {
+      try {
+        const beadId = req.params.beadId as string;
+        const events = store.getBeadConversationEvents(beadId);
+        res.json(events);
+      } catch (err) {
+        console.error('Error getting bead conversation events:', err);
+        res.status(500).json({ error: 'Failed to get bead conversation events' });
+      }
+    });
+
     // Serve static frontend files
     const staticPath = join(__dirname, 'public');
     app.use(express.static(staticPath));

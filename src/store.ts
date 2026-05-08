@@ -44,6 +44,8 @@ import {
   TimelapseOptions,
   HeatmapTimelapse,
   HeatmapSnapshot,
+  ConversationSession,
+  ConversationEvent,
   compareEventsBySequence,
 } from './types.js';
 import { isWorkerStuck } from './tui/utils/stuckDetection.js';
@@ -55,6 +57,12 @@ import { WorkerAnalytics, getWorkerAnalytics } from './workerAnalytics.js';
 import { CostTracker } from './tui/utils/costTracking.js';
 import { SemanticNarrativeGenerator, getSemanticNarrativeManager } from './semanticNarrative.js';
 import { HistoricalStore, getHistoricalStore } from './historicalStore.js';
+import {
+  buildConversationSessions,
+  getWorkerConversationSessions,
+  getBeadConversationSession,
+  extractConversationEvents,
+} from './conversationParser.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -156,6 +164,20 @@ export class InMemoryEventStore implements EventStore {
    */
   add(event: LogEvent): void {
     this.events.push(event);
+
+    // Invalidate conversation cache when conversation events are added
+    const spanName = String(event.span_name || '');
+    if (
+      spanName.includes('llm.') ||
+      spanName.includes('tool.') ||
+      event.prompt ||
+      event.response ||
+      event.tool ||
+      event.msg.includes('llm.request') ||
+      event.msg.includes('tool.call')
+    ) {
+      this.invalidateConversationCache();
+    }
 
     // Populate secondary index keyed on (worker, sequence)
     if (event.sequence != null && event.sequence >= 0) {
@@ -312,6 +334,9 @@ export class InMemoryEventStore implements EventStore {
       clearTimeout(this.batchTimeout);
       this.batchTimeout = null;
     }
+
+    // Clear conversation cache
+    this.invalidateConversationCache();
   }
 
   /**
@@ -1937,6 +1962,97 @@ export class InMemoryEventStore implements EventStore {
    */
   getSemanticNarrativeManager(): SemanticNarrativeGenerator {
     return this.semanticNarrativeManager;
+  }
+
+  // ============================================
+  // Conversation Transcript Methods
+  // ============================================
+
+  /**
+   * Cached conversation sessions built from events
+   */
+  private conversationSessions: ConversationSession[] | null = null;
+  private conversationSessionsCacheTime: number = 0;
+  private readonly CONVERSATION_CACHE_TTL_MS = 5000; // 5 seconds
+
+  /**
+   * Invalidate the conversation sessions cache
+   */
+  private invalidateConversationCache(): void {
+    this.conversationSessions = null;
+    this.conversationSessionsCacheTime = 0;
+  }
+
+  /**
+   * Build or retrieve cached conversation sessions
+   */
+  private buildConversationSessions(): ConversationSession[] {
+    const now = Date.now();
+
+    // Return cached sessions if still valid
+    if (
+      this.conversationSessions &&
+      (now - this.conversationSessionsCacheTime) < this.CONVERSATION_CACHE_TTL_MS
+    ) {
+      return this.conversationSessions;
+    }
+
+    // Build new sessions from events
+    this.conversationSessions = buildConversationSessions(this.events);
+    this.conversationSessionsCacheTime = now;
+    return this.conversationSessions;
+  }
+
+  /**
+   * Get all conversation sessions
+   */
+  getConversationSessions(): ConversationSession[] {
+    return this.buildConversationSessions();
+  }
+
+  /**
+   * Get conversation sessions for a specific worker
+   */
+  getWorkerConversationSessions(workerId: string): ConversationSession[] {
+    return getWorkerConversationSessions(this.events, workerId);
+  }
+
+  /**
+   * Get conversation session for a specific bead
+   */
+  getBeadConversationSession(beadId: string): ConversationSession | null {
+    return getBeadConversationSession(this.events, beadId);
+  }
+
+  /**
+   * Get a specific conversation session by ID
+   */
+  getConversationSession(sessionId: string): ConversationSession | undefined {
+    const sessions = this.buildConversationSessions();
+    return sessions.find(s => s.id === sessionId);
+  }
+
+  /**
+   * Get all conversation events across all sessions
+   */
+  getConversationEvents(): ConversationEvent[] {
+    return extractConversationEvents(this.events);
+  }
+
+  /**
+   * Get conversation events for a specific worker
+   */
+  getWorkerConversationEvents(workerId: string): ConversationEvent[] {
+    const workerEvents = this.events.filter(e => e.worker === workerId);
+    return extractConversationEvents(workerEvents);
+  }
+
+  /**
+   * Get conversation events for a specific bead
+   */
+  getBeadConversationEvents(beadId: string): ConversationEvent[] {
+    const beadEvents = this.events.filter(e => e.bead === beadId);
+    return extractConversationEvents(beadEvents);
   }
 }
 
