@@ -1392,6 +1392,140 @@ fabric logs --worker w-abc123           # Filter by worker
 - [ ] Anomaly detection (unexpected file activity)
 - [ ] Recovery playbook (error pattern matching)
 
+### Phase 9: Productivity Analytics (checklist)
+- [ ] Fix `beadsCompleted` counter for modern NEEDLE event format
+- [ ] Fleet summary bar (web)
+- [ ] Worker card: beadsCompleted + currentBead; remove eventCount
+- [ ] Worker sort by state (WORKING first)
+- [ ] Test worker filter (hide by default)
+- [ ] Productivity panel: daily throughput chart + worker leaderboard
+- [ ] Bead workspace scanner: read `.beads/issues.jsonl` for project breakdown
+- [ ] `/api/productivity` endpoint
+
+---
+
+### Phase 9: Productivity Analytics
+
+**The question this phase answers:** Are my workers productive? How many beads did they complete today? Which workers completed the most? Which projects got the most work done?
+
+The live view (Phases 1–8) answers "what is happening *right now*?" — it shows NEEDLE state, heartbeats, active files, stuck detection. But it does not answer the retrospective question: *how much did the fleet actually accomplish?*
+
+#### The Problem
+
+When a user opens the dashboard and sees 40 workers all showing `EXHAUSTED_IDLE`, the dashboard appears to say "nothing is happening." The correct interpretation is "the fleet finished all available work." There is no way to tell from the current UI whether the workers completed 200 beads or 0.
+
+Similarly, when workers are active, the worker card shows an event count (e.g., "134,572 events") but event count is an implementation detail, not a productivity signal. A worker that spent an hour stuck in a loop produces thousands of events and zero completions.
+
+#### Data Sources
+
+Two data sources combine to answer the productivity question:
+
+**1. NEEDLE log events** (already ingested by FABRIC):
+
+| Event | What it signals |
+|-------|----------------|
+| `bead.claim.succeeded` | Worker started working on a bead; record start time |
+| `outcome.classified` with `outcome: success` | Agent exited cleanly; bead likely done |
+| `bead.released` with `reason: release_success` | NEEDLE confirmed the bead was closed; **this is the completion signal** |
+| `bead.released` with `reason: release_failure` | Worker dropped the bead without completing it |
+
+The current `beadsCompleted` counter in `store.ts` only fires on a legacy `bead.completed` event that modern NEEDLE workers do not emit. The counter must be updated to fire on `bead.released` with `reason: release_success`.
+
+**2. Bead JSONL files** (not currently read by FABRIC):
+
+Each workspace has a `.beads/issues.jsonl` file. Closed beads carry:
+- `id` — bead identifier (prefix encodes the project, e.g. `kt-*` = kalshi-tape, `bf-*` = multi-project global)
+- `close_reason` — often contains the worker name (`"Completed by worker claude-code-glm-4.7-india"`)
+- `closed_at` — ISO timestamp of completion
+- `assignee` — the worker that held the bead
+
+Reading these files unlocks project-level breakdown without requiring NEEDLE to emit workspace context in its log events.
+
+#### UI Changes Required
+
+**1. Fleet summary bar** (top of dashboard, always visible)
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│  3 WORKING  ·  7 SELECTING  ·  24 EXHAUSTED  ·  53 beads today  ·  0 stuck  │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+One line. The single most important at-a-glance view. Replaces having to count individual worker cards.
+
+**2. Worker card enrichment**
+
+Each worker card should show beads completed (not event count) and, when `WORKING`, the current bead ID:
+
+```
+┌─────────────────────────────────────┐
+│  claude-code-glm-4.7-india  WORKING  │
+│  bead: bf-5r22                       │
+│  31 completed  ·  last: 2m ago       │
+└─────────────────────────────────────┘
+```
+
+**3. Worker sort order**
+
+Workers should sort by operational importance, not alphabetically:
+1. `WORKING` (doing something right now)
+2. `SELECTING` / `CLAIMING` (about to do something)
+3. `BOOTING` / `CLOSING`
+4. `EXHAUSTED_IDLE` / `IDLE` (queue empty)
+5. `STOPPED`
+
+**4. Test worker filter**
+
+Workers whose IDs match patterns like `test-*`, `claude-test-*`, `nonexistent-*`, `needle-test` should be hidden by default (togglable).
+
+**5. Productivity panel** (new tab/section in web dashboard)
+
+```
+┌─ Productivity ──────────────────────────────────────────────────────┐
+│                                                                     │
+│  Daily Throughput (last 14 days)                                    │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  79 ┤                   ████                                  │  │
+│  │  60 ┤              ████ ████ ████                             │  │
+│  │  40 ┤         ████ ████ ████ ████ ████                        │  │
+│  │  20 ┤    ████ ████ ████ ████ ████ ████ ████ ████              │  │
+│  │   0 └────────────────────────────────────────────────────    │  │
+│  │      Apr 26       May 1             May 8                     │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  Worker Leaderboard (all-time)                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  #  Worker                        Beads   Beads/hr            │  │
+│  │  1  claude-code-glm-4.7-india       31     1.8               │  │
+│  │  2  claude-code-glm-4.7-juliet      26     1.5               │  │
+│  │  3  claude-code-glm-4.7-charlie     19     1.1               │  │
+│  │  4  claude-code-glm-4.7-lima        14     0.9               │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  By Project (from bead JSONL files, requires workspace config)     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  kalshi-trading            647  ████████████████████████████  │  │
+│  │  kalshi-improvement        420  ██████████████████            │  │
+│  │  botburrow-agents          327  ██████████████                │  │
+│  │  mobile-gaming             270  ████████████                  │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Checklist
+
+- [ ] Fix `beadsCompleted` counter: fire on `bead.released` where `data.reason === 'release_success'`
+- [ ] Add `currentBead` field to WorkerInfo: populated from `bead.claim.succeeded`, cleared on `bead.released`
+- [ ] Fleet summary bar component (web)
+- [ ] Worker card: show `beadsCompleted`, `currentBead`; remove `eventCount`
+- [ ] Worker sort: WORKING > SELECTING > CLAIMING > BOOTING > EXHAUSTED_IDLE > STOPPED
+- [ ] Test worker filter: hide by default, toggle in UI
+- [ ] Productivity panel: daily throughput chart (from `bead.released` timestamps)
+- [ ] Productivity panel: worker leaderboard
+- [ ] Bead workspace scanner: read configured `.beads/issues.jsonl` files for project-level breakdown
+- [ ] `/api/productivity` endpoint: returns daily counts, worker leaderboard, project breakdown
+
 ### Phase 8: Post-launch Fixes
 
 Gaps discovered after the 134 initial implementation beads closed.
@@ -1457,5 +1591,5 @@ FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detec
 
 ---
 
-**Status**: Phases 1–8 complete.
-**Last Updated**: 2026-04-22
+**Status**: Phases 1–8 complete. Phase 9 (Productivity Analytics) planned.
+**Last Updated**: 2026-05-10
