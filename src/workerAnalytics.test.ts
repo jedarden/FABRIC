@@ -144,6 +144,32 @@ describe('WorkerAnalytics', () => {
     });
   });
 
+  describe('bead.released tracking', () => {
+    it('should count bead.released with release_success as a completion', () => {
+      const events: LogEvent[] = [
+        { ts: baseTime, worker: 'w-1', level: 'info', msg: 'bead.released', reason: 'release_success', bead: 'bd-1' },
+        { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'bead.released', reason: 'release_success', bead: 'bd-2' },
+      ];
+
+      events.forEach(e => analytics.processEvent(e));
+
+      const metrics = analytics.getWorkerMetrics('w-1');
+      expect(metrics?.beadsCompleted).toBe(2);
+    });
+
+    it('should NOT count bead.released with other reasons as a completion', () => {
+      const events: LogEvent[] = [
+        { ts: baseTime, worker: 'w-1', level: 'info', msg: 'bead.released', reason: 'release_retry', bead: 'bd-1' },
+        { ts: baseTime + 1000, worker: 'w-1', level: 'info', msg: 'bead.released', bead: 'bd-2' },
+      ];
+
+      events.forEach(e => analytics.processEvent(e));
+
+      const metrics = analytics.getWorkerMetrics('w-1');
+      expect(metrics?.beadsCompleted).toBe(0);
+    });
+  });
+
   describe('Error Tracking', () => {
     it('should track error count', () => {
       const events: LogEvent[] = [

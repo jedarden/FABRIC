@@ -484,7 +484,8 @@ export class InMemoryEventStore implements EventStore {
       // Find the completion event for this bead
       const completionEvent = this.events.find(e =>
         e.bead === beadId &&
-        (e.msg === 'bead.completed' || e.msg === 'bead.failed')
+        (e.msg === 'bead.completed' || e.msg === 'bead.failed' ||
+         (e.msg === 'bead.released' && e['reason'] === 'release_success'))
       );
 
       if (completionEvent) {
@@ -686,6 +687,14 @@ export class InMemoryEventStore implements EventStore {
           worker.activeDirectories = [];
           worker.activeBead = undefined;
         }
+      } else if (needleEvent === 'bead.released' && event['reason'] === 'release_success') {
+        worker.status = 'idle';
+        if (event.bead) {
+          worker.beadsCompleted++;
+        }
+        worker.activeFiles = [];
+        worker.activeDirectories = [];
+        worker.activeBead = undefined;
       } else if (
         needleEvent === 'worker.started' ||
         needleEvent === 'bead.claimed' ||
@@ -746,7 +755,8 @@ export class InMemoryEventStore implements EventStore {
 
     // Check for task completion — match on NEEDLE event type exactly
     const msg = event.msg || '';
-    if (msg === 'bead.completed' || msg === 'bead.failed') {
+    const isReleasedSuccess = msg === 'bead.released' && event['reason'] === 'release_success';
+    if (msg === 'bead.completed' || msg === 'bead.failed' || isReleasedSuccess) {
       const startTime = this.taskStartTimes.get(beadId);
       if (startTime) {
         const durationMs = event.ts - startTime;

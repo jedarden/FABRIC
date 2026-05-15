@@ -695,11 +695,12 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
 
     // Detect bead completion
     const msg = event.msg?.toLowerCase() || '';
+    const isReleasedSuccess = event.msg === 'bead.released' && event['reason'] === 'release_success';
     if (
       msg.includes('completed') ||
       msg.includes('finished') ||
       msg.includes('done') ||
-      msg.includes('success')
+      isReleasedSuccess
     ) {
       const startTime = worker.beadStartTimes.get(beadId);
       if (startTime) {

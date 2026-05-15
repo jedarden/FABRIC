@@ -200,6 +200,37 @@ describe('InMemoryEventStore', () => {
       expect(worker?.beadsCompleted).toBe(2);
     });
 
+    it('should set status to idle on bead.released with release_success', () => {
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.released', reason: 'release_success', bead: 'bd-1' }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.status).toBe('idle');
+    });
+
+    it('should increment beadsCompleted on bead.released with release_success', () => {
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.released', reason: 'release_success', bead: 'bd-1' }));
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.released', reason: 'release_success', bead: 'bd-2' }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.beadsCompleted).toBe(2);
+    });
+
+    it('should clear activeBead and activeFiles on bead.released with release_success', () => {
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.claimed', bead: 'bd-1' }));
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.released', reason: 'release_success', bead: 'bd-1' }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.activeBead).toBeUndefined();
+      expect(worker?.activeFiles).toEqual([]);
+    });
+
+    it('should NOT increment beadsCompleted on bead.released without release_success', () => {
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.released', reason: 'release_retry', bead: 'bd-1' }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.beadsCompleted).toBe(0);
+    });
+
     it('should track firstSeen timestamp', () => {
       const earlyTs = 1000;
       const lateTs = 5000;
