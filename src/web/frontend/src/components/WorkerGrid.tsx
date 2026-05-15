@@ -7,6 +7,7 @@ const NEEDLE_STATE_LABELS: Record<NeedleState, string> = {
   CLAIMING: 'CLAIMING',
   WORKING: 'WORKING',
   CLOSING: 'CLOSING',
+  EXHAUSTED_IDLE: 'EXHAUSTED',
   STOPPED: 'STOPPED',
 };
 
@@ -16,8 +17,40 @@ const NEEDLE_STATE_COLORS: Record<NeedleState, string> = {
   CLAIMING: '#9b59b6',
   WORKING: '#5cb85c',
   CLOSING: '#f0ad4e',
+  EXHAUSTED_IDLE: '#95a5a6',
   STOPPED: '#777',
 };
+
+// Lower number = higher priority (shown first)
+const NEEDLE_STATE_PRIORITY: Partial<Record<string, number>> = {
+  WORKING: 0,
+  CLAIMING: 1,
+  SELECTING: 2,
+  BOOTING: 3,
+  CLOSING: 4,
+  EXHAUSTED_IDLE: 5,
+  STOPPED: 6,
+};
+
+const TEST_WORKER_PATTERNS: RegExp[] = [
+  /^test-/,
+  /^claude-test-/,
+  /^nonexistent-/,
+  /^needle-test$/,
+  /^strand-runner$/,
+  /-test-worker$/,
+];
+
+function isTestWorker(id: string): boolean {
+  return TEST_WORKER_PATTERNS.some(pattern => pattern.test(id));
+}
+
+function stateSort(a: WorkerInfo, b: WorkerInfo): number {
+  const pa = a.needleState != null ? (NEEDLE_STATE_PRIORITY[a.needleState] ?? 7) : 7;
+  const pb = b.needleState != null ? (NEEDLE_STATE_PRIORITY[b.needleState] ?? 7) : 7;
+  if (pa !== pb) return pa - pb;
+  return a.id.localeCompare(b.id);
+}
 
 interface WorkerGridProps {
   workers: WorkerInfo[];
@@ -26,6 +59,7 @@ interface WorkerGridProps {
   pinnedWorkers?: Set<string>;
   onTogglePin?: (workerId: string) => void;
   focusModeEnabled?: boolean;
+  hideTestWorkers?: boolean;
 }
 
 const WorkerGrid: React.FC<WorkerGridProps> = ({
@@ -35,6 +69,7 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
   pinnedWorkers = new Set(),
   onTogglePin,
   focusModeEnabled = false,
+  hideTestWorkers = true,
 }) => {
   const formatLastSeen = (timestamp: string) => {
     const diff = Date.now() - new Date(timestamp).getTime();
@@ -47,16 +82,20 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
   };
 
   const handlePinClick = (e: React.MouseEvent, workerId: string) => {
-    e.stopPropagation(); // Prevent card selection when clicking pin
+    e.stopPropagation();
     if (onTogglePin) {
       onTogglePin(workerId);
     }
   };
 
+  const visibleWorkers = [...workers]
+    .filter(w => !hideTestWorkers || !isTestWorker(w.id))
+    .sort(stateSort);
+
   return (
     <div className="worker-grid">
       <h2>
-        Workers ({workers.length})
+        Workers ({visibleWorkers.length})
         {focusModeEnabled && pinnedWorkers.size > 0 && (
           <span style={{ marginLeft: '0.5rem', fontSize: '0.9rem', color: '#666' }}>
             (Focus: {pinnedWorkers.size} pinned)
@@ -64,7 +103,7 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
         )}
       </h2>
 
-      {workers.length === 0 ? (
+      {visibleWorkers.length === 0 ? (
         <div className="empty-state">
           <p>{focusModeEnabled && pinnedWorkers.size === 0
             ? 'No pinned workers. Pin workers to see them in Focus Mode.'
@@ -76,7 +115,7 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
           </p>
         </div>
       ) : (
-        workers.map(worker => {
+        visibleWorkers.map(worker => {
           const isPinned = pinnedWorkers.has(worker.id);
           return (
             <div

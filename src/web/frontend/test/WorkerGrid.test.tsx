@@ -520,4 +520,110 @@ describe('WorkerGrid', () => {
       expect(indicator).toHaveAttribute('title', 'File collision detected!');
     });
   });
+
+  describe('test worker filtering', () => {
+    const testWorkerIds = [
+      'test-worker',
+      'test-alpha',
+      'claude-test-worker',
+      'claude-test-foo',
+      'nonexistent-worker',
+      'nonexistent-abc',
+      'needle-test',
+      'strand-runner',
+      'claude-interactive-charlie-test-worker',
+    ];
+
+    it.each(testWorkerIds)('should hide test worker "%s" by default', (id) => {
+      const workers = [createMockWorker({ id })];
+      render(
+        <WorkerGrid workers={workers} selectedWorker={null} onSelectWorker={mockOnSelectWorker} />
+      );
+      expect(screen.queryByText(id)).not.toBeInTheDocument();
+    });
+
+    it.each(testWorkerIds)('should show test worker "%s" when hideTestWorkers=false', (id) => {
+      const workers = [createMockWorker({ id })];
+      render(
+        <WorkerGrid
+          workers={workers}
+          selectedWorker={null}
+          onSelectWorker={mockOnSelectWorker}
+          hideTestWorkers={false}
+        />
+      );
+      expect(screen.getByText(id)).toBeInTheDocument();
+    });
+
+    it('should show non-test workers by default', () => {
+      const workers = [createMockWorker({ id: 'claude-interactive-alpha' })];
+      render(
+        <WorkerGrid workers={workers} selectedWorker={null} onSelectWorker={mockOnSelectWorker} />
+      );
+      expect(screen.getByText('claude-interactive-alpha')).toBeInTheDocument();
+    });
+
+    it('should reflect filtered count in header', () => {
+      const workers = [
+        createMockWorker({ id: 'worker-real' }),
+        createMockWorker({ id: 'test-hidden' }),
+      ];
+      render(
+        <WorkerGrid workers={workers} selectedWorker={null} onSelectWorker={mockOnSelectWorker} />
+      );
+      expect(screen.getByText('Workers (1)')).toBeInTheDocument();
+    });
+  });
+
+  describe('worker sort order by needle state', () => {
+    it('should sort WORKING before STOPPED', () => {
+      const workers = [
+        createMockWorker({ id: 'stopped-worker', needleState: 'STOPPED' }),
+        createMockWorker({ id: 'working-worker', needleState: 'WORKING' }),
+      ];
+      const { container } = render(
+        <WorkerGrid workers={workers} selectedWorker={null} onSelectWorker={mockOnSelectWorker} />
+      );
+      const cards = container.querySelectorAll('.worker-id');
+      expect(cards[0].textContent).toContain('working-worker');
+      expect(cards[1].textContent).toContain('stopped-worker');
+    });
+
+    it('should sort WORKING > CLAIMING > SELECTING > BOOTING > CLOSING > STOPPED', () => {
+      const workers = [
+        createMockWorker({ id: 'w-stopped', needleState: 'STOPPED' }),
+        createMockWorker({ id: 'w-booting', needleState: 'BOOTING' }),
+        createMockWorker({ id: 'w-claiming', needleState: 'CLAIMING' }),
+        createMockWorker({ id: 'w-selecting', needleState: 'SELECTING' }),
+        createMockWorker({ id: 'w-closing', needleState: 'CLOSING' }),
+        createMockWorker({ id: 'w-working', needleState: 'WORKING' }),
+      ];
+      const { container } = render(
+        <WorkerGrid workers={workers} selectedWorker={null} onSelectWorker={mockOnSelectWorker} />
+      );
+      const cards = container.querySelectorAll('.worker-id');
+      const order = Array.from(cards).map(c => c.textContent?.trim());
+      expect(order).toEqual([
+        'w-working',
+        'w-claiming',
+        'w-selecting',
+        'w-booting',
+        'w-closing',
+        'w-stopped',
+      ]);
+    });
+
+    it('should sort workers without needle state after workers with states', () => {
+      const workers = [
+        createMockWorker({ id: 'no-state' }),
+        createMockWorker({ id: 'w-working', needleState: 'WORKING' }),
+      ];
+      const { container } = render(
+        <WorkerGrid workers={workers} selectedWorker={null} onSelectWorker={mockOnSelectWorker} />
+      );
+      const cards = container.querySelectorAll('.worker-id');
+      expect(cards[0].textContent).toContain('w-working');
+      expect(cards[1].textContent).toContain('no-state');
+    });
+  });
 });

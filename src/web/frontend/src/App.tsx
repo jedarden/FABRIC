@@ -258,6 +258,7 @@ const App: React.FC = () => {
   const [showGitIntegration, setShowGitIntegration] = useState(false);
   const [showNarrative, setShowNarrative] = useState(false);
   const [budgetBannerDismissed, setBudgetBannerDismissed] = useState(false);
+  const [hideTestWorkers, setHideTestWorkers] = useState(true);
 
   // Budget alert state polled from /api/cost/summary
   const [budgetSummary, setBudgetSummary] = useState<{
@@ -826,6 +827,14 @@ const App: React.FC = () => {
             <span className="narrative-toggle-icon">&#x1F4DD;</span>
             <span className="narrative-toggle-label">Narrative</span>
           </button>
+          <button
+            className={`hide-test-workers-toggle ${hideTestWorkers ? 'active' : ''}`}
+            onClick={() => setHideTestWorkers(prev => !prev)}
+            title={hideTestWorkers ? 'Test workers hidden — click to show' : 'Test workers visible — click to hide'}
+          >
+            <span className="hide-test-workers-icon">🧪</span>
+            <span className="hide-test-workers-label">{hideTestWorkers ? 'Hide Tests' : 'Show Tests'}</span>
+          </button>
           {unacknowledgedAlertCount > 0 && (
             <button
               className="collision-alert-toggle"
@@ -872,6 +881,7 @@ const App: React.FC = () => {
           pinnedWorkers={pinnedWorkers}
           onTogglePin={togglePinWorker}
           focusModeEnabled={focusModeEnabled}
+          hideTestWorkers={hideTestWorkers}
         />
 
         {showTimeline && (

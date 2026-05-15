@@ -6,6 +6,7 @@ export type NeedleState =
   | 'CLAIMING'
   | 'WORKING'
   | 'CLOSING'
+  | 'EXHAUSTED_IDLE'
   | 'STOPPED';
 
 export interface LogEvent {

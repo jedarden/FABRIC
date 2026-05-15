@@ -10,6 +10,7 @@ const NEEDLE_STATE_ICONS: Record<NeedleState, string> = {
   CLAIMING: '🎯',
   WORKING: '●',
   CLOSING: '⏹',
+  EXHAUSTED_IDLE: '💤',
   STOPPED: '○',
 };
 
@@ -19,6 +20,7 @@ const NEEDLE_STATE_COLORS: Record<NeedleState, string> = {
   CLAIMING: '#9b59b6',
   WORKING: '#5cb85c',
   CLOSING: '#f0ad4e',
+  EXHAUSTED_IDLE: '#95a5a6',
   STOPPED: '#777',
 };
 
