@@ -1096,6 +1096,49 @@ export function createWebServer(options: WebServerOptions): WebServer {
       }
     });
 
+    // Productivity analytics — daily throughput + worker leaderboard
+    app.get('/api/productivity', (_req: Request, res: Response) => {
+      try {
+        const now = Date.now();
+        const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+        // Count bead completions by day from in-memory events
+        const dayCounts = new Map<string, number>();
+        for (const event of store.query({})) {
+          if (
+            event.msg === 'bead.released' &&
+            (event as Record<string, unknown>)['reason'] === 'release_success' &&
+            event.ts >= thirtyDaysAgo
+          ) {
+            const date = new Date(event.ts).toISOString().slice(0, 10);
+            dayCounts.set(date, (dayCounts.get(date) ?? 0) + 1);
+          }
+        }
+
+        // Fill in all 30 days (including zeros)
+        const daily: { date: string; count: number }[] = [];
+        for (let i = 29; i >= 0; i--) {
+          const d = new Date(now - i * 24 * 60 * 60 * 1000);
+          const date = d.toISOString().slice(0, 10);
+          daily.push({ date, count: dayCounts.get(date) ?? 0 });
+        }
+
+        // Worker leaderboard
+        const workers = store.getWorkers().map((w) => {
+          const spanMs = Math.max(w.lastActivity - w.firstSeen, 1);
+          const beadsPerHour = parseFloat(
+            ((w.beadsCompleted / spanMs) * 3600000).toFixed(2)
+          );
+          return { id: w.id, beadsCompleted: w.beadsCompleted, beadsPerHour };
+        });
+        workers.sort((a, b) => b.beadsCompleted - a.beadsCompleted);
+
+        res.json({ daily, workers });
+      } catch (err) {
+        res.status(500).json({ error: String(err) });
+      }
+    });
+
     app.get('/api/digest', (req: Request, res: Response) => {
       try {
         const generator = new SessionDigestGenerator(store);

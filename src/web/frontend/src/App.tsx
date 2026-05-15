@@ -19,6 +19,7 @@ import SemanticNarrativePanel from './components/SemanticNarrativePanel';
 import BudgetAlertPanel, { BudgetBanner } from './components/BudgetAlertPanel';
 import SessionDigestPanel from './components/SessionDigestPanel';
 import GitIntegrationPanel from './components/GitIntegrationPanel';
+import ProductivityPanel from './components/ProductivityPanel';
 import CommandPalette from './components/CommandPalette';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
@@ -257,6 +258,7 @@ const App: React.FC = () => {
   const [showSessionDigest, setShowSessionDigest] = useState(false);
   const [showGitIntegration, setShowGitIntegration] = useState(false);
   const [showNarrative, setShowNarrative] = useState(false);
+  const [showProductivity, setShowProductivity] = useState(false);
   const [budgetBannerDismissed, setBudgetBannerDismissed] = useState(false);
   const [hideTestWorkers, setHideTestWorkers] = useState(true);
 
@@ -828,6 +830,14 @@ const App: React.FC = () => {
             <span className="narrative-toggle-label">Narrative</span>
           </button>
           <button
+            className={`productivity-toggle ${showProductivity ? 'active' : ''}`}
+            onClick={() => setShowProductivity(!showProductivity)}
+            title="Productivity — daily throughput and worker leaderboard"
+          >
+            <span className="productivity-toggle-icon">&#x1F3C6;</span>
+            <span className="productivity-toggle-label">Productivity</span>
+          </button>
+          <button
             className={`hide-test-workers-toggle ${hideTestWorkers ? 'active' : ''}`}
             onClick={() => setHideTestWorkers(prev => !prev)}
             title={hideTestWorkers ? 'Test workers hidden — click to show' : 'Test workers visible — click to hide'}
@@ -1004,6 +1014,13 @@ const App: React.FC = () => {
           <GitIntegrationPanel
             visible={showGitIntegration}
             onClose={() => setShowGitIntegration(false)}
+          />
+        )}
+
+        {showProductivity && (
+          <ProductivityPanel
+            visible={showProductivity}
+            onClose={() => setShowProductivity(false)}
           />
         )}
 

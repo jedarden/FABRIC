@@ -8814,3 +8814,60 @@ body {
   font-style: italic;
   margin-top: 0.25rem;
 }
+
+/* ============================================
+   Productivity Panel
+   ============================================ */
+
+.productivity-panel {
+  width: 700px;
+}
+
+.productivity-chart-wrap {
+  width: 100%;
+  padding: 0.5rem 0;
+}
+
+.productivity-leaderboard {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.productivity-leaderboard th {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 600;
+}
+
+.productivity-leaderboard td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.productivity-leaderboard tbody tr:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.04));
+}
+
+.productivity-rank {
+  color: var(--text-secondary);
+  width: 2rem;
+}
+
+.productivity-worker-id {
+  font-family: var(--mono-font, monospace);
+  font-size: 0.8rem;
+}
+
+.productivity-count {
+  font-weight: 600;
+  text-align: right;
+  padding-right: 1.5rem;
+}
+
+.productivity-rate {
+  color: var(--text-secondary);
+  text-align: right;
+}
