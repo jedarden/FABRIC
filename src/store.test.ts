@@ -231,6 +231,55 @@ describe('InMemoryEventStore', () => {
       expect(worker?.beadsCompleted).toBe(0);
     });
 
+    it('should set currentBead from bead.claim.succeeded event', () => {
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.claim.succeeded', bead: 'bd-abc123' }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.currentBead).toBe('bd-abc123');
+    });
+
+    it('should clear currentBead to null on bead.released event', () => {
+      // First set currentBead
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.claim.succeeded', bead: 'bd-abc123' }));
+
+      const workerBefore = store.getWorker('w-test');
+      expect(workerBefore?.currentBead).toBe('bd-abc123');
+
+      // Then release the bead
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.released', bead: 'bd-abc123' }));
+
+      const workerAfter = store.getWorker('w-test');
+      expect(workerAfter?.currentBead).toBeNull();
+    });
+
+    it('should clear currentBead on bead.released regardless of reason', () => {
+      // Set currentBead
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.claim.succeeded', bead: 'bd-xyz' }));
+
+      // Release with non-success reason
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.released', reason: 'release_retry', bead: 'bd-xyz' }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.currentBead).toBeNull();
+    });
+
+    it('should update currentBead when worker claims another bead', () => {
+      // Claim first bead
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.claim.succeeded', bead: 'bd-first' }));
+      expect(store.getWorker('w-test')?.currentBead).toBe('bd-first');
+
+      // Claim second bead
+      store.add(createEvent({ worker: 'w-test', msg: 'bead.claim.succeeded', bead: 'bd-second' }));
+      expect(store.getWorker('w-test')?.currentBead).toBe('bd-second');
+    });
+
+    it('should initialize currentBead to null for new workers', () => {
+      store.add(createEvent({ worker: 'w-newbie', msg: 'worker.started' }));
+
+      const worker = store.getWorker('w-newbie');
+      expect(worker?.currentBead).toBeNull();
+    });
+
     it('should track firstSeen timestamp', () => {
       const earlyTs = 1000;
       const lateTs = 5000;

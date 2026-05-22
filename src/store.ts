@@ -622,6 +622,7 @@ export class InMemoryEventStore implements EventStore {
         activeFiles: [],
         hasCollision: false,
         activeBead: event.bead,
+        currentBead: null,
         activeDirectories: [],
         collisionTypes: [],
         eventCount: 1,
@@ -687,14 +688,18 @@ export class InMemoryEventStore implements EventStore {
           worker.activeDirectories = [];
           worker.activeBead = undefined;
         }
-      } else if (needleEvent === 'bead.released' && event['reason'] === 'release_success') {
-        worker.status = 'idle';
-        if (event.bead) {
-          worker.beadsCompleted++;
+      } else if (needleEvent === 'bead.released') {
+        // Clear currentBead on any bead.released event (regardless of reason)
+        worker.currentBead = null;
+        if (event['reason'] === 'release_success') {
+          worker.status = 'idle';
+          if (event.bead) {
+            worker.beadsCompleted++;
+          }
+          worker.activeFiles = [];
+          worker.activeDirectories = [];
+          worker.activeBead = undefined;
         }
-        worker.activeFiles = [];
-        worker.activeDirectories = [];
-        worker.activeBead = undefined;
       } else if (
         needleEvent === 'worker.started' ||
         needleEvent === 'bead.claimed' ||
@@ -703,6 +708,11 @@ export class InMemoryEventStore implements EventStore {
       ) {
         worker.status = 'active';
       }
+    }
+
+    // Set currentBead from bead.claim.succeeded event
+    if (needleEvent === 'bead.claim.succeeded' && event.bead) {
+      worker.currentBead = event.bead;
     }
 
     // Update last event

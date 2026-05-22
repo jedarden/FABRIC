@@ -551,6 +551,9 @@ export interface WorkerInfo {
   /** Current bead/task being worked on */
   activeBead?: string;
 
+  /** Current bead from bead.claim.succeeded, cleared on bead.released */
+  currentBead: string | null;
+
   /** Directories this worker is active in */
   activeDirectories: string[];
 
