@@ -66,4 +66,5 @@ Vitest hoists `vi.mock()` calls to the top of the file before regular variable d
 - `1484adb` - docs(bf-5klc): verify fix already applied
 
 ## Date Verified
-2026-05-22 (re-verification - fix is in place and committed)
+- 2026-05-22 21:46 UTC (initial fix)
+- 2026-05-22 17:48 UTC (re-verification - tests pass: 107 tests)
