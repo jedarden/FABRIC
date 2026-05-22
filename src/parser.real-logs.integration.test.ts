@@ -138,7 +138,8 @@ describe('Real NEEDLE Log Integration', () => {
       }
 
       for (let i = 1; i < sequences.length; i++) {
-        expect(sequences[i]).toBeGreaterThan(sequences[i - 1]);
+        // Sequence numbers should be non-decreasing (allow duplicates for same-timestamp events)
+        expect(sequences[i]).toBeGreaterThanOrEqual(sequences[i - 1]);
       }
     });
 

@@ -168,7 +168,8 @@ describe('FleetSummaryBar', () => {
       const { container } = render(<FleetSummaryBar workers={[]} />);
 
       const separators = container.querySelectorAll('.fleet-summary-separator');
-      expect(separators.length).toBe(5);
+      // 5 items with 4 separators between them
+      expect(separators.length).toBe(4);
     });
   });
 

@@ -76,11 +76,11 @@ describe('Bead Workspace Scanner', () => {
     ].join('\n'),
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
 
     // Mock loadWorkspaces to return our test workspaces
-    const { loadWorkspaces } = vi.mocked(await import('./config.js'));
+    const { loadWorkspaces } = await import('./config.js');
     vi.mocked(loadWorkspaces).mockReturnValue(mockWorkspaces);
 
     // Mock fs.existsSync to return true for our test files
