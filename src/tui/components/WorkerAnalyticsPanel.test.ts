@@ -71,7 +71,7 @@ vi.mock('../utils/colors.js', () => ({
   },
 }));
 
-// Mock workerAnalytics module - define everything inline inside the factory to avoid hoisting issues
+// Mock workerAnalytics module - define everything inline to avoid hoisting issues
 vi.mock('../../workerAnalytics.js', () => {
   class MockWorkerAnalytics {
     compareWorkers = vi.fn(() => ({
@@ -87,6 +87,7 @@ vi.mock('../../workerAnalytics.js', () => {
 
   return {
     WorkerAnalytics: MockWorkerAnalytics,
+    default: MockWorkerAnalytics,
   };
 });
 

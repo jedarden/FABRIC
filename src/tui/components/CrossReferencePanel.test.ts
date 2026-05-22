@@ -64,26 +64,21 @@ vi.mock('../utils/colors.js', () => ({
 }));
 
 // Mock crossReferenceManager module - define everything inline to avoid hoisting issues
-let mockManagerInstance: any = null;
-
-const mockGetEntity = vi.fn(function() { return null; });
-const mockGetLinksForEntity = vi.fn(function() { return []; });
-const mockGetStats = vi.fn(function() { return ({
-  totalLinks: 0,
-  totalEntities: 0,
-  byRelationship: {},
-  byEntityType: {},
-  mostLinked: [],
-  recentLinks: [],
-});});
-const mockFindPath = vi.fn(function() { return null; });
-
 vi.mock('../../crossReferenceManager.js', () => {
+  let mockManagerInstance: any = null;
+
   class MockCrossReferenceManager {
-    getEntity = mockGetEntity;
-    getLinksForEntity = mockGetLinksForEntity;
-    getStats = mockGetStats;
-    findPath = mockFindPath;
+    getEntity = vi.fn(function() { return null; });
+    getLinksForEntity = vi.fn(function() { return []; });
+    getStats = vi.fn(function() { return ({
+      totalLinks: 0,
+      totalEntities: 0,
+      byRelationship: {},
+      byEntityType: {},
+      mostLinked: [],
+      recentLinks: [],
+    });});
+    findPath = vi.fn(function() { return null; });
   }
 
   const MockConstructor = vi.fn(function() {
@@ -95,12 +90,9 @@ vi.mock('../../crossReferenceManager.js', () => {
 
   return {
     CrossReferenceManager: MockConstructor,
-    MockCrossReferenceManager,
+    default: MockConstructor,
   };
 });
-
-// Export the mock functions for test access
-export { mockGetEntity, mockGetLinksForEntity, mockGetStats, mockFindPath };
 
 // Import after mocking
 import { CrossReferencePanel, createCrossReferencePanel } from './CrossReferencePanel.js';
@@ -111,12 +103,16 @@ import type { CrossReferenceEntity, CrossReferenceEntityType } from '../../types
 const MockCrossReferenceManagerConstructor = CrossReferenceManager as unknown as Mock;
 
 // Helper to get the mock functions from the singleton instance
-const getMockFunctions = () => ({
-  getEntity: mockGetEntity,
-  getLinksForEntity: mockGetLinksForEntity,
-  getStats: mockGetStats,
-  findPath: mockFindPath,
-});
+const getMockFunctions = () => {
+  // The mocked module is already imported above, just use it
+  const instance = new MockCrossReferenceManagerConstructor();
+  return {
+    getEntity: instance.getEntity,
+    getLinksForEntity: instance.getLinksForEntity,
+    getStats: instance.getStats,
+    findPath: instance.findPath,
+  };
+};
 
 // Helper to create mock screen
 function createMockScreen() {
