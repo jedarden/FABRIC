@@ -408,7 +408,7 @@ export class FileContextPanel {
   /**
    * Render the panel
    */
-  private render(): void {
+  render(): void {
     if (!this.currentContext) {
       this.fileInfo.setContent('{gray-fg}No file selected{/}');
       this.fileContent.setContent('{gray-fg}Click on a file event to see context{/}');
@@ -503,7 +503,7 @@ export class FileContextPanel {
   hide(): void {
     this.visible = false;
     this.box.hide();
-    this.box.screen.render();
+    this.render();
   }
 
   /**
