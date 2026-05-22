@@ -56,10 +56,15 @@ vi.mock('../utils/colors.js', () => ({
 }));
 
 // Mock semanticNarrative module - create a proper class mock
+// Define functions outside the mock to allow test access
+const generateNarrativeFn = vi.fn(() => null);
+const generateAggregatedNarrativeFn = vi.fn(() => null);
+const getNarrativeFn = vi.fn(() => null);
+
 class MockSemanticNarrativeManager {
-  generateNarrative = vi.fn(() => null);
-  generateAggregatedNarrative = vi.fn(() => null);
-  getNarrative = vi.fn(() => null);
+  generateNarrative = generateNarrativeFn;
+  generateAggregatedNarrative = generateAggregatedNarrativeFn;
+  getNarrative = getNarrativeFn;
 }
 
 // Create singleton instance
