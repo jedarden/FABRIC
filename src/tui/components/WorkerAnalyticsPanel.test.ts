@@ -71,9 +71,9 @@ vi.mock('../utils/colors.js', () => ({
   },
 }));
 
-// Mock workerAnalytics module - use vi.hoisted to properly handle class factory
-const { MockWorkerAnalytics } = vi.hoisted(() => {
-  class MockWorkerAnalyticsClass {
+// Mock workerAnalytics module - define everything inline inside the factory to avoid hoisting issues
+vi.mock('../../workerAnalytics.js', () => {
+  class MockWorkerAnalytics {
     compareWorkers = vi.fn(() => ({
       worker1: { workerId: 'w-1', beadsCompleted: 10, beadsPerHour: 5, avgCompletionTimeMs: 1000, errorRate: 0.1, costPerBead: 0.5, totalCostUsd: 5, efficiencyScore: 0.8, activeTimeMs: 10000, idlePercentage: 0.2, errorCount: 1, totalTokens: 1000, trend: undefined },
       worker2: { workerId: 'w-2', beadsCompleted: 15, beadsPerHour: 7, avgCompletionTimeMs: 800, errorRate: 0.05, costPerBead: 0.3, totalCostUsd: 4.5, efficiencyScore: 0.9, activeTimeMs: 15000, idlePercentage: 0.1, errorCount: 0, totalTokens: 900, trend: undefined },
@@ -84,12 +84,11 @@ const { MockWorkerAnalytics } = vi.hoisted(() => {
       overallWinner: 'worker2',
     }));
   }
-  return { MockWorkerAnalytics: MockWorkerAnalyticsClass };
-});
 
-vi.mock('../../workerAnalytics.js', () => ({
-  WorkerAnalytics: MockWorkerAnalytics,
-}));
+  return {
+    WorkerAnalytics: MockWorkerAnalytics,
+  };
+});
 
 // Import after mocking
 import { WorkerAnalyticsPanel } from './WorkerAnalyticsPanel.js';

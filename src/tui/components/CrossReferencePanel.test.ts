@@ -63,25 +63,20 @@ vi.mock('../utils/colors.js', () => ({
   },
 }));
 
-// Mock crossReferenceManager module - use vi.hoisted to declare variables before factory runs
-const { mockGetEntity, mockGetLinksForEntity, mockGetStats, mockFindPath, getMockManagerInstance, setMockManagerInstance } = vi.hoisted(() => {
-  let instance: any = null;
-  return {
-    getMockManagerInstance: () => instance,
-    setMockManagerInstance: (val: any) => { instance = val; },
-    mockGetEntity: vi.fn(function() { return null; }),
-    mockGetLinksForEntity: vi.fn(function() { return []; }),
-    mockGetStats: vi.fn(function() { return ({
-      totalLinks: 0,
-      totalEntities: 0,
-      byRelationship: {},
-      byEntityType: {},
-      mostLinked: [],
-      recentLinks: [],
-    });}),
-    mockFindPath: vi.fn(function() { return null; }),
-  };
-});
+// Mock crossReferenceManager module - define everything inline to avoid hoisting issues
+let mockManagerInstance: any = null;
+
+const mockGetEntity = vi.fn(function() { return null; });
+const mockGetLinksForEntity = vi.fn(function() { return []; });
+const mockGetStats = vi.fn(function() { return ({
+  totalLinks: 0,
+  totalEntities: 0,
+  byRelationship: {},
+  byEntityType: {},
+  mostLinked: [],
+  recentLinks: [],
+});});
+const mockFindPath = vi.fn(function() { return null; });
 
 vi.mock('../../crossReferenceManager.js', () => {
   class MockCrossReferenceManager {
@@ -92,13 +87,10 @@ vi.mock('../../crossReferenceManager.js', () => {
   }
 
   const MockConstructor = vi.fn(function() {
-    const current = getMockManagerInstance();
-    if (!current) {
-      const newInstance = new MockCrossReferenceManager();
-      setMockManagerInstance(newInstance);
-      return newInstance;
+    if (!mockManagerInstance) {
+      mockManagerInstance = new MockCrossReferenceManager();
     }
-    return current;
+    return mockManagerInstance;
   });
 
   return {
@@ -107,7 +99,7 @@ vi.mock('../../crossReferenceManager.js', () => {
   };
 });
 
-// Export the hoisted mock functions for test access
+// Export the mock functions for test access
 export { mockGetEntity, mockGetLinksForEntity, mockGetStats, mockFindPath };
 
 // Import after mocking
