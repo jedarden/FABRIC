@@ -20,6 +20,7 @@ import BudgetAlertPanel, { BudgetBanner } from './components/BudgetAlertPanel';
 import SessionDigestPanel from './components/SessionDigestPanel';
 import GitIntegrationPanel from './components/GitIntegrationPanel';
 import ProductivityPanel from './components/ProductivityPanel';
+import FleetSummaryBar from './components/FleetSummaryBar';
 import CommandPalette from './components/CommandPalette';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
@@ -882,6 +883,8 @@ const App: React.FC = () => {
           </div>
         </div>
       </header>
+
+      <FleetSummaryBar workers={filteredWorkers} />
 
       <main className="main-content">
         <WorkerGrid

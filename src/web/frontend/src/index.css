@@ -356,6 +356,54 @@ body {
   font-weight: 600;
 }
 
+/* Fleet Summary Bar */
+.fleet-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.fleet-summary-item {
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+}
+
+.fleet-summary-item.working {
+  color: var(--success);
+}
+
+.fleet-summary-item.selecting {
+  color: var(--warning);
+}
+
+.fleet-summary-item.exhausted {
+  color: var(--text-secondary);
+}
+
+.fleet-summary-item.beads-today {
+  color: var(--info);
+}
+
+.fleet-summary-item.stuck {
+  color: var(--text-secondary);
+}
+
+.fleet-summary-item.stuck.has-stuck {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.fleet-summary-separator {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
 .main-content {
   display: grid;
   grid-template-columns: 300px 1fr;
