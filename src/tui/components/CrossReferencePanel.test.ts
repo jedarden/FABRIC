@@ -63,29 +63,33 @@ vi.mock('../utils/colors.js', () => ({
   },
 }));
 
-// Mock crossReferenceManager module - define everything inline to avoid hoisting issues
+// Mock crossReferenceManager module - use vi.hoisted() to avoid hoisting issues
 vi.mock('../../crossReferenceManager.js', () => {
-  let mockManagerInstance: any = null;
+  const { MockCrossReferenceManager, MockConstructor } = vi.hoisted(() => {
+    let mockManagerInstance: any = null;
 
-  class MockCrossReferenceManager {
-    getEntity = vi.fn(function() { return null; });
-    getLinksForEntity = vi.fn(function() { return []; });
-    getStats = vi.fn(function() { return ({
-      totalLinks: 0,
-      totalEntities: 0,
-      byRelationship: {},
-      byEntityType: {},
-      mostLinked: [],
-      recentLinks: [],
-    });});
-    findPath = vi.fn(function() { return null; });
-  }
-
-  const MockConstructor = vi.fn(function() {
-    if (!mockManagerInstance) {
-      mockManagerInstance = new MockCrossReferenceManager();
+    class MockCrossReferenceManager {
+      getEntity = vi.fn(function() { return null; });
+      getLinksForEntity = vi.fn(function() { return []; });
+      getStats = vi.fn(function() { return ({
+        totalLinks: 0,
+        totalEntities: 0,
+        byRelationship: {},
+        byEntityType: {},
+        mostLinked: [],
+        recentLinks: [],
+      });});
+      findPath = vi.fn(function() { return null; });
     }
-    return mockManagerInstance;
+
+    const MockConstructor = vi.fn(function() {
+      if (!mockManagerInstance) {
+        mockManagerInstance = new MockCrossReferenceManager();
+      }
+      return mockManagerInstance;
+    });
+
+    return { MockCrossReferenceManager, MockConstructor };
   });
 
   return {
