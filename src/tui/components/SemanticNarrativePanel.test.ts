@@ -75,7 +75,7 @@ class MockSemanticNarrativeManager {
 let mockManagerInstance: MockSemanticNarrativeManager;
 
 vi.mock('../../semanticNarrative.js', () => ({
-  getSemanticNarrativeManager: vi.fn(() => mockManagerInstance),
+  getSemanticNarrativeManager: vi.fn(),
 }));
 
 // Import after mocking
@@ -202,6 +202,9 @@ describe('SemanticNarrativePanel', () => {
     mockManagerInstance.getActiveNarratives = vi.fn(() => []);
     mockManagerInstance.onUpdate = vi.fn(() => () => {});
     mockManagerInstance.clear = vi.fn();
+
+    // Update the mock to return the new instance
+    (getSemanticNarrativeManager as Mock).mockReturnValue(mockManagerInstance);
 
     mockScreen = createMockScreen();
     onSelectCallback = vi.fn();
