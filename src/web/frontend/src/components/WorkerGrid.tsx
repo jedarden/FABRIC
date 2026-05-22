@@ -153,7 +153,11 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
                 </div>
               </div>
               <div className="worker-stats">
-                <span>{worker.eventCount} events</span>
+                <span>
+                  {worker.needleState === 'WORKING' && worker.currentBead
+                    ? `bead: ${worker.currentBead} / ${worker.beadsCompleted} completed`
+                    : `${worker.beadsCompleted} completed`}
+                </span>
                 <span>{formatLastSeen(worker.lastSeen)}</span>
               </div>
               {worker.hasCollision && worker.activeFiles && worker.activeFiles.length > 0 && (

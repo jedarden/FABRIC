@@ -13,6 +13,8 @@ describe('WorkerGrid', () => {
     id: 'worker-alpha',
     lastSeen: new Date().toISOString(),
     eventCount: 10,
+    beadsCompleted: 5,
+    currentBead: null,
     status: 'active',
     recentEvents: [],
     ...overrides,
@@ -133,10 +135,10 @@ describe('WorkerGrid', () => {
     });
   });
 
-  describe('event count display', () => {
-    it('should display event count', () => {
+  describe('beads completed display', () => {
+    it('should display beads completed count', () => {
       const workers = [
-        createMockWorker({ id: 'worker-1', eventCount: 42 }),
+        createMockWorker({ id: 'worker-1', beadsCompleted: 31 }),
       ];
 
       render(
@@ -147,12 +149,12 @@ describe('WorkerGrid', () => {
         />
       );
 
-      expect(screen.getByText(/42 events/)).toBeInTheDocument();
+      expect(screen.getByText(/31 completed/)).toBeInTheDocument();
     });
 
-    it('should display zero events', () => {
+    it('should display zero beads completed', () => {
       const workers = [
-        createMockWorker({ id: 'worker-1', eventCount: 0 }),
+        createMockWorker({ id: 'worker-1', beadsCompleted: 0 }),
       ];
 
       render(
@@ -163,7 +165,72 @@ describe('WorkerGrid', () => {
         />
       );
 
-      expect(screen.getByText(/0 events/)).toBeInTheDocument();
+      expect(screen.getByText(/0 completed/)).toBeInTheDocument();
+    });
+
+    it('should display current bead when WORKING', () => {
+      const workers = [
+        createMockWorker({
+          id: 'worker-1',
+          beadsCompleted: 31,
+          currentBead: 'bf-5r22',
+          needleState: 'WORKING',
+        }),
+      ];
+
+      render(
+        <WorkerGrid
+          workers={workers}
+          selectedWorker={null}
+          onSelectWorker={mockOnSelectWorker}
+        />
+      );
+
+      expect(screen.getByText(/bead: bf-5r22 \/ 31 completed/)).toBeInTheDocument();
+    });
+
+    it('should not display current bead when not WORKING', () => {
+      const workers = [
+        createMockWorker({
+          id: 'worker-1',
+          beadsCompleted: 31,
+          currentBead: 'bf-5r22',
+          needleState: 'STOPPED',
+        }),
+      ];
+
+      render(
+        <WorkerGrid
+          workers={workers}
+          selectedWorker={null}
+          onSelectWorker={mockOnSelectWorker}
+        />
+      );
+
+      expect(screen.getByText(/31 completed/)).toBeInTheDocument();
+      expect(screen.queryByText(/bead: bf-5r22/)).not.toBeInTheDocument();
+    });
+
+    it('should not display bead prefix when WORKING but no currentBead', () => {
+      const workers = [
+        createMockWorker({
+          id: 'worker-1',
+          beadsCompleted: 15,
+          currentBead: null,
+          needleState: 'WORKING',
+        }),
+      ];
+
+      render(
+        <WorkerGrid
+          workers={workers}
+          selectedWorker={null}
+          onSelectWorker={mockOnSelectWorker}
+        />
+      );
+
+      expect(screen.getByText(/15 completed/)).toBeInTheDocument();
+      expect(screen.queryByText(/bead:/)).not.toBeInTheDocument();
     });
   });
 

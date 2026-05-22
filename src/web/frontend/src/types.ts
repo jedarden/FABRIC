@@ -49,6 +49,8 @@ export interface WorkerInfo {
   id: string;
   lastSeen: string;
   eventCount: number;
+  beadsCompleted: number;
+  currentBead: string | null;
   status: 'active' | 'idle' | 'error';
   needleState?: NeedleState;
   currentTool?: string;
