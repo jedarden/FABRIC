@@ -25,7 +25,95 @@ const CONFIG_FILES = {
   presets: path.join(CONFIG_DIR, 'focus-presets.json'),
   recentCommands: path.join(CONFIG_DIR, 'recent-commands.json'),
   filterState: path.join(HOME, '.fabric-filter-state.json'),
+  workspaces: path.join(CONFIG_DIR, 'workspaces.json'),
 };
+
+/**
+ * Workspace configuration for bead scanning
+ */
+export interface WorkspaceConfig {
+  /** Workspace path (e.g., /home/coding/FABRIC) */
+  path: string;
+  /** Project name derived from path or override */
+  name: string;
+  /** Bead ID prefix for this workspace (e.g., 'bf' for global, 'kt' for kalshi-tape) */
+  prefix: string;
+}
+
+/**
+ * Load workspace configurations
+ */
+export function loadWorkspaces(): WorkspaceConfig[] {
+  try {
+    if (fs.existsSync(CONFIG_FILES.workspaces)) {
+      const data = fs.readFileSync(CONFIG_FILES.workspaces, 'utf-8');
+      const config = JSON.parse(data) as { workspaces: WorkspaceConfig[] };
+      return config.workspaces || [];
+    }
+  } catch {
+    // Ignore errors
+  }
+  // Default workspace list
+  return getDefaultWorkspaces();
+}
+
+/**
+ * Get default workspace list by scanning /home/coding for .beads directories
+ */
+function getDefaultWorkspaces(): WorkspaceConfig[] {
+  const workspaces: WorkspaceConfig[] = [];
+  const codingDir = path.join(HOME);
+
+  try {
+    if (!fs.existsSync(codingDir)) {
+      return workspaces;
+    }
+
+    const entries = fs.readdirSync(codingDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const projectPath = path.join(codingDir, entry.name);
+      const beadsDir = path.join(projectPath, '.beads');
+      const issuesFile = path.join(beadsDir, 'issues.jsonl');
+
+      if (fs.existsSync(issuesFile)) {
+        // Extract project name from directory name
+        const name = entry.name;
+
+        // Determine prefix from bead ID format in the file
+        const prefix = detectBeadPrefix(issuesFile) || 'bf';
+
+        workspaces.push({
+          path: projectPath,
+          name,
+          prefix,
+        });
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+
+  return workspaces;
+}
+
+/**
+ * Detect bead ID prefix by reading the first line of issues.jsonl
+ */
+function detectBeadPrefix(issuesFile: string): string | null {
+  try {
+    const content = fs.readFileSync(issuesFile, 'utf-8');
+    const firstLine = content.split('\n')[0];
+    if (!firstLine) return null;
+
+    const match = firstLine.match(/"id":"([a-z]+)-/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Show current configuration
@@ -41,6 +129,21 @@ function showConfig(): void {
   const theme = loadTheme();
   console.log(`  Current: ${theme}`);
   console.log(`  File: ${CONFIG_FILES.theme}`);
+  console.log('');
+
+  // Workspaces
+  console.log('Workspaces:');
+  const workspaces = loadWorkspaces();
+  if (workspaces.length === 0) {
+    console.log('  No workspaces configured');
+  } else {
+    console.log(`  Count: ${workspaces.length}`);
+    workspaces.forEach(w => {
+      console.log(`  - ${w.name} (${w.prefix}-*)`);
+      console.log(`    Path: ${w.path}`);
+    });
+  }
+  console.log(`  File: ${CONFIG_FILES.workspaces}`);
   console.log('');
 
   // Presets

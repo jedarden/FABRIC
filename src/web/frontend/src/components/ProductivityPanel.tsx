@@ -11,9 +11,18 @@ interface WorkerStat {
   beadsPerHour: number;
 }
 
+interface ProjectStat {
+  name: string;
+  prefix: string;
+  closedCount: number;
+  byAssignee: Record<string, number>;
+  lastClosedAt?: string;
+}
+
 interface ProductivityData {
   daily: DailyCount[];
   workers: WorkerStat[];
+  byProject: ProjectStat[];
 }
 
 interface ProductivityPanelProps {
@@ -119,6 +128,7 @@ const ProductivityPanel: React.FC<ProductivityPanelProps> = ({ visible, onClose 
 
   const totalToday = data?.daily[data.daily.length - 1]?.count ?? 0;
   const total30d = data?.daily.reduce((s, d) => s + d.count, 0) ?? 0;
+  const maxProjectCount = Math.max(...(data?.byProject.map(p => p.closedCount) || [0]), 1);
 
   return (
     <div className="analytics-panel productivity-panel">
@@ -180,6 +190,60 @@ const ProductivityPanel: React.FC<ProductivityPanelProps> = ({ visible, onClose 
                           <td className="productivity-rate">{w.beadsPerHour}</td>
                         </tr>
                       ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          <div className="analytics-section">
+            <h3 className="analytics-section-title">By Project</h3>
+            <div className="analytics-section-body">
+              {data.byProject.length === 0 ? (
+                <p className="analytics-empty">No project data available.</p>
+              ) : (
+                <table className="productivity-projects">
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th>Closed Beads</th>
+                      <th>Progress</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.byProject.map((project) => {
+                      const width = (project.closedCount / maxProjectCount) * 100;
+                      const assignees = Object.entries(project.byAssignee)
+                        .sort(([, a], [, b]) => b - a)
+                        .slice(0, 3);
+                      return (
+                        <tr key={project.name}>
+                          <td className="productivity-project-name">
+                            {project.name}
+                            <span className="productivity-project-prefix"> ({project.prefix}-*)</span>
+                          </td>
+                          <td className="productivity-count">{project.closedCount}</td>
+                          <td className="productivity-bar-cell">
+                            <div className="productivity-bar-bg">
+                              <div
+                                className="productivity-bar-fill"
+                                style={{ width: `${width}%` }}
+                                title={`${project.closedCount} beads closed`}
+                              />
+                            </div>
+                            {assignees.length > 0 && (
+                              <div className="productivity-assignees" title={`Top assignees: ${assignees.map(([a]) => a).join(', ')}`}>
+                                {assignees.map(([assignee, count]) => (
+                                  <span key={assignee} className="productivity-assignee">
+                                    {assignee.split('-').pop()}: {count}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

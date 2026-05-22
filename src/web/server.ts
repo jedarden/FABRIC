@@ -24,6 +24,7 @@ import { generatePRPreview } from '../tui/utils/prPreview.js';
 import { getMemoryProfiler } from '../memoryProfiler.js';
 import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport } from '../heapDiff.js';
 import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } from '../logPruner.js';
+import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
 
 /** Get the v8 module (available in Node.js) */
 function getV8() {
@@ -1096,7 +1097,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       }
     });
 
-    // Productivity analytics — daily throughput + worker leaderboard
+    // Productivity analytics — daily throughput + worker leaderboard + project breakdown
     app.get('/api/productivity', (_req: Request, res: Response) => {
       try {
         const now = Date.now();
@@ -1133,7 +1134,10 @@ export function createWebServer(options: WebServerOptions): WebServer {
         });
         workers.sort((a, b) => b.beadsCompleted - a.beadsCompleted);
 
-        res.json({ daily, workers });
+        // Project breakdown from bead workspace scanner
+        const { byProject } = scanBeadWorkspaces();
+
+        res.json({ daily, workers, byProject });
       } catch (err) {
         res.status(500).json({ error: String(err) });
       }
