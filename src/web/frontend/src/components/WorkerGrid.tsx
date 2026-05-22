@@ -71,8 +71,8 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
   focusModeEnabled = false,
   hideTestWorkers = true,
 }) => {
-  const formatLastSeen = (timestamp: string) => {
-    const diff = Date.now() - new Date(timestamp).getTime();
+  const formatLastActivity = (timestamp: number) => {
+    const diff = Date.now() - timestamp;
     const seconds = Math.floor(diff / 1000);
     if (seconds < 60) return `${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);
@@ -158,7 +158,7 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
                     ? `bead: ${worker.currentBead} / ${worker.beadsCompleted} completed`
                     : `${worker.beadsCompleted} completed`}
                 </span>
-                <span>{formatLastSeen(worker.lastSeen)}</span>
+                <span>{formatLastActivity(worker.lastActivity)}</span>
               </div>
               {worker.hasCollision && worker.activeFiles && worker.activeFiles.length > 0 && (
                 <div className="collision-warning">

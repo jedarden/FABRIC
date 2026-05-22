@@ -1393,14 +1393,14 @@ fabric logs --worker w-abc123           # Filter by worker
 - [ ] Recovery playbook (error pattern matching)
 
 ### Phase 9: Productivity Analytics (checklist)
-- [ ] Fix `beadsCompleted` counter for modern NEEDLE event format
-- [ ] Fleet summary bar (web)
-- [ ] Worker card: beadsCompleted + currentBead; remove eventCount
-- [ ] Worker sort by state (WORKING first)
-- [ ] Test worker filter (hide by default)
-- [ ] Productivity panel: daily throughput chart + worker leaderboard
-- [ ] Bead workspace scanner: read `.beads/issues.jsonl` for project breakdown
-- [ ] `/api/productivity` endpoint
+- [x] Fix `beadsCompleted` counter for modern NEEDLE event format
+- [x] Fleet summary bar (web)
+- [x] Worker card: beadsCompleted + currentBead; remove eventCount
+- [x] Worker sort by state (WORKING first)
+- [x] Test worker filter (hide by default)
+- [x] Productivity panel: daily throughput chart + worker leaderboard
+- [x] Bead workspace scanner: read `.beads/issues.jsonl` for project breakdown
+- [x] `/api/productivity` endpoint
 
 ---
 
@@ -1515,16 +1515,18 @@ Workers whose IDs match patterns like `test-*`, `claude-test-*`, `nonexistent-*`
 
 #### Implementation Checklist
 
-- [ ] Fix `beadsCompleted` counter: fire on `bead.released` where `data.reason === 'release_success'`
-- [ ] Add `currentBead` field to WorkerInfo: populated from `bead.claim.succeeded`, cleared on `bead.released`
-- [ ] Fleet summary bar component (web)
-- [ ] Worker card: show `beadsCompleted`, `currentBead`; remove `eventCount`
-- [ ] Worker sort: WORKING > SELECTING > CLAIMING > BOOTING > EXHAUSTED_IDLE > STOPPED
-- [ ] Test worker filter: hide by default, toggle in UI
-- [ ] Productivity panel: daily throughput chart (from `bead.released` timestamps)
-- [ ] Productivity panel: worker leaderboard
-- [ ] Bead workspace scanner: read configured `.beads/issues.jsonl` files for project-level breakdown
-- [ ] `/api/productivity` endpoint: returns daily counts, worker leaderboard, project breakdown
+- [x] Fix `beadsCompleted` counter: fire on `bead.released` where `data.reason === 'release_success'`
+- [x] Add `currentBead` field to WorkerInfo: populated from `bead.claim.succeeded`, cleared on `bead.released`
+- [x] Fleet summary bar component (web)
+- [x] Worker card: show `beadsCompleted`, `currentBead`; remove `eventCount`
+- [x] Worker sort: WORKING > SELECTING > CLAIMING > BOOTING > EXHAUSTED_IDLE > STOPPED
+- [x] Test worker filter: hide by default, toggle in UI
+- [x] Productivity panel: daily throughput chart (from `bead.released` timestamps)
+- [x] Productivity panel: worker leaderboard
+- [x] Bead workspace scanner: read configured `.beads/issues.jsonl` files for project-level breakdown
+- [x] `/api/productivity` endpoint: returns daily counts, worker leaderboard, project breakdown
+
+**Status:** ✅ Phase 9 complete (verified 2026-05-22 via bead bf-2wf)
 
 ### Phase 8: Post-launch Fixes
 
@@ -1591,5 +1593,5 @@ FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detec
 
 ---
 
-**Status**: Phases 1–8 complete. Phase 9 (Productivity Analytics) planned.
-**Last Updated**: 2026-05-10
+**Status**: Phases 1–9 complete.
+**Last Updated**: 2026-05-22
