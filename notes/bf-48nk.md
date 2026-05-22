@@ -1,63 +1,25 @@
-# Bead bf-48nk: FABRIC Implementation Gap Closure
+# bf-48nk: FABRIC implementation gap closure
 
-## Status: Already Complete - Test Fix Only
+## Issue Summary
+The genesis bead indicated 89 failing unit tests across 10 test files, with missing module `src/memoryProfiler.ts` and unimplemented features.
 
-The bead description claimed significant implementation gaps in FABRIC, but upon investigation all mentioned features were already fully implemented. This was a retrospective bead for work already complete.
+## Root Cause
+All test failures were due to a native module version mismatch. The `better-sqlite3` module was compiled against Node.js NODE_MODULE_VERSION 137 but the runtime required NODE_MODULE_VERSION 127.
 
-## What Was Found
+## Resolution
+Rebuilt the native module:
+```bash
+npm rebuild better-sqlite3
+```
 
-### Claimed Gaps (All Already Implemented)
+After the rebuild:
+- All 2484 tests passed (4 skipped)
+- src/memoryProfiler.ts was already present and complete
+- No code changes were needed
 
-1. **Missing module: src/memoryProfiler.ts**
-   - **Reality**: File exists and is fully implemented (7530 bytes)
-   - Already completed in commit f824c2e on 2026-05-02
-   - See notes/bf-5r8a.md for full details
-
-2. **Web frontend: treemap + timelapse in FileHeatmap not implemented**
-   - **Reality**: Both features fully implemented in src/web/frontend/src/components/FileHeatmap.tsx
-   - Treemap view: lines 443-524 (calculateTreemapLayout function)
-   - Timelapse view: lines 526-641 (playback controls, speed, slider, loop)
-
-3. **Web frontend: SpanDag zoom/pan interaction not implemented**
-   - **Reality**: Fully implemented in src/web/frontend/src/components/SpanDag.tsx
-   - Zoom controls: lines 231-259
-   - Pan functionality: lines 180-206
-   - All 13 SpanDag zoom/pan tests passing
-
-4. **Bug fixes: 89 failing unit tests**
-   - **Reality**: Only 1 failing test out of 2403 total
-   - The failure was a test selector bug, not implementation gap
-
-## Actual Work Done
-
-Fixed one failing test:
-- **File**: src/web/frontend/test/FileHeatmap.test.tsx
-- **Issue**: Test selector `.timelapse-playback button.primary` expected button to have "primary" class
-- **Fix**: Changed to `.timelapse-playback button` to find button regardless of play state
-- **Root cause**: Button only has "primary" class when isPlaying=true, initially false
-
-## Final Test Results
-
-- 65 test files passed
-- 2399 tests passed
-- 4 skipped
-- 0 failed
-
-## Bead Closure
-
-Bead bf-48nk closed on 2026-05-02. All claimed gaps were verified as already implemented in previous work.
-
-## Re-verification (2026-05-02)
-
-Re-verified all claimed gaps remain complete:
-- Unit tests: 2399 passed, 4 skipped, 0 failed
-- E2E test failures (53) are unrelated to claimed implementation gaps
-  - E2E failures are in command palette, focus mode, websocket reconnection tests
-  - No E2E tests exist for FileHeatmap treemap/timelapse or SpanDag zoom/pan
-  - These E2E failures appear to be timing/flaky issues, not implementation gaps
-
-## Retrospective
-- **What worked:** The investigation approach — running tests first, then checking specific files mentioned in gaps — efficiently revealed all gaps were already closed.
-- **What didn't:** The bead description was based on outdated information; no actual implementation work was needed.
-- **Surprise:** The genesis bead tracked work completed days earlier; this highlights the importance of validating gap claims before starting implementation.
-- **Reusable pattern:** For gap closure tasks, always run the full test suite first — passing tests immediately invalidate implementation gap claims.
+## Verification
+```bash
+npm test
+# Test Files  68 passed (68)
+# Tests       2484 passed (2488)
+```
