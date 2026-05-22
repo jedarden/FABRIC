@@ -7,9 +7,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import blessed from 'blessed';
 
+// Track all mock box instances
+const mockBoxes: any[] = [];
+let mainBoxInstance: any;
+
 // Mock the blessed module before importing FileContextPanel
 vi.mock('blessed', () => {
-  const createMockElement = () => ({
+  const createMockElement = (index: number) => ({
     setContent: vi.fn(),
     setLabel: vi.fn(),
     show: vi.fn(),
@@ -26,13 +30,21 @@ vi.mock('blessed', () => {
     width: 80,
   });
 
-  const mockBoxInstance = createMockElement();
+  const boxMock = vi.fn((...args: any[]) => {
+    const index = mockBoxes.length;
+    const mock = createMockElement(index);
+    mockBoxes.push(mock);
+    if (index === 0) {
+      mainBoxInstance = mock;
+    }
+    return mock;
+  });
 
   return {
     default: {
-      box: vi.fn(() => mockBoxInstance),
+      box: boxMock,
     },
-    box: vi.fn(() => mockBoxInstance),
+    box: boxMock,
   };
 });
 
@@ -76,18 +88,13 @@ function createMockEvent(overrides: Partial<LogEvent> = {}): LogEvent {
 describe('FileContextPanel', () => {
   let panel: FileContextPanel;
   let mockScreen: blessed.Widgets.Screen;
-  let mockBoxInstance: any;
-  let mockSubBox: any;
 
   beforeEach(() => {
+    mockBoxes.length = 0;
+    mainBoxInstance = undefined;
     vi.clearAllMocks();
 
     mockScreen = createMockScreen();
-
-    // Get the mock box instance from the mock
-    const blessedMock = blessed as unknown as { box: Mock };
-    mockBoxInstance = blessedMock.box();
-    mockSubBox = blessedMock.box({ parent: mockBoxInstance });
 
     panel = new FileContextPanel({
       parent: mockScreen,
@@ -100,6 +107,8 @@ describe('FileContextPanel', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    mockBoxes.length = 0;
+    mainBoxInstance = undefined;
   });
 
   describe('constructor', () => {
@@ -129,7 +138,7 @@ describe('FileContextPanel', () => {
     });
 
     it('should bind key handlers on construction', () => {
-      expect(mockBoxInstance.key).toHaveBeenCalled();
+      expect(mainBoxInstance.key).toHaveBeenCalled();
     });
   });
 
@@ -248,7 +257,7 @@ describe('FileContextPanel', () => {
       panel.setContextFromEvent(event2);
 
       // Should render without errors
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
   });
 
@@ -276,7 +285,7 @@ describe('FileContextPanel', () => {
 
       panel.setContent('/current.ts', 'new content');
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should not trigger render for non-current file', () => {
@@ -291,7 +300,7 @@ describe('FileContextPanel', () => {
       panel.setContent('/file1.ts', 'content');
 
       // Should not render since file2 is current
-      expect(mockBoxInstance.screen.render).not.toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).not.toHaveBeenCalled();
     });
   });
 
@@ -301,35 +310,35 @@ describe('FileContextPanel', () => {
       panel.setContextFromEvent(event);
 
       // Render should include language indicator
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should detect JavaScript files', () => {
       const event = createMockEvent({ path: '/src/test.js' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should detect Python files', () => {
       const event = createMockEvent({ path: '/src/test.py' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should detect Rust files', () => {
       const event = createMockEvent({ path: '/src/test.rs' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should handle unknown file types', () => {
       const event = createMockEvent({ path: '/src/test.unknown' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should detect multiple TypeScript extensions', () => {
@@ -347,28 +356,28 @@ describe('FileContextPanel', () => {
       panel.setContextFromEvent(event);
 
       // Should render with read icon
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should show edit icon for edit operations', () => {
       const event = createMockEvent({ path: '/test.txt', tool: 'Edit' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should show write icon for write operations', () => {
       const event = createMockEvent({ path: '/test.txt', tool: 'Write' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should show glob icon for glob operations', () => {
       const event = createMockEvent({ path: '/src/*.ts', tool: 'Glob' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
   });
 
@@ -383,7 +392,7 @@ describe('FileContextPanel', () => {
     });
 
     it('should navigate to previous file', () => {
-      const mockBox = mockBoxInstance as any;
+      const mockBox = mainBoxInstance as any;
       const keyCalls = mockBox.key.mock.calls;
 
       // Find the [ key handler
@@ -396,11 +405,11 @@ describe('FileContextPanel', () => {
         handler();
       }
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should navigate to next file', () => {
-      const mockBox = mockBoxInstance as any;
+      const mockBox = mainBoxInstance as any;
       const keyCalls = mockBox.key.mock.calls;
 
       // Find the ] key handler
@@ -413,34 +422,34 @@ describe('FileContextPanel', () => {
         handler();
       }
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
   });
 
   describe('show/hide/toggle', () => {
     it('should show the panel', () => {
       panel.show();
-      expect(mockBoxInstance.show).toHaveBeenCalled();
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.show).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should hide the panel', () => {
       panel.hide();
-      expect(mockBoxInstance.hide).toHaveBeenCalled();
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.hide).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should toggle visibility', () => {
       // Initially not visible
       panel.toggle();
-      expect(mockBoxInstance.show).toHaveBeenCalled();
+      expect(mainBoxInstance.show).toHaveBeenCalled();
 
       vi.clearAllMocks();
 
       // Now visible, toggle should hide
       (panel as any).visible = true;
       panel.toggle();
-      expect(mockBoxInstance.hide).toHaveBeenCalled();
+      expect(mainBoxInstance.hide).toHaveBeenCalled();
     });
 
     it('should return visibility state', () => {
@@ -454,14 +463,14 @@ describe('FileContextPanel', () => {
   describe('focus', () => {
     it('should focus the box element', () => {
       panel.focus();
-      expect(mockBoxInstance.focus).toHaveBeenCalled();
+      expect(mainBoxInstance.focus).toHaveBeenCalled();
     });
   });
 
   describe('getElement', () => {
     it('should return the box element', () => {
       const element = panel.getElement();
-      expect(element).toBe(mockBoxInstance);
+      expect(element).toBe(mainBoxInstance);
     });
   });
 
@@ -507,13 +516,13 @@ describe('FileContextPanel', () => {
       panel.setContextFromEvent(createMockEvent({ path: '/test.ts' }));
       panel.clear();
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
   });
 
   describe('key bindings', () => {
     it('should bind scroll up keys', () => {
-      const mockBox = mockBoxInstance as any;
+      const mockBox = mainBoxInstance as any;
       const keyCalls = mockBox.key.mock.calls;
 
       expect(keyCalls.some((call: unknown[]) =>
@@ -522,7 +531,7 @@ describe('FileContextPanel', () => {
     });
 
     it('should bind scroll down keys', () => {
-      const mockBox = mockBoxInstance as any;
+      const mockBox = mainBoxInstance as any;
       const keyCalls = mockBox.key.mock.calls;
 
       expect(keyCalls.some((call: unknown[]) =>
@@ -531,7 +540,7 @@ describe('FileContextPanel', () => {
     });
 
     it('should bind page up/down keys', () => {
-      const mockBox = mockBoxInstance as any;
+      const mockBox = mainBoxInstance as any;
       const keyCalls = mockBox.key.mock.calls;
 
       expect(keyCalls.some((call: unknown[]) =>
@@ -544,7 +553,7 @@ describe('FileContextPanel', () => {
     });
 
     it('should bind open in editor key', () => {
-      const mockBox = mockBoxInstance as any;
+      const mockBox = mainBoxInstance as any;
       const keyCalls = mockBox.key.mock.calls;
 
       expect(keyCalls.some((call: unknown[]) =>
@@ -606,28 +615,29 @@ describe('FileContextPanel', () => {
     it('should show no file selected message when empty', () => {
       (panel as any).render();
 
-      expect(mockBoxInstance.setContent).toHaveBeenCalled();
+      // fileInfo is the second box created (index 1), it gets the "No file selected" message
+      expect(mockBoxes[1]?.setContent).toHaveBeenCalled();
     });
 
     it('should include file path in header', () => {
       const event = createMockEvent({ path: '/src/component.ts' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should include directory path', () => {
       const event = createMockEvent({ path: '/src/components/Button.ts' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
 
     it('should include operation history', () => {
       const event = createMockEvent({ path: '/test.ts', tool: 'Read' });
       panel.setContextFromEvent(event);
 
-      expect(mockBoxInstance.screen.render).toHaveBeenCalled();
+      expect(mainBoxInstance.screen.render).toHaveBeenCalled();
     });
   });
 
