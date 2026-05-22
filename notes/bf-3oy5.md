@@ -28,6 +28,16 @@ All 59 tests in `SemanticNarrativePanel.test.ts` now pass:
 ✓ src/tui/components/SemanticNarrativePanel.test.ts (59 tests) 37ms
 ```
 
+Re-verified on 2026-05-22:
+```
+✓ src/tui/components/SemanticNarrativePanel.test.ts (59 tests) 110ms
+```
+
+The three specific tests mentioned in the issue:
+- ✓ "should refresh narrative from manager" - PASS
+- ✓ "should generate narrative for worker and set it" - PASS
+- ✓ "should generate aggregated narrative and set it" - PASS
+
 The implementation methods (`refresh()`, `updateFromWorker()`, `updateAggregated()`) were always correct - they properly:
 1. Call the SemanticNarrative manager methods
 2. Pass results to `setNarrative()`
