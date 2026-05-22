@@ -1,24 +1,69 @@
-# bf-5klc: Verification - Already Fixed
+# bf-5klc: Fix vitest mock hoisting errors
 
 ## Status
-Bead is **closed**. The fix was already applied in commit `7686974fa796ccfd32e7dad2a62f20b665b9f877`.
+Bead was **already completed** in a previous session. This note documents the verification that the fix is in place.
 
-## Fix Applied
-The vitest mock hoisting errors in both test files were resolved using `vi.hoisted()`:
+## Fix Applied (Current State - Commit 55df248)
+The vitest mock hoisting errors in both test files were resolved by defining mock classes entirely inline within `vi.mock()` factory functions. This is the simplest and most reliable approach for vitest mocks.
 
-### CrossReferencePanel.test.ts
-- Used `vi.hoisted()` to declare mock functions (`mockGetEntity`, `mockGetLinksForEntity`, `mockGetStats`, `mockFindPath`)
-- Factory functions now reference these hoisted variables instead of top-level consts
+### CrossReferencePanel.test.ts (lines 67-95)
+The mock for `crossReferenceManager.js` defines `MockCrossReferenceManager` class and the mock constructor entirely inline, without referencing any external constants:
 
-### WorkerAnalyticsPanel.test.ts  
-- Used `vi.hoisted()` to declare `MockWorkerAnalytics` class
-- Mock factory references the hoisted class
+```typescript
+vi.mock('../../crossReferenceManager.js', () => {
+  let mockManagerInstance: any = null;
+
+  class MockCrossReferenceManager {
+    getEntity = vi.fn(function() { return null; });
+    getLinksForEntity = vi.fn(function() { return []; });
+    getStats = vi.fn(function() { return ({ ... }); });
+    findPath = vi.fn(function() { return null; });
+  }
+
+  const MockConstructor = vi.fn(function() {
+    if (!mockManagerInstance) {
+      mockManagerInstance = new MockCrossReferenceManager();
+    }
+    return mockManagerInstance;
+  });
+
+  return {
+    CrossReferenceManager: MockConstructor,
+    default: MockConstructor,
+  };
+});
+```
+
+### WorkerAnalyticsPanel.test.ts (lines 75-92)
+The mock for `workerAnalytics.js` defines `MockWorkerAnalytics` class inline:
+
+```typescript
+vi.mock('../../workerAnalytics.js', () => {
+  class MockWorkerAnalytics {
+    compareWorkers = vi.fn(() => ({ ... }));
+  }
+
+  return {
+    WorkerAnalytics: MockWorkerAnalytics,
+    default: MockWorkerAnalytics,
+  };
+});
+```
+
+## Why This Approach Works
+Vitest hoists `vi.mock()` calls to the top of the file before regular variable declarations. When the mock factory references external consts, those consts don't exist yet when the factory runs, causing "Cannot access X before initialization" errors. By defining everything inline, the mock factory has no external dependencies.
 
 ## Verification
-All tests pass:
-- CrossReferencePanel.test.ts: 43 tests passing
-- WorkerAnalyticsPanel.test.ts: 64 tests passing
-- Full suite: 2399 tests passing
+- The test files in the working directory match the committed versions (no uncommitted changes)
+- Previous sessions verified all tests passing:
+  - CrossReferencePanel.test.ts: 43 tests
+  - WorkerAnalyticsPanel.test.ts: 64 tests
+
+## Commits
+- `55df248` - test(bf-5klc): fix vitest mock hoisting errors (current)
+- `266a13f` - test(bf-5klc): fix vitest mock hoisting errors
+- `16ea233` - test(bf-5klc): fix vitest mock hoisting errors
+- `1484adb` - docs(bf-5klc): verify fix already applied
 
 ## Date Verified
-2026-05-02 17:12 UTC
+2026-05-22 (re-verification - fix is in place and committed)
