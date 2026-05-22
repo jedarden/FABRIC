@@ -71,24 +71,18 @@ describe('CommandPalette', () => {
     mockScreen = createMockScreen();
     onSubmit = vi.fn() as (command: string) => void;
 
-    // Get mock instances
-    const blessedMock = blessed as any;
-    mockBox = blessedMock.box();
-    mockInput = blessedMock.textbox();
-    mockList = blessedMock.list();
-
-    // Reset mock instances
-    vi.clearAllMocks();
-
+    // Clear mocks but DO NOT clear them after construction
+    // We need to capture the SAME instances that the palette uses
     palette = new CommandPalette({
       parent: mockScreen,
       onSubmit,
     });
 
-    // Re-capture after construction
-    mockBox = blessedMock.box();
-    mockInput = blessedMock.textbox();
-    mockList = blessedMock.list();
+    // Capture the instances that were ACTUALLY USED during construction
+    const blessedMock = blessed as any;
+    mockBox = blessedMock.box.mock.results[0]?.value;
+    mockInput = blessedMock.textbox.mock.results[0]?.value;
+    mockList = blessedMock.list.mock.results[0]?.value;
   });
 
   describe('Fuzzy Search', () => {
