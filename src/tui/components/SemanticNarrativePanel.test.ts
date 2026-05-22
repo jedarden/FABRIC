@@ -56,19 +56,23 @@ vi.mock('../utils/colors.js', () => ({
 }));
 
 // Mock semanticNarrative module - create a proper class mock
-// Define functions outside the mock to allow test access
-const generateNarrativeFn = vi.fn(() => null);
-const generateAggregatedNarrativeFn = vi.fn(() => null);
-const getNarrativeFn = vi.fn(() => null);
+// The mock instance will be created in beforeEach for proper test isolation
+
+let generateNarrativeFn: ReturnType<typeof vi.fn>;
+let generateAggregatedNarrativeFn: ReturnType<typeof vi.fn>;
+let getNarrativeFn: ReturnType<typeof vi.fn>;
 
 class MockSemanticNarrativeManager {
-  generateNarrative = generateNarrativeFn;
-  generateAggregatedNarrative = generateAggregatedNarrativeFn;
-  getNarrative = getNarrativeFn;
+  generateNarrative!: ReturnType<typeof vi.fn>;
+  generateAggregatedNarrative!: ReturnType<typeof vi.fn>;
+  getNarrative!: ReturnType<typeof vi.fn>;
+  processEvent!: ReturnType<typeof vi.fn>;
+  getActiveNarratives!: ReturnType<typeof vi.fn>;
+  onUpdate!: ReturnType<typeof vi.fn>;
+  clear!: ReturnType<typeof vi.fn>;
 }
 
-// Create singleton instance
-const mockManagerInstance = new MockSemanticNarrativeManager();
+let mockManagerInstance: MockSemanticNarrativeManager;
 
 vi.mock('../../semanticNarrative.js', () => ({
   getSemanticNarrativeManager: vi.fn(() => mockManagerInstance),
@@ -87,6 +91,35 @@ function createMockScreen() {
     key: vi.fn(),
     destroy: vi.fn(),
   } as unknown as blessed.Widgets.Screen;
+}
+
+// Helper to create empty narrative (default mock return)
+function createEmptyNarrative(workerId = 'empty'): SemanticNarrative {
+  return {
+    id: `narrative-empty-${workerId}`,
+    workerId,
+    title: `No activity for ${workerId}`,
+    summary: 'No events recorded for this worker.',
+    segments: [],
+    fullNarrative: 'No activity to report.',
+    timeline: [],
+    startTime: Date.now(),
+    endTime: Date.now(),
+    durationMs: 0,
+    accomplishments: [],
+    challenges: [],
+    sentiment: 'idle',
+    stats: {
+      totalEvents: 0,
+      segmentCount: 0,
+      beadsWorked: 0,
+      filesModified: 0,
+      errorsEncountered: 0,
+      toolsUsed: 0,
+    },
+    generatedAt: Date.now(),
+    isLive: false,
+  };
 }
 
 // Helper to create mock narrative
@@ -153,6 +186,22 @@ describe('SemanticNarrativePanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Create fresh mock functions for each test
+    // Return null by default (tests can override with mockReturnValue)
+    generateNarrativeFn = vi.fn(() => null as any);
+    generateAggregatedNarrativeFn = vi.fn(() => null as any);
+    getNarrativeFn = vi.fn(() => undefined);
+
+    // Create a new mock manager instance
+    mockManagerInstance = new MockSemanticNarrativeManager();
+    mockManagerInstance.generateNarrative = generateNarrativeFn;
+    mockManagerInstance.generateAggregatedNarrative = generateAggregatedNarrativeFn;
+    mockManagerInstance.getNarrative = getNarrativeFn;
+    mockManagerInstance.processEvent = vi.fn();
+    mockManagerInstance.getActiveNarratives = vi.fn(() => []);
+    mockManagerInstance.onUpdate = vi.fn(() => () => {});
+    mockManagerInstance.clear = vi.fn();
 
     mockScreen = createMockScreen();
     onSelectCallback = vi.fn();
