@@ -3,14 +3,34 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { InMemoryEventStore, getStore, resetStore } from './store.js';
+import {
+  InMemoryEventStore,
+  getStore,
+  resetStore,
+} from './store.js';
 import { LogEvent } from './types.js';
+import { resetWorkerAnalytics } from './workerAnalytics.js';
+import { resetCrossReferenceManager } from './crossReferenceManager.js';
+import { resetHistoricalStore } from './historicalStore.js';
+import { resetErrorGroupManager } from './errorGrouping.js';
+import { resetRecoveryManager } from './tui/utils/recoveryPlaybook.js';
+import { resetCostTracker } from './tui/utils/costTracking.js';
 
 describe('InMemoryEventStore', () => {
   let store: InMemoryEventStore;
 
   beforeEach(() => {
     store = new InMemoryEventStore();
+  });
+
+  afterEach(() => {
+    resetStore();
+    resetWorkerAnalytics();
+    resetCrossReferenceManager();
+    resetHistoricalStore();
+    resetErrorGroupManager();
+    resetRecoveryManager();
+    resetCostTracker();
   });
 
   const createEvent = (overrides: Partial<LogEvent> = {}): LogEvent => ({
