@@ -21,6 +21,7 @@ import SessionDigestPanel from './components/SessionDigestPanel';
 import GitIntegrationPanel from './components/GitIntegrationPanel';
 import ProductivityPanel from './components/ProductivityPanel';
 import FleetSummaryBar from './components/FleetSummaryBar';
+import HistoricalSessionsPanel from './components/HistoricalSessionsPanel';
 import CommandPalette from './components/CommandPalette';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
@@ -260,6 +261,7 @@ const App: React.FC = () => {
   const [showGitIntegration, setShowGitIntegration] = useState(false);
   const [showNarrative, setShowNarrative] = useState(false);
   const [showProductivity, setShowProductivity] = useState(false);
+  const [showHistoricalSessions, setShowHistoricalSessions] = useState(false);
   const [budgetBannerDismissed, setBudgetBannerDismissed] = useState(false);
   const [hideTestWorkers, setHideTestWorkers] = useState(true);
 
@@ -543,6 +545,8 @@ const App: React.FC = () => {
       setShowGitIntegration(true);
     } else if (action === 'show:narrative') {
       setShowNarrative(true);
+    } else if (action === 'show:sessions') {
+      setShowHistoricalSessions(true);
     } else if (action.startsWith('worker:')) {
       const workerId = action.slice('worker:'.length);
       setSelectedWorker(workerId);
@@ -839,6 +843,14 @@ const App: React.FC = () => {
             <span className="productivity-toggle-label">Productivity</span>
           </button>
           <button
+            className={`sessions-toggle ${showHistoricalSessions ? 'active' : ''}`}
+            onClick={() => setShowHistoricalSessions(!showHistoricalSessions)}
+            title="Historical Sessions — browse past sessions and worker performance"
+          >
+            <span className="sessions-toggle-icon">&#x1F4C5;</span>
+            <span className="sessions-toggle-label">Sessions</span>
+          </button>
+          <button
             className={`hide-test-workers-toggle ${hideTestWorkers ? 'active' : ''}`}
             onClick={() => setHideTestWorkers(prev => !prev)}
             title={hideTestWorkers ? 'Test workers hidden — click to show' : 'Test workers visible — click to hide'}
@@ -1024,6 +1036,13 @@ const App: React.FC = () => {
           <ProductivityPanel
             visible={showProductivity}
             onClose={() => setShowProductivity(false)}
+          />
+        )}
+
+        {showHistoricalSessions && (
+          <HistoricalSessionsPanel
+            visible={showHistoricalSessions}
+            onClose={() => setShowHistoricalSessions(false)}
           />
         )}
 

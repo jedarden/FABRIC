@@ -1307,6 +1307,86 @@ export function createWebServer(options: WebServerOptions): WebServer {
       }
     });
 
+    // ============================================
+    // Historical Sessions API Endpoints
+    // ============================================
+
+    // Get historical sessions list (paginated, with time range filter)
+    app.get('/api/sessions', (req: Request, res: Response) => {
+      try {
+        const historical = store.getHistoricalStore();
+        const startTime = req.query.start ? parseInt(req.query.start as string) : undefined;
+        const endTime = req.query.end ? parseInt(req.query.end as string) : undefined;
+        const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+
+        const sessions = historical.getSessions({
+          startTime,
+          endTime,
+          limit,
+        });
+
+        res.json({
+          sessions,
+          count: sessions.length,
+        });
+      } catch (error) {
+        console.error('Error fetching sessions:', error);
+        res.status(500).json({
+          error: 'Failed to fetch sessions',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
+    // Get a specific session by ID
+    app.get('/api/sessions/:id', (req: Request, res: Response) => {
+      try {
+        const sessionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+        const historical = store.getHistoricalStore();
+        const session = historical.getSession(sessionId);
+
+        if (!session) {
+          res.status(404).json({ error: 'Session not found' });
+          return;
+        }
+
+        // Get worker summaries for this session
+        const workerSummaries = historical.getSessionWorkerSummaries({ sessionId });
+
+        res.json({
+          session,
+          workerSummaries,
+        });
+      } catch (error) {
+        console.error('Error fetching session:', error);
+        res.status(500).json({
+          error: 'Failed to fetch session',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
+    // Get worker summaries for a specific session
+    app.get('/api/sessions/:id/workers', (req: Request, res: Response) => {
+      try {
+        const sessionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+        const historical = store.getHistoricalStore();
+        const workerSummaries = historical.getSessionWorkerSummaries({ sessionId });
+
+        res.json({
+          sessionId,
+          workers: workerSummaries,
+          count: workerSummaries.length,
+        });
+      } catch (error) {
+        console.error('Error fetching session workers:', error);
+        res.status(500).json({
+          error: 'Failed to fetch session workers',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
     // Serve static frontend files
     const staticPath = join(__dirname, 'public');
     app.use(express.static(staticPath));
