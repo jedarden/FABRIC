@@ -11,7 +11,7 @@ import { WorkerInfo } from '../src/types';
 describe('WorkerGrid', () => {
   const createMockWorker = (overrides: Partial<WorkerInfo> = {}): WorkerInfo => ({
     id: 'worker-alpha',
-    lastSeen: new Date().toISOString(),
+    lastActivity: Date.now(),
     eventCount: 10,
     beadsCompleted: 5,
     currentBead: null,
@@ -248,7 +248,7 @@ describe('WorkerGrid', () => {
       const workers = [
         createMockWorker({
           id: 'worker-1',
-          lastSeen: new Date(Date.now() - 30000).toISOString(), // 30 seconds ago
+          lastActivity: Date.now() - 30000, // 30 seconds ago
         }),
       ];
 
@@ -267,7 +267,7 @@ describe('WorkerGrid', () => {
       const workers = [
         createMockWorker({
           id: 'worker-1',
-          lastSeen: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5 minutes ago
+          lastActivity: Date.now() - 5 * 60 * 1000, // 5 minutes ago
         }),
       ];
 
@@ -286,7 +286,7 @@ describe('WorkerGrid', () => {
       const workers = [
         createMockWorker({
           id: 'worker-1',
-          lastSeen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+          lastActivity: Date.now() - 2 * 60 * 60 * 1000, // 2 hours ago
         }),
       ];
 

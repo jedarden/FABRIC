@@ -140,8 +140,13 @@ export class WorkerGrid {
     const stateLabel = this.getStateLabel(worker);
     const workerId = worker.id.slice(0, 12);
 
-    // Show currentBead when WORKING, otherwise show '-'
-    const currentBead = (worker.needleState === 'WORKING' && worker.currentBead) ? worker.currentBead : '-';
+    // Show currentBead when WORKING, otherwise show '-' or lastEvent.bead if available
+    let currentBead = '-';
+    if (worker.needleState === 'WORKING' && worker.currentBead) {
+      currentBead = worker.currentBead;
+    } else if (worker.lastEvent?.bead) {
+      currentBead = worker.lastEvent.bead;
+    }
     // Show beads completed count
     const completedCount = worker.beadsCompleted;
 
@@ -158,7 +163,12 @@ export class WorkerGrid {
     const dimPrefix = shouldDim ? '{gray-fg}' : '';
     const dimSuffix = shouldDim ? '{/}' : '';
 
-    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/} {bold}${workerId}{/} ${pinIndicator} {${color}-fg}${stateLabel}{/} ${stuckIndicator} {gray-fg}${currentBead}{/} {cyan-fg}${completedCount} done{/} {blue-fg}${duration}{/} ${collisionIndicator}${dimSuffix}`;
+    // Format task message from lastEvent if available (truncated to 25 chars)
+    const taskMsg = worker.lastEvent?.msg
+      ? ` ${worker.lastEvent.msg.slice(0, 25)}${worker.lastEvent.msg.length > 25 ? '…' : ''}`
+      : '';
+
+    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/}} {{bold}}${workerId}{{/}} ${pinIndicator} {${color}-fg}${stateLabel}{/}} ${stuckIndicator} {{gray-fg}}${currentBead}{{/}} {{cyan-fg}}${completedCount} done{{/}} {{blue-fg}}${duration}{{/}} ${taskMsg}${collisionIndicator}${dimSuffix}`;
   }
 
   /**
