@@ -1366,31 +1366,31 @@ fabric logs --worker w-abc123           # Filter by worker
 - [ ] Focus mode with pinning
 
 ### Phase 4: Intelligence Features (Core)
-- [ ] Cross-reference hyperlinking (bead, file, worker links)
-- [ ] Inline diff view for Edit tool calls
-- [ ] File activity heatmap
-- [ ] Cost & token tracking dashboard
-- [ ] Conversation transcript view
+- [x] Cross-reference hyperlinking (bead, file, worker links)
+- [x] Inline diff view for Edit tool calls
+- [x] File activity heatmap
+- [x] Cost & token tracking dashboard
+- [x] Conversation transcript view
 
 ### Phase 5: Intelligence Features (Detection)
-- [ ] Stuck detection (no progress timeout)
-- [ ] Loop detection (repeated actions on same file)
-- [ ] Worker collision detection (overlapping file edits)
-- [ ] Smart error grouping with context
-- [ ] Semantic activity narrative (phase detection)
+- [x] Stuck detection (no progress timeout)
+- [x] Loop detection (repeated actions on same file)
+- [x] Worker collision detection (overlapping file edits)
+- [x] Smart error grouping with context
+- [x] Semantic activity narrative (phase detection)
 
 ### Phase 6: Context & Integration
-- [ ] Git integration panel (status, diff preview, conflict detection)
-- [ ] AI session digest generation
-- [ ] Worker comparison analytics
-- [ ] Historical session index for comparisons
+- [x] Git integration panel (status, diff preview, conflict detection)
+- [x] AI session digest generation
+- [ ] Worker comparison analytics (web API + frontend; tracked by bead bf-4cqq)
+- [x] Historical session index for comparisons
 
 ### Phase 7: Advanced Features
-- [ ] Session replay with timeline scrubbing
-- [ ] Task dependency DAG visualization
-- [ ] Budget alerts and projections
-- [ ] Anomaly detection (unexpected file activity)
-- [ ] Recovery playbook (error pattern matching)
+- [x] Session replay with timeline scrubbing
+- [x] Task dependency DAG visualization
+- [x] Budget alerts and projections
+- [x] Anomaly detection (unexpected file activity)
+- [x] Recovery playbook (error pattern matching)
 
 ### Phase 9: Productivity Analytics (checklist)
 - [x] Fix `beadsCompleted` counter for modern NEEDLE event format
@@ -1593,5 +1593,5 @@ FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detec
 
 ---
 
-**Status**: Phases 1–9 complete.
-**Last Updated**: 2026-05-22
+**Status**: Phases 1–5, 7 complete. Phase 6: worker comparison analytics web layer (bead bf-4cqq).
+**Last Updated**: 2026-05-26
