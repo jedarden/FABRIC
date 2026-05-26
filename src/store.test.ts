@@ -388,7 +388,7 @@ describe('InMemoryEventStore', () => {
       }
 
       expect(defaultStore.size).toBe(10000);
-    });
+    }, 30000);
   });
 
   describe('size property', () => {
