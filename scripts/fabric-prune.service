@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=oneshot
 WorkingDirectory=/home/coding/FABRIC
-ExecStart=/usr/bin/node dist/cli.js prune --source ~/.needle/logs
+ExecStart=/home/coding/.nix-profile/bin/node dist/cli.js prune --source ~/.needle/logs
 Environment=NODE_ENV=production
 StandardOutput=journal
 StandardError=journal

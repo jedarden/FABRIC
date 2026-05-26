@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 WorkingDirectory=/home/coding/FABRIC
 # Run with 1GB heap limit, enable heap snapshots for leak detection
-ExecStart=/usr/bin/node --max-old-space-size=1024 dist/cli.js web --port 3000 --source /home/coding/.needle/logs --otlp-http :4318 --heap-snapshots --snapshot-interval 30
+ExecStart=/home/coding/.nix-profile/bin/node --max-old-space-size=1024 dist/cli.js web --port 3000 --source /home/coding/.needle/logs --otlp-http :4318 --heap-snapshots --snapshot-interval 30
 Restart=on-failure
 RestartSec=5
 # Rate limit restarts: 5 times within 2 minutes before entering failed state
