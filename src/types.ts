@@ -1311,8 +1311,8 @@ export interface SpanNode {
   /** OTLP trace ID */
   trace_id: string;
 
-  /** Parent span ID (undefined for root spans) */
-  parent_span_id?: string;
+  /** Parent span ID (null for root spans) */
+  parent_span_id: string | null;
 
   /** Span name (e.g. "bead.lifecycle", "tool.call", "llm.request") */
   name: string;
@@ -1320,17 +1320,17 @@ export interface SpanNode {
   /** Worker that emitted this span */
   worker_id: string;
 
-  /** Associated bead ID (if this is a bead lifecycle span) */
-  bead_id?: string;
+  /** Associated bead ID (null if not associated) */
+  bead_id: string | null;
 
-  /** Start timestamp (ms from .started event) */
-  start_ts?: number;
+  /** Start timestamp (ms from .started event, null if not available) */
+  start_ts: number | null;
 
-  /** End timestamp (ms from .finished event) */
-  end_ts?: number;
+  /** End timestamp (ms from .finished event, null if not available) */
+  end_ts: number | null;
 
-  /** Duration in ms */
-  duration_ms?: number;
+  /** Duration in ms (null if not available) */
+  duration_ms: number | null;
 
   /** Span completion status */
   status: 'ok' | 'error' | 'unknown';
@@ -1357,6 +1357,22 @@ export interface SpanDag {
 
   /** Spans grouped by trace_id */
   traces: Map<string, SpanNode[]>;
+}
+
+/**
+ * JSON-serializable span DAG response for API endpoints.
+ * Unlike SpanDag (which uses Maps for internal use), this format
+ * is designed for HTTP responses and JSON serialization.
+ */
+export interface SpanDagResponse {
+  /** Root spans (no parent_span_id or orphaned) */
+  roots: SpanNode[];
+
+  /** Total number of spans in the DAG */
+  totalSpans: number;
+
+  /** Trace summary with span counts */
+  traces: Array<{ trace_id: string; span_count: number }>;
 }
 
 // ============================================

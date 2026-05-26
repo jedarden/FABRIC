@@ -11,7 +11,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as systemdNotify from 'systemd-notify';
 import { WebSocketServer, WebSocket } from 'ws';
-import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus, SemanticNarrative, NarrativeSegment } from '../types.js';
+import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus, SemanticNarrative, NarrativeSegment, SpanDagResponse, SpanNode } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
 import { normalizeToLogEvent, EventDeduplicator } from '../normalizer.js';
@@ -1478,6 +1478,87 @@ export function createWebServer(options: WebServerOptions): WebServer {
         console.error('Error fetching historical sessions:', error);
         res.status(500).json({
           error: 'Failed to fetch historical sessions',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
+    // GET /api/spans/dag - Get span DAG for visualization
+    app.get('/api/spans/dag', (req: Request, res: Response) => {
+      try {
+        const traceId = req.query.trace_id as string | undefined;
+
+        // Query all events that have span data
+        const allEvents = store.query();
+        const spanEvents = allEvents.filter(
+          (e) => e.span_id && (e.trace_id || !traceId)
+        );
+
+        // Filter by trace_id if specified
+        const filteredEvents = traceId
+          ? spanEvents.filter((e) => e.trace_id === traceId)
+          : spanEvents;
+
+        // Build span nodes and index
+        const spanMap = new Map<string, SpanNode>();
+        const rootSpans: SpanNode[] = [];
+        const traceCounts = new Map<string, number>();
+
+        for (const event of filteredEvents) {
+          const spanId = event.span_id as string;
+          const traceId = event.trace_id as string;
+
+          // Count spans per trace
+          traceCounts.set(traceId, (traceCounts.get(traceId) || 0) + 1);
+
+          // Create span node if not exists
+          if (!spanMap.has(spanId)) {
+            const node: SpanNode = {
+              span_id: spanId,
+              trace_id: traceId,
+              parent_span_id: event.parent_span_id as string | null || null,
+              name: event.span_name as string || event.msg || 'Unknown',
+              worker_id: event.worker,
+              bead_id: event.bead || null,
+              start_ts: event.start_ts ? Number(event.start_ts) : null,
+              end_ts: event.end_ts ? Number(event.end_ts) : null,
+              duration_ms: event.duration_ms || null,
+              status: event.level === 'error' ? 'error' : 'ok',
+              attributes: {},
+              children: [],
+            };
+            spanMap.set(spanId, node);
+          }
+        }
+
+        // Build tree structure by linking children to parents
+        for (const [spanId, node] of spanMap) {
+          if (node.parent_span_id && spanMap.has(node.parent_span_id)) {
+            // Add as child to parent
+            spanMap.get(node.parent_span_id)!.children.push(node);
+          } else if (!node.parent_span_id) {
+            // Root span (no parent)
+            rootSpans.push(node);
+          }
+        }
+
+        // Build traces array
+        const traces = Array.from(traceCounts.entries()).map(([trace_id, span_count]) => ({
+          trace_id,
+          span_count,
+        }));
+
+        const response: SpanDagResponse = {
+          roots: rootSpans,
+          totalSpans: spanMap.size,
+          traces,
+        };
+
+        res.json(response);
+      } catch (error) {
+        console.error('Error fetching span DAG:', error);
+        res.status(500).json({
+          error: 'Failed to fetch span DAG',
           message: error instanceof Error ? error.message : 'Unknown error',
         });
       }

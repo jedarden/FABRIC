@@ -539,18 +539,22 @@ export function buildSpanDag(events: LogEvent[]): SpanDag {
 
     let node = allSpans.get(spanId);
     if (!node) {
-      node = {
+      const newNode: SpanNode = {
         span_id: spanId,
         trace_id: (event.trace_id as string) || '',
-        parent_span_id: event.parent_span_id as string | undefined,
+        parent_span_id: (event.parent_span_id as string | null) || null,
         name: (event.span_name as string) || event.msg.replace(/\.(started|finished)$/, ''),
         worker_id: event.worker,
-        bead_id: event.bead,
+        bead_id: event.bead || null,
+        start_ts: null,
+        end_ts: null,
+        duration_ms: null,
         status: 'unknown',
         children: [],
         attributes: {},
       };
-      allSpans.set(spanId, node);
+      allSpans.set(spanId, newNode);
+      node = newNode;
     }
 
     // Update from .started / .finished events
@@ -558,11 +562,11 @@ export function buildSpanDag(events: LogEvent[]): SpanDag {
     const isFinished = event.msg.endsWith('.finished');
 
     if (isStarted) {
-      node.start_ts = event.ts;
+      node.start_ts = event.ts || null;
       if (event.span_name) node.name = event.span_name as string;
     } else if (isFinished) {
-      node.end_ts = event.ts;
-      node.duration_ms = event.duration_ms;
+      node.end_ts = event.ts || null;
+      node.duration_ms = event.duration_ms || null;
       node.status = event.error ? 'error' : 'ok';
     }
 
