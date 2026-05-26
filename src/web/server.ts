@@ -1387,6 +1387,102 @@ export function createWebServer(options: WebServerOptions): WebServer {
       }
     });
 
+    // ============================================
+    // Worker Comparison Analytics API Endpoints
+    // ============================================
+
+    // Compare two workers side-by-side
+    app.get('/api/workers/compare', (req: Request, res: Response) => {
+      try {
+        const worker1 = req.query.worker1 as string;
+        const worker2 = req.query.worker2 as string;
+
+        if (!worker1 || !worker2) {
+          res.status(400).json({ error: 'Missing required parameters: worker1 and worker2' });
+          return;
+        }
+
+        const analytics = store.getWorkerAnalytics();
+        const comparison = analytics.compareWorkers(worker1, worker2);
+
+        if (!comparison) {
+          res.status(404).json({ error: 'One or both workers not found' });
+          return;
+        }
+
+        res.json(comparison);
+      } catch (error) {
+        console.error('Error comparing workers:', error);
+        res.status(500).json({
+          error: 'Failed to compare workers',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
+    // Get per-worker metrics for leaderboard table
+    app.get('/api/analytics/workers', (req: Request, res: Response) => {
+      try {
+        const analytics = store.getWorkerAnalytics();
+        const sortBy = req.query.sortBy as 'beadsCompleted' | 'beadsPerHour' | 'errorRate' | 'costPerBead' | 'efficiencyScore' | undefined;
+        const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
+
+        let workers = analytics.getAllWorkerMetrics();
+
+        // Apply sort if specified
+        if (sortBy) {
+          const lowerIsBetter = ['errorRate', 'costPerBead'].includes(sortBy);
+          workers.sort((a, b) => lowerIsBetter
+            ? (a[sortBy] as number) - (b[sortBy] as number)
+            : (b[sortBy] as number) - (a[sortBy] as number)
+          );
+        }
+
+        // Apply limit if specified
+        if (limit && limit > 0) {
+          workers = workers.slice(0, limit);
+        }
+
+        res.json({
+          workers,
+          count: workers.length,
+        });
+      } catch (error) {
+        console.error('Error fetching worker metrics:', error);
+        res.status(500).json({
+          error: 'Failed to fetch worker metrics',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
+    // Get historical sessions for cross-session comparisons
+    app.get('/api/analytics/sessions', (req: Request, res: Response) => {
+      try {
+        const historical = store.getHistoricalStore();
+        const startTime = req.query.start ? parseInt(req.query.start as string) : undefined;
+        const endTime = req.query.end ? parseInt(req.query.end as string) : undefined;
+        const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+
+        const sessions = historical.getSessions({
+          startTime,
+          endTime,
+          limit,
+        });
+
+        res.json({
+          sessions,
+          count: sessions.length,
+        });
+      } catch (error) {
+        console.error('Error fetching historical sessions:', error);
+        res.status(500).json({
+          error: 'Failed to fetch historical sessions',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
     // Serve static frontend files
     const staticPath = join(__dirname, 'public');
     app.use(express.static(staticPath));
