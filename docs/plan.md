@@ -1348,22 +1348,22 @@ fabric logs --worker w-abc123           # Filter by worker
 - [x] Conversation transcript parser (extract full conversation from logs)
 
 ### Phase 2: TUI Display
-- [ ] Worker list panel
-- [ ] Live log stream panel
-- [ ] Worker detail panel
-- [ ] Keyboard controls and filtering
-- [ ] Command palette (Ctrl+K)
-- [ ] File context panel (split view)
-- [ ] Focus mode with pinning
+- [x] Worker list panel
+- [x] Live log stream panel
+- [x] Worker detail panel
+- [x] Keyboard controls and filtering
+- [x] Command palette (Ctrl+K)
+- [x] File context panel (split view)
+- [x] Focus mode with pinning
 
 ### Phase 3: Web Display
-- [ ] HTTP server with WebSocket support
-- [ ] Real-time event streaming to browser
-- [ ] React/Svelte dashboard UI
-- [ ] Worker cards and activity feed
-- [ ] Command palette (Cmd+K)
-- [ ] File context panel (side panel)
-- [ ] Focus mode with pinning
+- [x] HTTP server with WebSocket support
+- [x] Real-time event streaming to browser
+- [x] React/Svelte dashboard UI
+- [x] Worker cards and activity feed
+- [x] Command palette (Cmd+K)
+- [x] File context panel (side panel)
+- [x] Focus mode with pinning
 
 ### Phase 4: Intelligence Features (Core)
 - [x] Cross-reference hyperlinking (bead, file, worker links)
@@ -1382,7 +1382,7 @@ fabric logs --worker w-abc123           # Filter by worker
 ### Phase 6: Context & Integration
 - [x] Git integration panel (status, diff preview, conflict detection)
 - [x] AI session digest generation
-- [ ] Worker comparison analytics (web API + frontend; tracked by bead bf-4cqq)
+- [x] Worker comparison analytics (web API + frontend; completed via bead bf-4cqq)
 - [x] Historical session index for comparisons
 
 ### Phase 7: Advanced Features
@@ -1593,5 +1593,5 @@ FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detec
 
 ---
 
-**Status**: Phases 1–5, 7 complete. Phase 6: worker comparison analytics web layer (bead bf-4cqq).
+**Status**: Phases 1–7 complete. Phase 9 complete.
 **Last Updated**: 2026-05-26
