@@ -46,6 +46,7 @@ function createMockWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     activeDirectories: [],
     collisionTypes: [],
     eventCount: 10,
+    currentBead: null,
     ...overrides,
   };
 }

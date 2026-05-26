@@ -31,7 +31,7 @@ describe('Bead Workspace Scanner', () => {
     },
   ];
 
-  const mockBeadsData = {
+  const mockBeadsData: Record<string, string> = {
     '/home/coding/FABRIC/.beads/issues.jsonl': [
       JSON.stringify({
         id: 'bf-1abc',

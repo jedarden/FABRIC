@@ -134,6 +134,19 @@ function createMockNarrative(overrides: Partial<SemanticNarrative> = {}): Semant
     startTime: Date.now() - 20000,
     endTime: Date.now(),
     durationMs: 20000,
+    accomplishments: ['Fixed bug', 'Added feature'],
+    challenges: ['Complex refactoring'],
+    sentiment: 'productive',
+    stats: {
+      totalEvents: 10,
+      segmentCount: 2,
+      beadsWorked: 1,
+      filesModified: 3,
+      errorsEncountered: 0,
+      toolsUsed: 5,
+    },
+    generatedAt: Date.now(),
+    isLive: false,
     segments: [
       {
         id: 'seg-1',
@@ -182,7 +195,7 @@ describe('SemanticNarrativePanel', () => {
   let mockListInstance: any;
   let mockSubBox: any;
   let mockManager: any;
-  let onSelectCallback: ReturnType<typeof vi.fn>;
+  let onSelectCallback: ReturnType<typeof vi.fn> & ((segmentId: string) => void);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -207,7 +220,7 @@ describe('SemanticNarrativePanel', () => {
     (getSemanticNarrativeManager as Mock).mockReturnValue(mockManagerInstance);
 
     mockScreen = createMockScreen();
-    onSelectCallback = vi.fn();
+    onSelectCallback = vi.fn() as ReturnType<typeof vi.fn> & ((segmentId: string) => void);
 
     // Get the mock instances from the mock
     const blessedMock = blessed as unknown as { box: Mock; list: Mock };
@@ -333,9 +346,9 @@ describe('SemanticNarrativePanel', () => {
     beforeEach(() => {
       const narrative = createMockNarrative({
         segments: [
-          { id: '1', pattern: 'file_editing', summary: 'First', startTime: Date.now() - 30000, endTime: Date.now() - 20000, durationMs: 10000, confidence: 0.9, isActive: true, entities: {} },
-          { id: '2', pattern: 'tool_usage', summary: 'Second', startTime: Date.now() - 20000, endTime: Date.now() - 10000, durationMs: 10000, confidence: 0.8, isActive: false, entities: {} },
-          { id: '3', pattern: 'error_handling', summary: 'Third', startTime: Date.now() - 10000, endTime: Date.now(), durationMs: 10000, confidence: 0.7, isActive: false, entities: {} },
+          { id: '1', pattern: 'file_editing', summary: 'First', startTime: Date.now() - 30000, endTime: Date.now() - 20000, durationMs: 10000, confidence: 0.9, isActive: true, workerId: 'w-test', events: [], entities: {} },
+          { id: '2', pattern: 'tool_usage', summary: 'Second', startTime: Date.now() - 20000, endTime: Date.now() - 10000, durationMs: 10000, confidence: 0.8, isActive: false, workerId: 'w-test', events: [], entities: {} },
+          { id: '3', pattern: 'error_handling', summary: 'Third', startTime: Date.now() - 10000, endTime: Date.now(), durationMs: 10000, confidence: 0.7, isActive: false, workerId: 'w-test', events: [], entities: {} },
         ] as NarrativeSegment[],
       });
       panel.setNarrative(narrative);
@@ -783,6 +796,19 @@ describe('SemanticNarrativePanel', () => {
         startTime: Date.now() - 10000,
         endTime: Date.now(),
         durationMs: 10000,
+        accomplishments: [],
+        challenges: [],
+        sentiment: 'idle',
+        stats: {
+          totalEvents: 0,
+          segmentCount: 0,
+          beadsWorked: 0,
+          filesModified: 0,
+          errorsEncountered: 0,
+          toolsUsed: 0,
+        },
+        generatedAt: Date.now(),
+        isLive: false,
         segments: [],
       };
 
@@ -803,6 +829,8 @@ describe('SemanticNarrativePanel', () => {
           durationMs: 10000,
           confidence: 0.9,
           isActive: true,
+          workerId: 'w-test',
+          events: [],
           entities: {},
         }],
       });
