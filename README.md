@@ -282,8 +282,6 @@ ss -tlnp | grep 4318
 
 NEEDLE's `otlp_metric_sink` is enabled in `~/.needle/config.yaml`, pushing aggregated token/cost/bead metrics to `http://localhost:4318/v1/metrics`. FABRIC deduplicates these against JSONL-tailed events and writes them to `~/.needle/fabric.db` with `metrics_source='otlp-metric'`.
 
-🚧 **In Development** - See [docs/plan.md](docs/plan.md) for implementation roadmap.
-
 ## Documentation
 
 - [NeedleEvent Schema](docs/schema.md) — canonical wire format shared with NEEDLE
