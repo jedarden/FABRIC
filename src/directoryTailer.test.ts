@@ -273,38 +273,59 @@ describe('DirectoryTailer', () => {
     const fileA = path.join(tempDir, 'a.jsonl');
     const fileB = path.join(tempDir, 'b.jsonl');
 
-    fs.writeFileSync(fileA, makeEvent('w-a', 'before-eviction', 1) + '\n');
-    fs.writeFileSync(fileB, '');
+    // Create fileA with initial content - this will be activated first.
+    fs.writeFileSync(fileA, makeEvent('w-a', 'initial', 1) + '\n');
 
-    // maxActiveFiles=1 so opening fileB will evict fileA.
     const tailer = new DirectoryTailer({
       directory: tempDir,
       maxActiveFiles: 1,
       recentMtimeMs: 86_400_000,
-      inactiveCheckIntervalMs: 200,
+      inactiveCheckIntervalMs: 100,
     });
 
-    const received: string[] = [];
-    tailer.on('event', (event) => received.push(event.msg));
+    const received: Array<{ msg: string; filePath: string }> = [];
+    tailer.on('event', (event, filePath) => {
+      received.push({ msg: event.msg, filePath });
+    });
 
+    // Start with only fileA present - it will be activated.
     tailer.start();
+
+    // Wait for fileA to be read and emit 'initial'.
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Verify fileA is active and emitted 'initial'.
+    expect(tailer.activeFiles.length).toBe(1);
+    expect(tailer.activeFiles[0]).toBe(fileA);
+    expect(received.filter((r) => r.msg === 'initial').length).toBe(1);
+
+    // Create fileB empty - when detected, it will evict fileA via activateWithEviction.
+    fs.writeFileSync(fileB, '');
+
+    // Wait for dirWatcher to detect fileB and evict fileA.
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Exactly one file should be active (fileB, the newer one).
+    expect(tailer.activeFiles.length).toBe(1);
+    expect(tailer.activeFiles[0]).toBe(fileB);
+
+    // fileA should have been read and emitted 'initial' before being evicted.
+    const initialCount = received.filter((r) => r.msg === 'initial').length;
+    expect(initialCount).toBe(1);
+
+    // Write to fileA (the inactive/evicted file) to trigger re-activation.
+    // This new content should be read from the checkpointed position.
+    fs.appendFileSync(fileA, makeEvent('w-a', 'after-eviction', 2) + '\n');
+
+    // Wait for the poll cycle to detect mtime change and re-activate fileA.
     await new Promise((r) => setTimeout(r, 400));
 
-    // Exactly one file is active; the other is inactive.
-    expect(tailer.activeFiles.length).toBe(1);
-
-    // Write to the inactive file to trigger re-activation.
-    const inactive = tailer.activeFiles[0] === fileA ? fileB : fileA;
-    fs.appendFileSync(inactive, makeEvent('w-inactive', 'after-reactivation', 2) + '\n');
-
-    await new Promise((r) => setTimeout(r, 800));
     tailer.stop();
 
-    // The event written after re-activation must have been received.
-    expect(received).toContain('after-reactivation');
-    // The event written before eviction (to fileA at start time) should NOT
-    // have been re-emitted when fileA was re-activated (position is checkpointed).
-    const beforeCount = received.filter((m) => m === 'before-eviction').length;
-    expect(beforeCount).toBe(0);
+    // The new event should be received.
+    expect(received.some((r) => r.msg === 'after-eviction')).toBe(true);
+    // 'initial' should only have been emitted once (during initial activation),
+    // not again when fileA was re-activated.
+    expect(received.filter((r) => r.msg === 'initial').length).toBe(1);
   });
 });
