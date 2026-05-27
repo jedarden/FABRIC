@@ -42,6 +42,11 @@ interface TimelineSegment {
   intensity: number; // 0-1 for block visualization
 }
 
+// Events arrive with ts (unix ms) from the server; timestamp (ISO string) is the
+// frontend-normalised field. Accept either so the timeline works with both.
+const getEventTime = (event: LogEvent): number =>
+  event.ts ?? (event.timestamp ? Date.parse(event.timestamp) : 0);
+
 const TIME_RANGE_MS: Record<TimeRange, number> = {
   '5m': 5 * 60 * 1000,
   '10m': 10 * 60 * 1000,
@@ -232,7 +237,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
     filteredEvents
       .filter(e => new Date(e.timestamp).getTime() >= rangeStart)
       .forEach(event => {
-        const eventTime = new Date(event.timestamp).getTime();
+        const eventTime = getEventTime(event);
         const bucketStart = Math.floor(eventTime / BUCKET_SIZE) * BUCKET_SIZE;
 
         if (!workerBuckets.has(event.worker)) {
@@ -420,7 +425,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
 
     // Find events in this time range for this worker
     const blockEvents = filteredEvents.filter(event => {
-      const eventTime = new Date(event.timestamp).getTime();
+      const eventTime = getEventTime(event);
       return event.worker === workerId && eventTime >= blockStart && eventTime < blockEnd;
     });
 
@@ -530,7 +535,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
 
                             // Find events in this time range for this worker
                             const blockEvents = filteredEvents.filter(event => {
-                              const eventTime = new Date(event.timestamp).getTime();
+                              const eventTime = getEventTime(event);
                               return event.worker === workerData.workerId && eventTime >= blockStart && eventTime < blockEnd;
                             });
 
@@ -661,7 +666,7 @@ const TimelineView: React.FC<TimelineViewProps> = ({
                   className={`popup-event-item popup-event-${event.level}`}
                   onClick={() => {
                     if (onTimeSelect) {
-                      onTimeSelect(new Date(event.timestamp).getTime());
+                      onTimeSelect(getEventTime(event));
                     }
                     setBlockEventPopup(null);
                   }}
