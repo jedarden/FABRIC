@@ -22,7 +22,7 @@ const FleetSummaryBar: React.FC<FleetSummaryBarProps> = ({ workers }) => {
     }
 
     return {
-      working: stateCounts.WORKING || 0,
+      working: (stateCounts.WORKING || 0) + (stateCounts.BUILDING || 0) + (stateCounts.DISPATCHING || 0) + (stateCounts.EXECUTING || 0) + (stateCounts.HANDLING || 0) + (stateCounts.LOGGING || 0),
       selecting: stateCounts.SELECTING || 0,
       exhausted: (stateCounts.EXHAUSTED_IDLE || 0) + (stateCounts.STOPPED || 0),
       beadsToday: totalBeadsCompleted,

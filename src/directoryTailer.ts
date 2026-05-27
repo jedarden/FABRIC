@@ -99,16 +99,21 @@ export class DirectoryTailer extends EventEmitter {
     const now = Date.now();
     const candidates: Array<{ fullPath: string; mtime: number; size: number }> = [];
 
+    // Files modified within this window are read from the start on startup so
+    // FABRIC can reconstruct current worker state after a restart.
+    const STARTUP_REREAD_MS = 4 * 60 * 60 * 1000; // 4 hours
+
     for (const entry of fs.readdirSync(this.directory)) {
       if (!entry.endsWith('.jsonl')) continue;
       const fullPath = path.join(this.directory, entry);
       try {
         const stat = fs.statSync(fullPath);
-        // Register all files; position = stat.size so initial activation
-        // starts from the current end (don't re-emit historical events).
+        const isRecent = now - stat.mtimeMs <= STARTUP_REREAD_MS;
+        // Recent files: read from the beginning so state is reconstructed.
+        // Old files: start at EOF — don't replay ancient history on restart.
         this.fileInfo.set(fullPath, {
           mtime: stat.mtimeMs,
-          position: stat.size,
+          position: isRecent ? 0 : stat.size,
           lastActivity: 0,
         });
         if (now - stat.mtimeMs <= this.recentMtimeMs) {

@@ -20,27 +20,42 @@ export type WorkerStatus = 'active' | 'idle' | 'error';
  * worker.state_transition events. These are the canonical states
  * that replace the coarse WorkerStatus in the UI.
  *
- * BOOTING → SELECTING → CLAIMING → WORKING → CLOSING → STOPPED
+ * Abstract:  BOOTING → SELECTING → CLAIMING → WORKING → CLOSING → STOPPED
+ * Granular:  SELECTING → BUILDING → DISPATCHING → EXECUTING → HANDLING → LOGGING → SELECTING
+ *
+ * BUILDING/DISPATCHING/EXECUTING/HANDLING/LOGGING are the inner loop of a
+ * single bead execution. They all map to the WORKING display state.
  */
 export type NeedleState =
   | 'BOOTING'
   | 'SELECTING'
   | 'CLAIMING'
   | 'WORKING'
+  | 'BUILDING'
+  | 'DISPATCHING'
+  | 'EXECUTING'
+  | 'HANDLING'
+  | 'LOGGING'
   | 'CLOSING'
+  | 'EXHAUSTED_IDLE'
   | 'STOPPED';
 
 /**
  * All valid state transitions in the NEEDLE worker state machine.
- * A worker in BOOTING can only go to SELECTING, etc.
  */
-export const VALID_TRANSITIONS: Record<NeedleState, NeedleState[]> = {
-  BOOTING:   ['SELECTING'],
-  SELECTING: ['CLAIMING', 'STOPPED'],
-  CLAIMING:  ['WORKING', 'SELECTING'],
-  WORKING:   ['CLOSING', 'SELECTING'],
-  CLOSING:   ['SELECTING', 'STOPPED'],
-  STOPPED:   ['BOOTING'],
+export const VALID_TRANSITIONS: Partial<Record<NeedleState, NeedleState[]>> = {
+  BOOTING:        ['SELECTING'],
+  SELECTING:      ['BUILDING', 'CLAIMING', 'EXHAUSTED_IDLE', 'STOPPED'],
+  CLAIMING:       ['WORKING', 'SELECTING'],
+  BUILDING:       ['DISPATCHING', 'SELECTING'],
+  DISPATCHING:    ['EXECUTING', 'SELECTING'],
+  EXECUTING:      ['HANDLING', 'SELECTING'],
+  HANDLING:       ['LOGGING', 'SELECTING'],
+  LOGGING:        ['SELECTING'],
+  WORKING:        ['CLOSING', 'SELECTING'],
+  CLOSING:        ['SELECTING', 'STOPPED'],
+  EXHAUSTED_IDLE: ['SELECTING', 'STOPPED'],
+  STOPPED:        ['BOOTING'],
 };
 
 /**
@@ -51,10 +66,16 @@ export function needleStateToStatus(state: NeedleState): WorkerStatus {
     case 'BOOTING':
     case 'SELECTING':
     case 'CLAIMING':
+    case 'BUILDING':
+    case 'DISPATCHING':
+    case 'EXECUTING':
+    case 'HANDLING':
+    case 'LOGGING':
     case 'WORKING':
       return 'active';
     case 'CLOSING':
       return 'active';
+    case 'EXHAUSTED_IDLE':
     case 'STOPPED':
       return 'idle';
   }

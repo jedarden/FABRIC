@@ -741,7 +741,7 @@ export class InMemoryEventStore implements EventStore {
    * Check if a string is a valid NeedleState value.
    */
   private isValidNeedleState(value: string): value is NeedleState {
-    return ['BOOTING', 'SELECTING', 'CLAIMING', 'WORKING', 'CLOSING', 'STOPPED'].includes(value);
+    return ['BOOTING', 'SELECTING', 'CLAIMING', 'WORKING', 'BUILDING', 'DISPATCHING', 'EXECUTING', 'HANDLING', 'LOGGING', 'CLOSING', 'EXHAUSTED_IDLE', 'STOPPED'].includes(value);
   }
 
   /**

@@ -398,7 +398,7 @@ const App: React.FC = () => {
         if (existing) {
           return prev.map(w => w.id === event.worker ? {
             ...w,
-            lastSeen: event.timestamp,
+            lastSeen: event.timestamp ?? (event.ts ? new Date(event.ts).toISOString() : undefined),
             eventCount: w.eventCount + 1,
             status: 'active' as const,
             currentTool: event.tool,
@@ -407,7 +407,7 @@ const App: React.FC = () => {
         } else {
           return [...prev, {
             id: event.worker,
-            lastSeen: event.timestamp,
+            lastSeen: event.timestamp ?? (event.ts ? new Date(event.ts).toISOString() : undefined),
             eventCount: 1,
             status: 'active' as const,
             currentTool: event.tool,

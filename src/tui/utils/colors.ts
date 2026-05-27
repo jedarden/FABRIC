@@ -46,12 +46,18 @@ export function getStatusColor(status: 'active' | 'idle' | 'error'): string {
 export function getNeedleStateColor(state: NeedleState): string {
   const c = getColors();
   switch (state) {
-    case 'BOOTING':   return c.info;
-    case 'SELECTING': return c.warn;
-    case 'CLAIMING':  return 'magenta';
-    case 'WORKING':   return c.active;
-    case 'CLOSING':   return c.warn;
-    case 'STOPPED':   return c.idle;
+    case 'BOOTING':        return c.info;
+    case 'SELECTING':      return c.warn;
+    case 'CLAIMING':       return 'magenta';
+    case 'BUILDING':
+    case 'DISPATCHING':
+    case 'EXECUTING':
+    case 'HANDLING':
+    case 'LOGGING':
+    case 'WORKING':        return c.active;
+    case 'CLOSING':        return c.warn;
+    case 'EXHAUSTED_IDLE': return c.idle;
+    case 'STOPPED':        return c.idle;
   }
 }
 
@@ -60,12 +66,18 @@ export function getNeedleStateColor(state: NeedleState): string {
  */
 export function getNeedleStateIcon(state: NeedleState): string {
   switch (state) {
-    case 'BOOTING':   return '⏳';
-    case 'SELECTING': return '🔍';
-    case 'CLAIMING':  return '🎯';
-    case 'WORKING':   return '●';
-    case 'CLOSING':   return '⏹';
-    case 'STOPPED':   return '○';
+    case 'BOOTING':        return '⏳';
+    case 'SELECTING':      return '🔍';
+    case 'CLAIMING':       return '🎯';
+    case 'BUILDING':
+    case 'DISPATCHING':
+    case 'EXECUTING':
+    case 'HANDLING':
+    case 'LOGGING':
+    case 'WORKING':        return '●';
+    case 'CLOSING':        return '⏹';
+    case 'EXHAUSTED_IDLE': return '○';
+    case 'STOPPED':        return '○';
   }
 }
 

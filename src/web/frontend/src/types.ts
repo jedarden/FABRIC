@@ -5,6 +5,11 @@ export type NeedleState =
   | 'SELECTING'
   | 'CLAIMING'
   | 'WORKING'
+  | 'BUILDING'
+  | 'DISPATCHING'
+  | 'EXECUTING'
+  | 'HANDLING'
+  | 'LOGGING'
   | 'CLOSING'
   | 'EXHAUSTED_IDLE'
   | 'STOPPED';
