@@ -102,3 +102,36 @@ npx tsc --noEmit        # type-check without emitting
 | `scripts/fabric-prune.timer` | systemd timer for daily log pruning |
 | `scripts/setup-tailscale-serve.sh` | One-time Tailscale Serve setup |
 | `docs/plan.md` | Full architecture and phase roadmap |
+
+## CI — Argo Workflows on iad-ci only. GitHub Actions are disabled.
+
+**GitHub Actions are disabled across all repos in this environment. Never re-enable them, never add new workflows, never propose them.**
+
+At the start of every work iteration, delete any `.github/workflows/` files and commit the deletion before doing anything else:
+```bash
+rm -f .github/workflows/*.yml .github/workflows/*.yaml
+git add -A && git commit -m "ci: remove GitHub Actions (Argo Workflows on iad-ci only)"
+```
+
+There are two legacy workflow files (`ci.yml`, `release.yml`) that are inert but must not be revived or used as templates.
+
+All CI runs on Argo Workflows in the `iad-ci` cluster:
+
+- **WorkflowTemplate:** `fabric-ci` — lives in `jedarden/declarative-config → k8s/iad-ci/argo-workflows/fabric-ci-workflowtemplate.yml`
+- Runs: `npm ci` → `npm run typecheck` → `npm test` → `npm run build` → `npm run build:web`
+
+To trigger a CI run manually:
+```bash
+kubectl --kubeconfig=/home/coding/.kube/iad-ci.kubeconfig create -f - <<YAML
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: fabric-ci-manual-
+  namespace: argo-workflows
+spec:
+  workflowTemplateRef:
+    name: fabric-ci
+YAML
+```
+
+ArgoCD on ardenone-manager syncs declarative-config automatically on push. Never `kubectl apply` directly against any cluster.
