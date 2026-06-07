@@ -284,17 +284,19 @@ function detectLongRunning(
   if (runningTime > opts.longRunningThresholdMs) {
     const minutes = Math.floor(runningTime / 60000);
 
-    // Check if making progress
-    const completions = events.filter(
-      (e) => e.msg?.includes('completed') || e.msg?.includes('complete')
-    ).length;
+    // Use worker.beadsCompleted (counts bead.completed and bead.released with release_success)
+    // instead of text-based message matching
+    const completions = worker.beadsCompleted;
 
     if (completions < 2) {
       return {
         type: 'long_running',
-        reason: `Running for ${minutes}m with only ${completions} completion(s)`,
+        reason: `Running for ${minutes}m with only ${completions} successful completion(s)`,
         severity: minutes >= 20 ? 'critical' : 'warning',
-        evidence: [`Beads completed: ${worker.beadsCompleted}`],
+        evidence: [
+          `Beads completed: ${worker.beadsCompleted}`,
+          `Total events in window: ${events.length}`,
+        ],
         suggestion: 'Consider breaking task into smaller pieces',
       };
     }
