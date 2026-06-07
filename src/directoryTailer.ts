@@ -18,6 +18,7 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { LogTailer, TailerEvents } from './tailer.js';
 import { EventDeduplicator } from './normalizer.js';
+import { applyLimitForLogFile } from './workerMemoryLimiter.js';
 
 export interface DirectoryTailerOptions {
   /** Directory to watch for *.jsonl files */
@@ -230,6 +231,10 @@ export class DirectoryTailer extends EventEmitter {
 
     this.children.set(filePath, tailer);
     tailer.start();
+
+    // Apply memory limit to needle worker when activating its log file
+    const fileName = path.basename(filePath);
+    applyLimitForLogFile(fileName);
   }
 
   /**

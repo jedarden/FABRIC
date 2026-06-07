@@ -18,6 +18,7 @@ import { getStore } from './store.js';
 import { createWebServer } from './web/index.js';
 import { EventDeduplicator } from './normalizer.js';
 import { createConfigCommand } from './config.js';
+import { applyAllWorkerLimits } from './workerMemoryLimiter.js';
 import * as fs from 'fs';
 import * as net from 'net';
 import type { LogLevel, EventFilter, LogEvent } from './types.js';
@@ -135,6 +136,14 @@ program
             lines: 50,
             deduplicator,
           });
+
+      // Apply memory limits to all currently running needle workers at startup
+      if (resolved.kind === 'directory') {
+        const limitedCount = applyAllWorkerLimits();
+        if (limitedCount > 0) {
+          console.error(`Applied memory limits to ${limitedCount} needle worker(s)`);
+        }
+      }
 
       tailer.on('event', (event) => {
         // Apply filters before processing event
@@ -333,6 +342,14 @@ program
             lines: 100,
             deduplicator,
           });
+
+      // Apply memory limits to all currently running needle workers at startup
+      if (resolved.kind === 'directory') {
+        const limitedCount = applyAllWorkerLimits();
+        if (limitedCount > 0) {
+          console.error(`Applied memory limits to ${limitedCount} needle worker(s)`);
+        }
+      }
 
       tailer.on('event', (event) => {
         // Apply filters before processing event
