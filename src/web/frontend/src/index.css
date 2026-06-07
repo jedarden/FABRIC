@@ -8938,3 +8938,71 @@ body {
   color: var(--text-secondary);
   text-align: right;
 }
+
+/* ============================================
+   OOM Alert Banner (persistent, top of page)
+   ============================================ */
+
+.oom-alert-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: linear-gradient(135deg, #4a0000, #660000);
+  border-bottom: 2px solid var(--error);
+  animation: slideDown 0.3s ease-out;
+  box-shadow: 0 2px 8px rgba(255, 0, 0, 0.3);
+}
+
+.oom-alert-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.oom-alert-banner-icon {
+  font-size: 1.2rem;
+  min-width: 1.5em;
+  text-align: center;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.oom-alert-banner-text {
+  flex: 1;
+  font-weight: 500;
+}
+
+.oom-alert-banner-detail {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.oom-alert-banner-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  min-width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.oom-alert-banner-dismiss:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.1);
+}

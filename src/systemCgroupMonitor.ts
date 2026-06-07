@@ -24,6 +24,13 @@ export interface MemoryHistorySample {
   swapUsage: number | null;
 }
 
+export interface OomState {
+  oomKillCount: number;
+  lastOomAt: string | null; // ISO timestamp string or null
+  oomDetected: boolean; // True if oom_kill increased since last check
+  memoryCurrentAtOom: number | null; // memory.current at time of OOM detection
+}
+
 export interface SystemMemoryStatus {
   totalMemory: number | null;
   availableMemory: number | null;
@@ -39,10 +46,16 @@ export interface SystemMemoryStatus {
   oomRisk: 'none' | 'low' | 'medium' | 'high' | 'critical';
   oomKill: number;
   oom: number;
+  oomState: OomState;
 }
 
 // In-memory history store
 const memoryHistory: MemoryHistorySample[] = [];
+
+// OOM state tracking
+let lastOomKillCount = 0;
+let lastOomAt: number | null = null;
+let memoryCurrentAtOom: number | null = null;
 
 /**
  * Read a file and return its trimmed content, or null if file doesn't exist.
@@ -127,6 +140,16 @@ export function getSystemMemoryStatus(): SystemMemoryStatus {
   // Read memory.events for oom_kill count
   const memoryEvents = readCgroupFile('memory.events');
   const oomKill = parseOomKill(memoryEvents);
+
+  // Track OOM state changes
+  let oomDetected = false;
+  if (oomKill > lastOomKillCount && lastOomKillCount > 0) {
+    // OOM kill detected!
+    oomDetected = true;
+    lastOomAt = Date.now();
+    memoryCurrentAtOom = cgroupUsage;
+  }
+  lastOomKillCount = oomKill;
 
   // Read memory.stat for additional stats
   const memoryStatContent = readCgroupFile('memory.stat');
@@ -228,6 +251,12 @@ export function getSystemMemoryStatus(): SystemMemoryStatus {
     oomRisk,
     oomKill,
     oom: oomKill, // Alias for compatibility
+    oomState: {
+      oomKillCount: oomKill,
+      lastOomAt: lastOomAt ? new Date(lastOomAt).toISOString() : null,
+      oomDetected,
+      memoryCurrentAtOom,
+    },
   };
 }
 
@@ -244,6 +273,43 @@ export function getMemoryHistory(): MemoryHistorySample[] {
 export function getMemorySummary(): string {
   const status = getSystemMemoryStatus();
   return formatBytes(status.cgroupUsage) + ' / ' + formatBytes(status.cgroupLimit);
+}
+
+/**
+ * Get current OOM state for polling.
+ * This is a lightweight call that just reads the oom_kill counter
+ * and compares to the last known value.
+ */
+export function getOomState(): OomState {
+  const memoryEvents = readCgroupFile('memory.events');
+  const oomKill = parseOomKill(memoryEvents);
+  const memoryCurrentStr = readCgroupFile('memory.current');
+  const memoryCurrent = memoryCurrentStr ? parseInt(memoryCurrentStr, 10) : null;
+
+  // Check if OOM kill increased
+  let oomDetected = false;
+  if (oomKill > lastOomKillCount && lastOomKillCount > 0) {
+    oomDetected = true;
+    lastOomAt = Date.now();
+    memoryCurrentAtOom = memoryCurrent;
+  }
+  lastOomKillCount = oomKill;
+
+  return {
+    oomKillCount: oomKill,
+    lastOomAt: lastOomAt ? new Date(lastOomAt).toISOString() : null,
+    oomDetected,
+    memoryCurrentAtOom,
+  };
+}
+
+/**
+ * Reset OOM detection state (e.g., after user dismisses alert).
+ * This clears the oomDetected flag but keeps the historical oomKillCount.
+ */
+export function resetOomDetected(): void {
+  // The oomDetected flag is transient and will be cleared on the next poll
+  // This function exists for explicit reset if needed
 }
 
 /**

@@ -17,6 +17,7 @@ import AnalyticsDashboard from './components/AnalyticsDashboard';
 import ErrorGroupPanel from './components/ErrorGroupPanel';
 import SemanticNarrativePanel from './components/SemanticNarrativePanel';
 import BudgetAlertPanel, { BudgetBanner } from './components/BudgetAlertPanel';
+import OomAlertBanner from './components/OomAlertBanner';
 import SessionDigestPanel from './components/SessionDigestPanel';
 import GitIntegrationPanel from './components/GitIntegrationPanel';
 import ProductivityPanel from './components/ProductivityPanel';
@@ -269,6 +270,7 @@ const App: React.FC = () => {
   const [showWorkerAnalytics, setShowWorkerAnalytics] = useState(false);
   const [showSystemMemory, setShowSystemMemory] = useState(false);
   const [budgetBannerDismissed, setBudgetBannerDismissed] = useState(false);
+  const [oomBannerDismissed, setOomBannerDismissed] = useState(false);
   const [hideTestWorkers, setHideTestWorkers] = useState(true);
 
   // Budget alert state polled from /api/cost/summary
@@ -635,6 +637,7 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
+      <OomAlertBanner onDismiss={() => setOomBannerDismissed(true)} />
       {budgetSummary && !budgetBannerDismissed && budgetSummary.budget.warningLevel !== 'none' && (
         <BudgetBanner
           budget={budgetSummary.budget}

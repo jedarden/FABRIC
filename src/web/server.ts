@@ -1687,6 +1687,17 @@ export function createWebServer(options: WebServerOptions): WebServer {
       res.json(alert);
     });
 
+    // Get OOM state for polling (oom_kill count and detection state)
+    app.get('/api/system/oom-state', async (_req: Request, res: Response) => {
+      const { getOomState, formatBytes } = await import('../systemCgroupMonitor.js');
+      const oomState = getOomState();
+
+      res.json({
+        ...oomState,
+        formattedMemoryCurrent: oomState.memoryCurrentAtOom ? formatBytes(oomState.memoryCurrentAtOom) : null,
+      });
+    });
+
     // Serve static frontend files
     const staticPath = join(__dirname, 'public');
     app.use(express.static(staticPath));
