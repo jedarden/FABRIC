@@ -1740,6 +1740,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
       }
 
       emitter.emit('start');
+
+      // Start the background memory sampler
+      import('../systemCgroupMonitor.js').then(({ startMemorySampler }) => {
+        startMemorySampler(10000); // Sample every 10 seconds
+        console.log('Memory sampler started (10s interval)');
+      }).catch(err => {
+        console.error('Failed to start memory sampler:', err);
+      });
     });
 
     // Second HTTP listener for OTLP/HTTP traffic (port 4318 by convention)

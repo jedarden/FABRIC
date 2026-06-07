@@ -361,11 +361,12 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-color);
+  padding: 0;
+  background: transparent;
+  border: none;
   font-size: 0.75rem;
   flex-wrap: wrap;
+  flex: 1;
 }
 
 .fleet-summary-item {
@@ -401,6 +402,24 @@ body {
 
 .fleet-summary-separator {
   color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+/* Fleet Header - combines FleetSummaryBar and SystemMemoryIndicator */
+.fleet-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.fleet-header-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border-color);
   opacity: 0.5;
 }
 

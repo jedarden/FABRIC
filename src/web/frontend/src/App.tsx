@@ -21,6 +21,7 @@ import SessionDigestPanel from './components/SessionDigestPanel';
 import GitIntegrationPanel from './components/GitIntegrationPanel';
 import ProductivityPanel from './components/ProductivityPanel';
 import FleetSummaryBar from './components/FleetSummaryBar';
+import SystemMemoryIndicator from './components/SystemMemoryIndicator';
 import HistoricalSessionsPanel from './components/HistoricalSessionsPanel';
 import WorkerAnalyticsPanel from './components/WorkerAnalyticsPanel';
 import CommandPalette from './components/CommandPalette';
@@ -921,7 +922,11 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <FleetSummaryBar workers={filteredWorkers} />
+      <div className="fleet-header">
+        <FleetSummaryBar workers={filteredWorkers} />
+        <div className="fleet-header-separator" />
+        <SystemMemoryIndicator onClick={() => setShowSystemMemory(true)} />
+      </div>
 
       <main className="main-content">
         <WorkerGrid
