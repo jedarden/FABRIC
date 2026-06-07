@@ -25,6 +25,7 @@ import { getMemoryProfiler } from '../memoryProfiler.js';
 import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport } from '../heapDiff.js';
 import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } from '../logPruner.js';
 import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
+import { getMemorySampler, type WorkerMemorySample } from '../memorySampler.js';
 
 /** Get the v8 module (available in Node.js) */
 function getV8() {
@@ -104,6 +105,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   let wsServer: WebSocketServer;
   let running = false;
   const clients: Set<WebSocket> = new Set();
+  let memoryUpdateInterval: NodeJS.Timeout | null = null;
 
   function start() {
     if (running) return;
@@ -183,6 +185,51 @@ export function createWebServer(options: WebServerOptions): WebServer {
         clients.delete(ws);
       });
     });
+
+    // ── Memory Sampler Setup ──
+    const memorySampler = getMemorySampler();
+    memorySampler.start();
+
+    // Periodic memory updates broadcast (every 10 seconds)
+    memoryUpdateInterval = setInterval(() => {
+      const samples = memorySampler.sampleAllWorkers();
+      if (samples.size === 0) return;
+
+      // Update worker memory stats in store
+      for (const [workerId, sample] of samples) {
+        const worker = store.getWorker(workerId);
+        if (worker && sample.rssKb !== null) {
+          worker.rssKb = sample.rssKb;
+          worker.peakRssKb = sample.peakRssKb ?? undefined;
+          worker.swapKb = sample.swapKb ?? undefined;
+        }
+      }
+
+      // Broadcast memory updates to WebSocket clients
+      const message = JSON.stringify({
+        type: 'memory',
+        data: {
+          workers: store.getWorkers(),
+        },
+      });
+
+      const terminatedClients: WebSocket[] = [];
+      for (const client of clients) {
+        if (client.readyState === WebSocket.OPEN) {
+          if (client.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
+            client.close(1013, 'Send buffer overflow');
+            terminatedClients.push(client);
+            continue;
+          }
+          client.send(message);
+        }
+      }
+
+      // Clean up terminated clients
+      for (const client of terminatedClients) {
+        clients.delete(client);
+      }
+    }, 10000);
 
     // Health check endpoint
     app.get('/api/health', (_req: Request, res: Response) => {
@@ -1734,6 +1781,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   function stop() {
     if (!running || !httpServer) return;
+
+    // Stop memory sampler
+    if (memoryUpdateInterval) {
+      clearInterval(memoryUpdateInterval);
+      memoryUpdateInterval = null;
+    }
+    const memorySampler = getMemorySampler();
+    memorySampler.stop();
 
     // Close all WebSocket connections
     for (const client of clients) {

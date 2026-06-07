@@ -598,6 +598,18 @@ export interface WorkerInfo {
 
   /** RSS usage as percentage of limit (0-100) */
   rssPercent?: number;
+
+  /** Process ID for this worker (from OTLP telemetry or needle state) */
+  pid?: number;
+
+  /** Current RSS from /proc/<pid>/status in KB */
+  rssKb?: number;
+
+  /** Peak RSS from /proc/<pid>/status in KB */
+  peakRssKb?: number;
+
+  /** Swap usage from /proc/<pid>/status in KB */
+  swapKb?: number;
 }
 
 export interface EventFilter {

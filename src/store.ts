@@ -641,6 +641,16 @@ export class InMemoryEventStore implements EventStore {
     // Update last activity
     worker.lastActivity = event.ts;
 
+    // Track PID from event if available
+    const pid = (event as Record<string, unknown>).pid as number | undefined;
+    if (pid && typeof pid === 'number') {
+      worker.pid = pid;
+      // Register with MemorySampler
+      const { getMemorySampler } = require('./memorySampler.js');
+      const sampler = getMemorySampler();
+      sampler.registerWorkerPid(event.worker, pid);
+    }
+
     // Track active bead
     if (event.bead) {
       worker.activeBead = event.bead;
