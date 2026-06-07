@@ -1637,6 +1637,25 @@ export function createWebServer(options: WebServerOptions): WebServer {
       });
     });
 
+    // Get memory history for sparkline (last 5 minutes @ 10s intervals = 30 samples)
+    app.get('/api/system/memory/history', async (_req: Request, res: Response) => {
+      const { getMemoryHistory, formatBytes } = await import('../systemCgroupMonitor.js');
+      const history = getMemoryHistory();
+
+      res.json({
+        samples: history.map(sample => ({
+          timestamp: sample.timestamp,
+          usage: sample.usage,
+          usagePercent: sample.usagePercent,
+          swapUsage: sample.swapUsage,
+          formattedUsage: formatBytes(sample.usage),
+          formattedSwapUsage: formatBytes(sample.swapUsage),
+        })),
+        count: history.length,
+        maxSamples: 30, // 5 minutes @ 10s intervals
+      });
+    });
+
     // Get human-readable memory summary
     app.get('/api/system/memory/summary', async (_req: Request, res: Response) => {
       const { getMemorySummary } = await import('../systemCgroupMonitor.js');

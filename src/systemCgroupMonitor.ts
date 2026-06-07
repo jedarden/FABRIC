@@ -15,6 +15,23 @@ const SYSTEM_CGROUP_PATH = '/sys/fs/cgroup/user.slice';
 const FALLBACK_CGROUP_PATH = '/sys/fs/cgroup/user.slice/user-1001.slice';
 
 /**
+ * Memory history sample for sparkline.
+ */
+export interface MemoryHistorySample {
+  timestamp: number;
+  usage: number;
+  usagePercent: number;
+  swapUsage: number | null;
+}
+
+/** Maximum number of history samples for sparkline (5 minutes @ 10s = 30 samples) */
+const MAX_HISTORY_SAMPLES = 30;
+
+/** In-memory circular buffer for memory history samples */
+const memoryHistory: MemoryHistorySample[] = [];
+let historyIndex = 0;
+
+/**
  * Read a cgroup memory control file and return its value in bytes.
  * Returns null if the file doesn't exist or cannot be read.
  */
@@ -32,6 +49,79 @@ function readCgroupMemoryValue(cgroupPath: string, filename: string): number | n
   } catch {
     return null;
   }
+}
+
+/**
+ * Memory events from memory.events file.
+ */
+export interface MemoryEvents {
+  low: number;
+  high: number;
+  max: number;
+  oom: number;
+  oomKill: number;
+  oomGroupKill: number;
+}
+
+/**
+ * Parse memory.events file and return event counts.
+ */
+export function getMemoryEvents(): MemoryEvents | null {
+  function readEvents(cgroupPath: string): MemoryEvents | null {
+    try {
+      const filePath = path.join(cgroupPath, 'memory.events');
+      if (!fs.existsSync(filePath)) {
+        return null;
+      }
+      const content = fs.readFileSync(filePath, 'utf-8').trim();
+      const lines = content.split('\n');
+      const events: MemoryEvents = {
+        low: 0,
+        high: 0,
+        max: 0,
+        oom: 0,
+        oomKill: 0,
+        oomGroupKill: 0,
+      };
+
+      for (const line of lines) {
+        const [key, value] = line.split(' ');
+        if (!key || !value) continue;
+        const numValue = parseInt(value, 10);
+        if (isNaN(numValue)) continue;
+
+        switch (key) {
+          case 'low':
+            events.low = numValue;
+            break;
+          case 'high':
+            events.high = numValue;
+            break;
+          case 'max':
+            events.max = numValue;
+            break;
+          case 'oom':
+            events.oom = numValue;
+            break;
+          case 'oom_kill':
+            events.oomKill = numValue;
+            break;
+          case 'oom_group_kill':
+            events.oomGroupKill = numValue;
+            break;
+        }
+      }
+      return events;
+    } catch {
+      return null;
+    }
+  }
+
+  let events = readEvents(SYSTEM_CGROUP_PATH);
+  if (events === null) {
+    events = readEvents(FALLBACK_CGROUP_PATH);
+  }
+  return events;
 }
 
 /**
@@ -168,6 +258,43 @@ export interface SystemMemoryStatus {
   underPressure: boolean;
   /** OOM risk level */
   oomRisk: 'none' | 'low' | 'medium' | 'high' | 'critical';
+  /** OOM kill counter from memory.events */
+  oomKill: number;
+  /** Total OOM events count */
+  oom: number;
+}
+
+/**
+ * Add a memory sample to the history buffer (circular buffer).
+ */
+export function addMemoryHistorySample(usage: number, usagePercent: number, swapUsage: number | null): void {
+  const sample: MemoryHistorySample = {
+    timestamp: Date.now(),
+    usage,
+    usagePercent,
+    swapUsage,
+  };
+
+  // Initialize or replace in circular buffer
+  if (memoryHistory.length < MAX_HISTORY_SAMPLES) {
+    memoryHistory.push(sample);
+  } else {
+    memoryHistory[historyIndex] = sample;
+    historyIndex = (historyIndex + 1) % MAX_HISTORY_SAMPLES;
+  }
+}
+
+/**
+ * Get all memory history samples.
+ * Returns samples in chronological order (oldest to newest).
+ */
+export function getMemoryHistory(): MemoryHistorySample[] {
+  if (memoryHistory.length < MAX_HISTORY_SAMPLES) {
+    // Buffer not full, return as-is
+    return [...memoryHistory];
+  }
+  // Buffer full, return from historyIndex to end, then start to historyIndex
+  return [...memoryHistory.slice(historyIndex), ...memoryHistory.slice(0, historyIndex)];
 }
 
 /**
@@ -182,6 +309,7 @@ export function getSystemMemoryStatus(): SystemMemoryStatus {
   const cgroupSwapUsage = getSystemSwapUsage();
   const swapInfo = getSwapInfo();
   const fabricRss = getFabricRss();
+  const memoryEvents = getMemoryEvents();
 
   // Calculate cgroup usage percentage
   let cgroupUsagePercent: number | null = null;
@@ -196,6 +324,11 @@ export function getSystemMemoryStatus(): SystemMemoryStatus {
     underPressure = cgroupUsage > cgroupHigh;
   } else if (cgroupUsagePercent !== null) {
     underPressure = cgroupUsagePercent > 90;
+  }
+
+  // Add to history buffer for sparkline
+  if (cgroupUsage !== null && cgroupUsagePercent !== null) {
+    addMemoryHistorySample(cgroupUsage, cgroupUsagePercent, cgroupSwapUsage);
   }
 
   // Determine OOM risk level
@@ -234,6 +367,8 @@ export function getSystemMemoryStatus(): SystemMemoryStatus {
     cgroupUsagePercent,
     underPressure,
     oomRisk,
+    oomKill: memoryEvents?.oomKill ?? 0,
+    oom: memoryEvents?.oom ?? 0,
   };
 }
 

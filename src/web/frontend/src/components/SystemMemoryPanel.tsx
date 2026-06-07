@@ -13,6 +13,8 @@ interface SystemMemoryStatus {
   cgroupUsagePercent: number | null;
   underPressure: boolean;
   oomRisk: 'none' | 'low' | 'medium' | 'high' | 'critical';
+  oomKill: number;
+  oom: number;
 }
 
 interface FormattedMemory {
@@ -35,6 +37,21 @@ interface OomAlert {
   cgroupLimit: number | null;
   message: string;
   timestamp: number;
+}
+
+interface MemoryHistorySample {
+  timestamp: number;
+  usage: number;
+  usagePercent: number;
+  swapUsage: number | null;
+  formattedUsage: string;
+  formattedSwapUsage: string;
+}
+
+interface MemoryHistoryResponse {
+  samples: MemoryHistorySample[];
+  count: number;
+  maxSamples: number;
 }
 
 interface SystemMemoryPanelProps {
@@ -74,6 +91,7 @@ export const SystemMemoryPanel: React.FC<SystemMemoryPanelProps> = ({ visible, o
   const [memoryStatus, setMemoryStatus] = useState<SystemMemoryStatus | null>(null);
   const [formattedMemory, setFormattedMemory] = useState<FormattedMemory | null>(null);
   const [oomAlert, setOomAlert] = useState<OomAlert | null>(null);
+  const [memoryHistory, setMemoryHistory] = useState<MemoryHistorySample[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,17 +126,32 @@ export const SystemMemoryPanel: React.FC<SystemMemoryPanelProps> = ({ visible, o
     }
   }, []);
 
+  const fetchMemoryHistory = useCallback(async () => {
+    try {
+      const response = await fetch('/api/system/memory/history');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data: MemoryHistoryResponse = await response.json();
+      setMemoryHistory(data.samples);
+    } catch (err) {
+      console.error('Failed to fetch memory history:', err);
+    }
+  }, []);
+
   useEffect(() => {
     if (visible) {
       fetchSystemMemory();
       fetchOomAlert();
+      fetchMemoryHistory();
       const interval = setInterval(() => {
         fetchSystemMemory();
         fetchOomAlert();
+        fetchMemoryHistory();
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [visible, fetchSystemMemory, fetchOomAlert]);
+  }, [visible, fetchSystemMemory, fetchOomAlert, fetchMemoryHistory]);
 
   if (!visible) return null;
 
@@ -163,6 +196,58 @@ export const SystemMemoryPanel: React.FC<SystemMemoryPanelProps> = ({ visible, o
             {/* Cgroup Memory Section */}
             <div className="memory-section">
               <h3>Cgroup Memory</h3>
+
+              {/* OOM Kill Counter */}
+              {(memoryStatus.oomKill > 0 || memoryStatus.oom > 0) && (
+                <div className="oom-kill-counter">
+                  <span className="oom-kill-icon">💀</span>
+                  <span className="oom-kill-text">
+                    {memoryStatus.oomKill > 0 && `${memoryStatus.oomKill} OOM kill${memoryStatus.oomKill > 1 ? 's' : ''}`}
+                    {memoryStatus.oom > 0 && memoryStatus.oomKill !== memoryStatus.oom && ` · ${memoryStatus.oom} OOM event${memoryStatus.oom > 1 ? 's' : ''}`}
+                  </span>
+                </div>
+              )}
+
+              {/* 5-minute sparkline */}
+              {memoryHistory.length > 0 && (
+                <div className="memory-sparkline-container">
+                  <div className="sparkline-label">5-minute trend</div>
+                  <div className="memory-sparkline">
+                    {memoryHistory.map((sample, index) => {
+                      const maxPercent = Math.max(...memoryHistory.map(s => s.usagePercent), 1);
+                      const heightPercent = (sample.usagePercent / maxPercent) * 100;
+                      const getColor = (pct: number) => {
+                        if (pct >= 98) return '#d32f2f';
+                        if (pct >= 95) return '#f44336';
+                        if (pct >= 90) return '#ff5722';
+                        if (pct >= 80) return '#ff9800';
+                        return '#4caf50';
+                      };
+                      return (
+                        <div
+                          key={sample.timestamp}
+                          className="sparkline-bar"
+                          style={{
+                            height: `${Math.max(5, heightPercent)}%`,
+                            backgroundColor: getColor(sample.usagePercent),
+                          }}
+                          title={`${new Date(sample.timestamp).toLocaleTimeString()}: ${sample.formattedUsage} (${sample.usagePercent.toFixed(1)}%)`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="sparkline-legend">
+                    <span className="legend-dot" style={{ backgroundColor: '#4caf50' }}></span>
+                    <span>&lt;80%</span>
+                    <span className="legend-dot" style={{ backgroundColor: '#ff9800' }}></span>
+                    <span>80-90%</span>
+                    <span className="legend-dot" style={{ backgroundColor: '#ff5722' }}></span>
+                    <span>90-95%</span>
+                    <span className="legend-dot" style={{ backgroundColor: '#f44336' }}></span>
+                    <span>≥95%</span>
+                  </div>
+                </div>
+              )}
               <div className="memory-bar-container">
                 <div className="memory-bar-label">
                   <span>Usage</span>
@@ -537,6 +622,80 @@ export const SystemMemoryPanel: React.FC<SystemMemoryPanelProps> = ({ visible, o
 
         .system-memory-panel .refresh-button:hover {
           background: var(--bg-secondary);
+        }
+
+        /* OOM Kill Counter */
+        .system-memory-panel .oom-kill-counter {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 12px;
+          background: rgba(211, 47, 47, 0.1);
+          border: 1px solid rgba(211, 47, 47, 0.3);
+          border-radius: 6px;
+          margin-bottom: 12px;
+          color: #d32f2f;
+          font-weight: 600;
+          font-size: 13px;
+        }
+
+        .system-memory-panel .oom-kill-icon {
+          font-size: 18px;
+        }
+
+        .system-memory-panel .oom-kill-text {
+          flex: 1;
+        }
+
+        /* Memory Sparkline */
+        .system-memory-panel .memory-sparkline-container {
+          margin-bottom: 12px;
+          padding: 12px;
+          background: var(--bg-secondary);
+          border-radius: 6px;
+        }
+
+        .system-memory-panel .sparkline-label {
+          font-size: 12px;
+          color: var(--text-secondary);
+          margin-bottom: 8px;
+          display: block;
+        }
+
+        .system-memory-panel .memory-sparkline {
+          display: flex;
+          align-items: flex-end;
+          gap: 2px;
+          height: 60px;
+          margin-bottom: 8px;
+        }
+
+        .system-memory-panel .sparkline-bar {
+          flex: 1;
+          min-width: 2px;
+          max-width: 12px;
+          border-radius: 2px 2px 0 0;
+          transition: height 0.3s ease, background-color 0.3s ease;
+          cursor: crosshair;
+        }
+
+        .system-memory-panel .sparkline-bar:hover {
+          opacity: 0.8;
+        }
+
+        .system-memory-panel .sparkline-legend {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 10px;
+          color: var(--text-secondary);
+          flex-wrap: wrap;
+        }
+
+        .system-memory-panel .legend-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
         }
       `}</style>
     </div>

@@ -24,7 +24,7 @@ import FleetSummaryBar from './components/FleetSummaryBar';
 import HistoricalSessionsPanel from './components/HistoricalSessionsPanel';
 import WorkerAnalyticsPanel from './components/WorkerAnalyticsPanel';
 import CommandPalette from './components/CommandPalette';
-import SystemMemoryPanel from './components/SystemMemoryPanel';
+import { SystemMemoryPanel } from './components/SystemMemoryPanel';
 import { Agentation } from 'agentation';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
@@ -554,6 +554,8 @@ const App: React.FC = () => {
       setShowHistoricalSessions(true);
     } else if (action === 'show:worker-analytics') {
       setShowWorkerAnalytics(true);
+    } else if (action === 'show:memory') {
+      setShowSystemMemory(true);
     } else if (action.startsWith('worker:')) {
       const workerId = action.slice('worker:'.length);
       setSelectedWorker(workerId);
@@ -1110,6 +1112,13 @@ const App: React.FC = () => {
               }}
             />
           </div>
+        )}
+
+        {showSystemMemory && (
+          <SystemMemoryPanel
+            visible={showSystemMemory}
+            onClose={() => setShowSystemMemory(false)}
+          />
         )}
       </main>
 
