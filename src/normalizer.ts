@@ -334,12 +334,21 @@ function normalizeLegacyLogEntry(parsed: unknown): NeedleEvent | null {
  *   }
  */
 
-/** Namespaced → canonical field mapping */
+/** Namespaced → canonical field mapping
+ *
+ * NEEDLE emits a mix of dot-separated and underscore attribute names.
+ * Both forms are supported here, with underscore forms taking priority
+ * (checked first in resolveAttr) since they match NEEDLE's actual telemetry.
+ */
 const OTLP_ATTR_ALIASES: ReadonlyMap<string, string> = new Map([
-  ['needle.worker.id',  'worker_id'],
-  ['needle.session.id', 'session_id'],
+  // Underscore forms (actual NEEDLE telemetry output)
+  ['needle.worker_id',  'worker_id'],
+  ['needle.session_id', 'session_id'],
   ['needle.sequence',   'sequence'],
   ['needle.bead.id',    'bead_id'],
+  // Dot-separated forms (for compatibility with some exporters)
+  ['needle.worker.id',  'worker_id'],
+  ['needle.session.id', 'session_id'],
 ]);
 
 /** All attribute keys that map to structural NeedleEvent fields */

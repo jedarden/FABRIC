@@ -407,23 +407,44 @@ describe('normalize – otlp-log source', () => {
     expect(result!.bead_id).toBe('bd-ns');
   });
 
-  it('prefers namespaced keys over non-namespaced when both present', () => {
+  it('resolves underscore attribute names (needle.worker_id etc.)', () => {
+    const record = {
+      timeUnixNano: '1772641054008000000',
+      attributes: [
+        { key: 'event_type', value: { stringValue: 'bead.claimed' } },
+        { key: 'needle.worker_id', value: { stringValue: 'tcb-alpha' } },
+        { key: 'needle.session_id', value: { stringValue: 'sess-ns' } },
+        { key: 'needle.sequence', value: { intValue: '42' } },
+        { key: 'needle.bead.id', value: { stringValue: 'bd-ns' } },
+      ],
+    };
+    const result = normalize(record, 'otlp-log');
+    expect(result).not.toBeNull();
+    expect(result!.worker_id).toBe('tcb-alpha');
+    expect(result!.session_id).toBe('sess-ns');
+    expect(result!.sequence).toBe(42);
+    expect(result!.bead_id).toBe('bd-ns');
+  });
+
+  it('prefers underscore namespaced keys over dot-separated when both present', () => {
     const record = {
       timeUnixNano: '1772641054008000000',
       attributes: [
         { key: 'event_type', value: { stringValue: 'test' } },
         { key: 'worker_id', value: { stringValue: 'plain-worker' } },
-        { key: 'needle.worker.id', value: { stringValue: 'ns-worker' } },
+        { key: 'needle.worker.id', value: { stringValue: 'dot-worker' } },
+        { key: 'needle.worker_id', value: { stringValue: 'underscore-worker' } },
         { key: 'session_id', value: { stringValue: 'plain-sess' } },
-        { key: 'needle.session.id', value: { stringValue: 'ns-sess' } },
+        { key: 'needle.session.id', value: { stringValue: 'dot-sess' } },
+        { key: 'needle.session_id', value: { stringValue: 'underscore-sess' } },
       ],
     };
     const result = normalize(record, 'otlp-log');
-    expect(result!.worker_id).toBe('ns-worker');
-    expect(result!.session_id).toBe('ns-sess');
+    expect(result!.worker_id).toBe('underscore-worker');
+    expect(result!.session_id).toBe('underscore-sess');
   });
 
-  it('falls back to non-namespaced keys when namespaced absent', () => {
+  it('prefers namespaced keys over non-namespaced when both present', () => {
     const record = {
       timeUnixNano: '1772641054008000000',
       attributes: [
