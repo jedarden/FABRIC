@@ -34,6 +34,29 @@ To re-apply after a reset: `./scripts/setup-tailscale-serve.sh`.
 - GET endpoints (dashboard UI, workers, events read) are open — read-only, no secret data
 - Tailscale provides network-level access control (tailnet membership required)
 
+## NEEDLE OTLP Wiring
+
+FABRIC listens on port **4318** for OTLP/HTTP telemetry (enabled via `--otlp-http :4318` in the systemd unit).
+
+To wire NEEDLE workers to push OTLP telemetry to the running FABRIC instance:
+
+```yaml
+# ~/.config/needle/config.yaml
+telemetry:
+  otlp_sink:
+    enabled: true   # pushes to http://localhost:4318 by default
+
+fabric:
+  enabled: true
+  endpoint: http://localhost:3000
+```
+
+**Key points:**
+- FABRIC's OTLP receiver runs on `http://localhost:4318` (OTLP/HTTP protocol)
+- NEEDLE uses the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var (defaults to `http://localhost:4318`) — no explicit endpoint key needed in config
+- With OTLP enabled, `/api/summary` workers_active updates in near real-time vs log-file polling
+- The `fabric.endpoint` setting pushes to FABRIC's native API (POST `/api/events` or heartbeat endpoint)
+
 ## Log Retention Policy
 
 FABRIC automatically manages NEEDLE log file retention to prevent unbounded growth.
