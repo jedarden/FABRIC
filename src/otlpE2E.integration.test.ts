@@ -409,6 +409,52 @@ describe('E2E OTLP Integration', () => {
     const health = await healthRes.json();
     expect(health.dedup_dropped).toBeGreaterThanOrEqual(initialDropped);
   });
+
+  it('Active workers count from /api/workers should be >= 1 after OTLP events', async () => {
+    // Create a new active worker
+    const workerId = 'e2e-active-count-' + Date.now();
+    const sessionId = 'sess-active-' + Date.now();
+
+    const stateTransitionPayload = {
+      resourceLogs: [{
+        scopeLogs: [{
+          logRecords: [{
+            timeUnixNano: String(Date.now() * 1_000_000),
+            attributes: [
+              { key: 'event_type', value: { stringValue: 'worker.state_transition' } },
+              { key: 'needle.worker.id', value: { stringValue: workerId } },
+              { key: 'needle.session.id', value: { stringValue: sessionId } },
+              { key: 'needle.sequence', value: { intValue: 1 } },
+              { key: 'from', value: { stringValue: 'BOOTING' } },
+              { key: 'to', value: { stringValue: 'WORKING' } },
+            ],
+          }],
+        }],
+      }],
+    };
+
+    const res = await fetch(`${otlpUrl}/v1/logs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(stateTransitionPayload),
+    });
+    expect(res.status).toBe(200);
+
+    // Wait for event processing
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Count active workers (non-STOPPED states) from /api/workers
+    const workersRes = await fetch(`${baseUrl}/api/workers`);
+    expect(workersRes.status).toBe(200);
+
+    const workers = await workersRes.json();
+    const activeWorkers = workers.filter((w: { needleState?: string }) =>
+      w.needleState && w.needleState !== 'STOPPED'
+    );
+
+    // Should have at least 1 active worker
+    expect(activeWorkers.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 /**
