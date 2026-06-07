@@ -1,0 +1,16 @@
+{
+  "bead_id": "bf-6bx7",
+  "agent": "claude-interactive",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "exit_code": 0,
+  "outcome": "success",
+  "duration_ms": 1227724,
+  "input_tokens": null,
+  "output_tokens": null,
+  "cost_usd": null,
+  "captured_at": "2026-05-15T21:12:01.399341649Z",
+  "trace_format": "claude_json",
+  "pruned": true,
+  "template_version": null
+}

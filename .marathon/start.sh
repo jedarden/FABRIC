@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# FABRIC Marathon Launcher — claude-code @ GLM-4.7 via apexalgo proxy
+#
+# Usage:
+#   ./.marathon/start.sh                   # session "fabric-marathon"
+#   ./.marathon/start.sh <session-name>    # custom session name
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+MARATHON_SKILL="/home/coding/claude-config/skills/marathon-coding"
+INSTRUCTION_FILE="$SCRIPT_DIR/instruction.md"
+LOG_DIR="$SCRIPT_DIR/logs"
+SESSION_NAME="${1:-fabric-marathon}"
+
+ZAI_BASE_URL="https://traefik-apexalgo-iad.tail1b1987.ts.net:8444"
+
+command -v tmux >/dev/null 2>&1 || { echo "Error: tmux not installed" >&2; exit 1; }
+[ -x "$MARATHON_SKILL/launcher.sh" ] || { echo "Error: marathon launcher missing: $MARATHON_SKILL/launcher.sh" >&2; exit 1; }
+[ -f "$INSTRUCTION_FILE" ] || { echo "Error: instruction file missing: $INSTRUCTION_FILE" >&2; exit 1; }
+
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    echo "Session '$SESSION_NAME' already exists."
+    echo "  Attach: tmux attach -t $SESSION_NAME"
+    echo "  Kill:   tmux kill-session -t $SESSION_NAME"
+    exit 1
+fi
+
+if pgrep -f "needle run --workspace $REPO_DIR" >/dev/null 2>&1; then
+    echo "Error: a NEEDLE worker is running against $REPO_DIR." >&2
+    echo "       Marathon + NEEDLE share one git worktree → contention." >&2
+    echo "       Stop the NEEDLE worker first." >&2
+    exit 1
+fi
+
+if ! curl -sk --max-time 8 -o /dev/null "$ZAI_BASE_URL"; then
+    echo "Error: proxy at $ZAI_BASE_URL is unreachable." >&2
+    echo "       Check Tailscale + the proxy on apexalgo-iad." >&2
+    exit 1
+fi
+
+mkdir -p "$LOG_DIR"
+
+LOOP_CMD="cd '$REPO_DIR' && \
+    unset CLAUDECODE && \
+    export NODE_TLS_REJECT_UNAUTHORIZED=0 && \
+    export ANTHROPIC_BASE_URL='$ZAI_BASE_URL' && \
+    export ANTHROPIC_AUTH_TOKEN='proxy-handles-auth' && \
+    export ANTHROPIC_MODEL='glm-4.7' && \
+    export ANTHROPIC_DEFAULT_OPUS_MODEL='glm-4.7' && \
+    export ANTHROPIC_DEFAULT_SONNET_MODEL='glm-4.7' && \
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL='glm-4.7' && \
+    export CLAUDE_CODE_SUBAGENT_MODEL='glm-4.7' && \
+    export API_TIMEOUT_MS='900000' && \
+    export DISABLE_AUTOUPDATER=1 && \
+    export DISABLE_TELEMETRY=1 && \
+    '$MARATHON_SKILL/launcher.sh' \
+        --prompt '$INSTRUCTION_FILE' \
+        --model glm-4.7 \
+        --delay 10 \
+        --log-dir '$LOG_DIR'"
+
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║          FABRIC Marathon — claude-code @ GLM-4.7            ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo "  Repo:        $REPO_DIR"
+echo "  Instruction: $INSTRUCTION_FILE"
+echo "  Session:     $SESSION_NAME"
+echo "  Model:       glm-4.7 (all tiers)"
+echo "  Proxy:       $ZAI_BASE_URL"
+echo "  Logs:        $LOG_DIR"
+echo ""
+
+tmux new-session -d -s "$SESSION_NAME" -c "$REPO_DIR" "$LOOP_CMD"
+
+echo "Marathon running in tmux session: $SESSION_NAME"
+echo "  Attach:  tmux attach -t $SESSION_NAME"
+echo "  Detach:  Ctrl+B, D (while attached)"
+echo "  Stop:    tmux kill-session -t $SESSION_NAME"
+echo "  Logs:    ls $LOG_DIR/"
