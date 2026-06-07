@@ -284,20 +284,35 @@ function detectLongRunning(
   if (runningTime > opts.longRunningThresholdMs) {
     const minutes = Math.floor(runningTime / 60000);
 
-    // Use worker.beadsCompleted (counts bead.completed and bead.released with release_success)
-    // instead of text-based message matching
+    // Use worker.beadsCompleted (counts only bead.completed events)
+    // worker.beadsReleased counts bead.released with release_success (includes timed-out/deferred)
     const completions = worker.beadsCompleted;
+    const released = worker.beadsReleased;
 
     if (completions < 2) {
+      // Build evidence string showing both completed and released counts
+      const evidence = [
+        `Beads successfully completed: ${worker.beadsCompleted}`,
+        `Beads released (including timed-out): ${released || 0}`,
+        `Total events in window: ${events.length}`,
+      ];
+
+      // If we have released beads but no completions, note that in the reason
+      let reason: string;
+      if (released > 0 && completions === 0) {
+        reason = `Running for ${minutes}m with ${released} processed but 0 successful completions (all timed out/deferred)`;
+      } else {
+        reason = `Running for ${minutes}m with only ${completions} successful completion(s)`;
+      }
+
       return {
         type: 'long_running',
-        reason: `Running for ${minutes}m with only ${completions} successful completion(s)`,
+        reason,
         severity: minutes >= 20 ? 'critical' : 'warning',
-        evidence: [
-          `Beads completed: ${worker.beadsCompleted}`,
-          `Total events in window: ${events.length}`,
-        ],
-        suggestion: 'Consider breaking task into smaller pieces',
+        evidence,
+        suggestion: released > 0 && completions === 0
+          ? 'Beads are timing out before completion — check task complexity or resource constraints'
+          : 'Consider breaking task into smaller pieces',
       };
     }
   }

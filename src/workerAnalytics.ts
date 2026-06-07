@@ -245,6 +245,7 @@ interface WorkerTrackingData {
 
   // Bead tracking
   beadsCompleted: number;
+  beadsReleased: number;
   beadStartTimes: Map<string, number>; // beadId -> start timestamp
   beadCompletionTimes: number[]; // completion durations in ms
 
@@ -673,6 +674,7 @@ export class WorkerAnalytics implements WorkerAnalyticsStore {
       lastSeen: timestamp,
       lastActivity: timestamp,
       beadsCompleted: 0,
+      beadsReleased: 0,
       beadStartTimes: new Map(),
       beadCompletionTimes: [],
       errorCount: 0,
