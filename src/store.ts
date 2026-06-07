@@ -622,7 +622,7 @@ export class InMemoryEventStore implements EventStore {
         id: event.worker,
         status: 'active',
         beadsCompleted: 0,
-        beadsReleased: 0,
+        beadsSucceeded: 0,
         firstSeen: event.ts,
         lastActivity: event.ts,
         activeFiles: [],
@@ -698,7 +698,7 @@ export class InMemoryEventStore implements EventStore {
         worker.status = 'idle';
         // bead.completed = true successful completion, not just release
         if (needleEvent === 'bead.completed' && event.bead) {
-          worker.beadsCompleted++;
+          worker.beadsSucceeded++;
         }
         if (needleEvent === 'bead.completed') {
           worker.activeFiles = [];
@@ -712,7 +712,7 @@ export class InMemoryEventStore implements EventStore {
           worker.status = 'idle';
           // bead.released with release_success includes timed-out/deferred beads
           if (event.bead) {
-            worker.beadsReleased++;
+            worker.beadsCompleted++;
           }
           worker.activeFiles = [];
           worker.activeDirectories = [];

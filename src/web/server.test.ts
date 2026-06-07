@@ -326,7 +326,8 @@ describe('Web Server API Endpoints', () => {
       const response = await fetchApi('/api/workers/w-test');
       const data = await response.json() as any;
 
-      expect(data.beadsCompleted).toBe(2);
+      // bead.completed now increments beadsSucceeded (successful completions only)
+      expect(data.beadsSucceeded).toBe(2);
     });
   });
 

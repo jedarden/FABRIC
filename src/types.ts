@@ -554,11 +554,11 @@ export interface WorkerInfo {
   /** Last event received */
   lastEvent?: LogEvent;
 
-  /** Total beads completed (bead.completed events only, excludes timed-out/deferred releases) */
+  /** Total beads processed (bead.released events with release_success, includes timed-out/deferred) */
   beadsCompleted: number;
 
-  /** Total beads released with release_success (includes timed-out/deferred beads) */
-  beadsReleased: number;
+  /** Total beads successfully completed (bead.completed events only, excludes timed-out/deferred releases) */
+  beadsSucceeded: number;
 
   /** First seen timestamp */
   firstSeen: number;

@@ -9,8 +9,8 @@ import { LogEvent, WorkerInfo } from '../../types.js';
 const makeWorker = (overrides: Partial<WorkerInfo> = {}): WorkerInfo => ({
   id: 'w-test',
   status: 'active',
-  beadsCompleted: 3,
-  beadsReleased: 0,
+  beadsCompleted: 0, // All processed (including timed-out/deferred)
+  beadsSucceeded: 3, // Successful completions only
   firstSeen: Date.now() - 5 * 60 * 1000,
   lastActivity: Date.now(),
   activeFiles: [],
@@ -210,8 +210,8 @@ describe('Stuck Detection', () => {
       const worker = makeWorker({
         firstSeen: Date.now() - 40 * 60 * 1000, // 40 minutes ago
         lastActivity: Date.now(), // Recent activity to avoid no_progress detection
-        beadsCompleted: 0, // No successful completions
-        beadsReleased: 100, // All beads timed out/deferred
+        beadsCompleted: 100, // All beads timed out/deferred (now counts processed)
+        beadsSucceeded: 0, // No successful completions
       });
       const events: LogEvent[] = [];
       // Create only 5 events to avoid triggering "events but no completions" in no_progress
@@ -224,18 +224,18 @@ describe('Stuck Detection', () => {
       expect(pattern).not.toBeNull();
       expect(pattern!.type).toBe('long_running');
       expect(pattern!.reason).toContain('40m'); // Running for 40 minutes
-      expect(pattern!.reason).toContain('100 processed'); // 100 beads released
+      expect(pattern!.reason).toContain('100 processed'); // 100 beads processed
       expect(pattern!.reason).toContain('0 successful completions'); // No successful completions
       expect(pattern!.reason).toContain('timed out/deferred'); // Clarifies why
       expect(pattern!.evidence).toContain('Beads successfully completed: 0');
-      expect(pattern!.evidence).toContain('Beads released (including timed-out): 100');
+      expect(pattern!.evidence).toContain('Beads processed (including timed-out/deferred): 100');
     });
 
     it('detects worker with only 1 successful completion after long runtime', () => {
       const worker = makeWorker({
         firstSeen: Date.now() - 30 * 60 * 1000, // 30 minutes ago
-        beadsCompleted: 1, // Only 1 successful completion
-        beadsReleased: 50, // 50 beads released (49 timed out)
+        beadsCompleted: 50, // 50 beads processed (including timed-out)
+        beadsSucceeded: 1, // Only 1 successful completion
       });
       const events: LogEvent[] = [];
       for (let i = 0; i < 30; i++) {
@@ -249,7 +249,7 @@ describe('Stuck Detection', () => {
       expect(pattern!.reason).toContain('30m');
       expect(pattern!.reason).toContain('only 1 successful completion');
       expect(pattern!.evidence).toContain('Beads successfully completed: 1');
-      expect(pattern!.evidence).toContain('Beads released (including timed-out): 50');
+      expect(pattern!.evidence).toContain('Beads processed (including timed-out/deferred): 50');
     });
   });
 
