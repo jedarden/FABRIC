@@ -24,6 +24,7 @@ import FleetSummaryBar from './components/FleetSummaryBar';
 import HistoricalSessionsPanel from './components/HistoricalSessionsPanel';
 import WorkerAnalyticsPanel from './components/WorkerAnalyticsPanel';
 import CommandPalette from './components/CommandPalette';
+import SystemMemoryPanel from './components/SystemMemoryPanel';
 import { Agentation } from 'agentation';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
@@ -265,6 +266,7 @@ const App: React.FC = () => {
   const [showProductivity, setShowProductivity] = useState(false);
   const [showHistoricalSessions, setShowHistoricalSessions] = useState(false);
   const [showWorkerAnalytics, setShowWorkerAnalytics] = useState(false);
+  const [showSystemMemory, setShowSystemMemory] = useState(false);
   const [budgetBannerDismissed, setBudgetBannerDismissed] = useState(false);
   const [hideTestWorkers, setHideTestWorkers] = useState(true);
 
@@ -862,6 +864,14 @@ const App: React.FC = () => {
           >
             <span className="worker-analytics-toggle-icon">&#x2694;</span>
             <span className="worker-analytics-toggle-label">Workers</span>
+          </button>
+          <button
+            className={`system-memory-toggle ${showSystemMemory ? 'active' : ''}`}
+            onClick={() => setShowSystemMemory(!showSystemMemory)}
+            title="System Memory — cgroup usage, swap, OOM risk"
+          >
+            <span className="system-memory-toggle-icon">💾</span>
+            <span className="system-memory-toggle-label">Memory</span>
           </button>
           <button
             className={`hide-test-workers-toggle ${hideTestWorkers ? 'active' : ''}`}

@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /** Default memory limit per worker (4 GB) */
-const DEFAULT_MEMORY_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
+export const DEFAULT_MEMORY_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
 
 /** Cache of worker IDs we've already applied limits to (avoid repeated work). */
 const limitedWorkers = new Set<string>();

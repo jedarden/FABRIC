@@ -1564,6 +1564,63 @@ export function createWebServer(options: WebServerOptions): WebServer {
       }
     });
 
+    // ============================================
+    // System Memory / Cgroup API Endpoints
+    // ============================================
+
+    // Get system memory status (cgroup + system memory)
+    app.get('/api/system/memory', async (_req: Request, res: Response) => {
+      const { getSystemMemoryStatus, formatBytes } = await import('../systemCgroupMonitor.js');
+      const status = getSystemMemoryStatus();
+
+      res.json({
+        ...status,
+        formatted: {
+          totalMemory: formatBytes(status.totalMemory),
+          availableMemory: formatBytes(status.availableMemory),
+          cgroupLimit: formatBytes(status.cgroupLimit),
+          cgroupUsage: formatBytes(status.cgroupUsage),
+          cgroupHigh: formatBytes(status.cgroupHigh),
+          cgroupSwapUsage: formatBytes(status.cgroupSwapUsage),
+          swapTotal: formatBytes(status.swapTotal),
+          swapFree: formatBytes(status.swapFree),
+          fabricRss: formatBytes(status.fabricRss),
+        },
+        summary: `${formatBytes(status.cgroupUsage)} / ${formatBytes(status.cgroupLimit)}${status.cgroupUsagePercent !== null ? ` (${status.cgroupUsagePercent.toFixed(1)}%)` : ''}`,
+      });
+    });
+
+    // Get human-readable memory summary
+    app.get('/api/system/memory/summary', async (_req: Request, res: Response) => {
+      const { getMemorySummary } = await import('../systemCgroupMonitor.js');
+      const summary = getMemorySummary();
+      res.json({ summary });
+    });
+
+    // ============================================
+    // OOM Alert API Endpoints
+    // ============================================
+
+    // Get current OOM risk and alerts
+    app.get('/api/alerts/oom', async (_req: Request, res: Response) => {
+      const { getSystemMemoryStatus } = await import('../systemCgroupMonitor.js');
+      const status = getSystemMemoryStatus();
+
+      const alert = {
+        risk: status.oomRisk,
+        underPressure: status.underPressure,
+        cgroupUsagePercent: status.cgroupUsagePercent,
+        cgroupUsage: status.cgroupUsage,
+        cgroupLimit: status.cgroupLimit,
+        message: status.oomRisk !== 'none'
+          ? `OOM risk: ${status.oomRisk.toUpperCase()} (${status.cgroupUsagePercent?.toFixed(1)}% of cgroup limit used)`
+          : 'Memory pressure normal',
+        timestamp: Date.now(),
+      };
+
+      res.json(alert);
+    });
+
     // Serve static frontend files
     const staticPath = join(__dirname, 'public');
     app.use(express.static(staticPath));

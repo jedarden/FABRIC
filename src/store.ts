@@ -63,6 +63,11 @@ import {
   getBeadConversationSession,
   extractConversationEvents,
 } from './conversationParser.js';
+import {
+  getWorkerMemoryUsage,
+  getWorkerMemoryLimit,
+  DEFAULT_MEMORY_LIMIT_BYTES,
+} from './workerMemoryLimiter.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -734,6 +739,15 @@ export class InMemoryEventStore implements EventStore {
       const hasBeadCollision = this.getWorkerBeadCollisions(worker.id).length > 0;
       const hasTaskCollision = this.getWorkerTaskCollisions(worker.id).length > 0;
       worker.hasCollision = hasFileCollision || hasBeadCollision || hasTaskCollision;
+    }
+
+    // Update memory stats (throttled — only every 200 events per worker to avoid excessive cgroup reads)
+    if (worker.eventCount % 200 === 0) {
+      const rssBytes = getWorkerMemoryUsage(worker.id);
+      const rssLimitBytes = getWorkerMemoryLimit(worker.id) ?? DEFAULT_MEMORY_LIMIT_BYTES;
+      worker.rssBytes = rssBytes ?? undefined;
+      worker.rssLimitBytes = rssLimitBytes;
+      worker.rssPercent = rssBytes && rssLimitBytes ? (rssBytes / rssLimitBytes) * 100 : undefined;
     }
   }
 

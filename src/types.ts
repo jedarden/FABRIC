@@ -589,6 +589,15 @@ export interface WorkerInfo {
 
   /** Human-readable reason the worker is stuck */
   stuckReason?: string;
+
+  /** Current RSS memory usage in bytes (from cgroup) */
+  rssBytes?: number;
+
+  /** Memory limit applied to this worker in bytes */
+  rssLimitBytes?: number;
+
+  /** RSS usage as percentage of limit (0-100) */
+  rssPercent?: number;
 }
 
 export interface EventFilter {
