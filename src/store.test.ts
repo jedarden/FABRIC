@@ -227,12 +227,13 @@ describe('InMemoryEventStore', () => {
       expect(worker?.status).toBe('idle');
     });
 
-    it('should increment beadsCompleted on bead.released with release_success', () => {
+    it('should increment beadsReleased on bead.released with release_success', () => {
       store.add(createEvent({ worker: 'w-test', msg: 'bead.released', reason: 'release_success', bead: 'bd-1' }));
       store.add(createEvent({ worker: 'w-test', msg: 'bead.released', reason: 'release_success', bead: 'bd-2' }));
 
       const worker = store.getWorker('w-test');
-      expect(worker?.beadsCompleted).toBe(2);
+      expect(worker?.beadsReleased).toBe(2);
+      expect(worker?.beadsCompleted).toBe(0); // beadsCompleted only increments on bead.completed
     });
 
     it('should clear activeBead and activeFiles on bead.released with release_success', () => {
