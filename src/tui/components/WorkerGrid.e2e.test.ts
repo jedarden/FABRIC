@@ -40,6 +40,8 @@ function createMockWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     id: 'w-test123',
     status: 'active',
     beadsCompleted: 5,
+    beadsSucceeded: 3,
+    beadsTimedOut: 2,
     firstSeen: Date.now() - 60000,
     lastActivity: Date.now(),
     activeFiles: [],

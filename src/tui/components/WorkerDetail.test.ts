@@ -70,6 +70,8 @@ function createMockWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     id: 'w-test123',
     status: 'active',
     beadsCompleted: 5,
+    beadsSucceeded: 3,
+    beadsTimedOut: 2,
     firstSeen: Date.now() - 60000,
     lastActivity: Date.now(),
     activeFiles: ['/src/test.ts'],
@@ -277,7 +279,11 @@ describe('WorkerDetail', () => {
     });
 
     it('should include beads completed count', () => {
-      const worker = createMockWorker({ beadsCompleted: 42 });
+      const worker = createMockWorker({
+        beadsCompleted: 42,
+        beadsSucceeded: 3,
+        beadsTimedOut: 2,
+      });
       workerDetail.setWorker(worker);
 
       const content = mockBoxInstance.setContent.mock.calls[0][0];

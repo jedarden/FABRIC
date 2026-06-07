@@ -254,6 +254,8 @@ function createMockWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     id: 'w-test123',
     status: 'active',
     beadsCompleted: 5,
+    beadsSucceeded: 3,
+    beadsTimedOut: 2,
     firstSeen: Date.now() - 60000,
     lastActivity: Date.now(),
     activeFiles: [],
@@ -1017,9 +1019,9 @@ describe('TUI Regression Tests', () => {
 
     it('should render consistent worker grid content format', () => {
       const workers = [
-        createMockWorker({ id: 'w-active123', status: 'active', beadsCompleted: 10 }),
-        createMockWorker({ id: 'w-idle456', status: 'idle', beadsCompleted: 5 }),
-        createMockWorker({ id: 'w-error789', status: 'error', beadsCompleted: 2 }),
+        createMockWorker({ id: 'w-active123', status: 'active', beadsCompleted: 10, beadsSucceeded: 3, beadsTimedOut: 2 }),
+        createMockWorker({ id: 'w-idle456', status: 'idle', beadsCompleted: 5, beadsSucceeded: 2, beadsTimedOut: 1 }),
+        createMockWorker({ id: 'w-error789', status: 'error', beadsCompleted: 2, beadsSucceeded: 0, beadsTimedOut: 2 }),
       ];
 
       // Add events to create workers

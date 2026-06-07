@@ -42,6 +42,8 @@ function createMockWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
     id: 'w-test123',
     status: 'active',
     beadsCompleted: 5,
+    beadsSucceeded: 3,
+    beadsTimedOut: 2,
     firstSeen: Date.now() - 60000,
     lastActivity: Date.now(),
     activeFiles: [],
@@ -176,7 +178,11 @@ describe('E2E: WorkerDetail Panel', () => {
 
   describe('beads completed display', () => {
     it('should display beads completed count with green color', () => {
-      detail.setWorker(createMockWorker({ beadsCompleted: 42 }));
+      detail.setWorker(createMockWorker({
+        beadsCompleted: 42,
+        beadsSucceeded: 3,
+        beadsTimedOut: 2,
+      }));
 
       const content = getRenderedContent();
       expect(content).toContain('Beads Completed:');
@@ -184,7 +190,11 @@ describe('E2E: WorkerDetail Panel', () => {
     });
 
     it('should display zero beads completed', () => {
-      detail.setWorker(createMockWorker({ beadsCompleted: 0 }));
+      detail.setWorker(createMockWorker({
+        beadsCompleted: 0,
+        beadsSucceeded: 0,
+        beadsTimedOut: 0,
+      }));
 
       const content = getRenderedContent();
       expect(content).toContain('{green-fg}0{/}');
@@ -394,6 +404,8 @@ describe('E2E: WorkerDetail Panel', () => {
         id: 'w-claude-sonnet-alpha',
         status: 'active',
         beadsCompleted: 23,
+    beadsSucceeded: 3,
+    beadsTimedOut: 2,
         firstSeen: Date.now() - 5400000, // ~1.5h ago
         lastEvent: {
           ts: Date.now() - 5000,

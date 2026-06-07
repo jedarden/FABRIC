@@ -623,6 +623,7 @@ export class InMemoryEventStore implements EventStore {
         status: 'active',
         beadsCompleted: 0,
         beadsSucceeded: 0,
+        beadsTimedOut: 0,
         firstSeen: event.ts,
         lastActivity: event.ts,
         activeFiles: [],
@@ -713,6 +714,11 @@ export class InMemoryEventStore implements EventStore {
           // bead.released with release_success includes timed-out/deferred beads
           if (event.bead) {
             worker.beadsCompleted++;
+            // Track timed-out/deferred beads separately
+            const releaseOutcome = event['outcome'] as string | undefined;
+            if (releaseOutcome === 'TimedOut' || releaseOutcome === 'Deferred') {
+              worker.beadsTimedOut++;
+            }
           }
           worker.activeFiles = [];
           worker.activeDirectories = [];

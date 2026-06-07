@@ -296,6 +296,7 @@ function detectLongRunning(
       const evidence = [
         `Beads successfully completed: ${worker.beadsSucceeded}`,
         `Beads processed (including timed-out/deferred): ${completed || 0}`,
+        `Beads timed out or deferred: ${worker.beadsTimedOut || 0}`,
         `Total events in window: ${events.length}`,
       ];
 
@@ -303,6 +304,8 @@ function detectLongRunning(
       let reason: string;
       if (completed > 0 && succeeded === 0) {
         reason = `Running for ${minutes}m with ${completed} processed but 0 successful completions (all timed out/deferred)`;
+      } else if (completed > succeeded) {
+        reason = `Running for ${minutes}m with ${completed} processed but only ${succeeded} successful completion(s) (${worker.beadsTimedOut || 0} timed out/deferred)`;
       } else {
         reason = `Running for ${minutes}m with only ${succeeded} successful completion(s)`;
       }

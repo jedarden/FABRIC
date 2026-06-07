@@ -560,6 +560,9 @@ export interface WorkerInfo {
   /** Total beads successfully completed (bead.completed events only, excludes timed-out/deferred releases) */
   beadsSucceeded: number;
 
+  /** Total beads that timed out or were deferred (subset of beadsCompleted) */
+  beadsTimedOut: number;
+
   /** First seen timestamp */
   firstSeen: number;
 

@@ -11,6 +11,7 @@ const makeWorker = (overrides: Partial<WorkerInfo> = {}): WorkerInfo => ({
   status: 'active',
   beadsCompleted: 0, // All processed (including timed-out/deferred)
   beadsSucceeded: 3, // Successful completions only
+  beadsTimedOut: 0, // Timed out or deferred
   firstSeen: Date.now() - 5 * 60 * 1000,
   lastActivity: Date.now(),
   activeFiles: [],
