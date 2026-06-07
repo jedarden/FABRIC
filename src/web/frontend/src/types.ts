@@ -64,6 +64,13 @@ export interface WorkerInfo {
   activeFiles?: string[];
   stuck?: boolean;
   stuckReason?: string;
+  // Memory fields from RSS sampling
+  rssKb?: number;
+  peakRssKb?: number;
+  rssLimitBytes?: number;
+  rssPercent?: number;
+  swapKb?: number;
+  pid?: number;
 }
 
 export interface FileCollision {

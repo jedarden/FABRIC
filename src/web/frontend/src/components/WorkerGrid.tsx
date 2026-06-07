@@ -1,5 +1,6 @@
 import React from 'react';
 import { WorkerInfo, NeedleState } from '../types';
+import WorkerMemoryBar from './WorkerMemoryBar';
 
 const NEEDLE_STATE_LABELS: Record<NeedleState, string> = {
   BOOTING: 'BOOTING',
@@ -175,6 +176,13 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
                 </span>
                 <span>{formatLastActivity(worker.lastActivity)}</span>
               </div>
+              <WorkerMemoryBar
+                rssKb={worker.rssKb}
+                peakRssKb={worker.peakRssKb}
+                rssLimitBytes={worker.rssLimitBytes}
+                rssPercent={worker.rssPercent}
+                swapKb={worker.swapKb}
+              />
               {worker.hasCollision && worker.activeFiles && worker.activeFiles.length > 0 && (
                 <div className="collision-warning">
                   <span style={{ fontSize: '0.7rem', color: '#ff9800' }}>
