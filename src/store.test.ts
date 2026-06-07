@@ -254,6 +254,51 @@ describe('InMemoryEventStore', () => {
       expect(worker?.beadsCompleted).toBe(0);
     });
 
+    it('should increment beadsTimedOut on bead.released with TimedOut outcome', () => {
+      store.add(createEvent({
+        worker: 'w-test',
+        msg: 'bead.released',
+        reason: 'release_success',
+        bead: 'bd-1',
+        outcome: 'TimedOut',
+      }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.beadsCompleted).toBe(1);
+      expect(worker?.beadsTimedOut).toBe(1);
+      expect(worker?.beadsSucceeded).toBe(0);
+    });
+
+    it('should increment beadsTimedOut on bead.released with Deferred outcome', () => {
+      store.add(createEvent({
+        worker: 'w-test',
+        msg: 'bead.released',
+        reason: 'release_success',
+        bead: 'bd-1',
+        outcome: 'Deferred',
+      }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.beadsCompleted).toBe(1);
+      expect(worker?.beadsTimedOut).toBe(1);
+      expect(worker?.beadsSucceeded).toBe(0);
+    });
+
+    it('should NOT increment beadsTimedOut on bead.released without TimedOut/Deferred outcome', () => {
+      store.add(createEvent({
+        worker: 'w-test',
+        msg: 'bead.released',
+        reason: 'release_success',
+        bead: 'bd-1',
+        outcome: 'Succeeded',
+      }));
+
+      const worker = store.getWorker('w-test');
+      expect(worker?.beadsCompleted).toBe(1);
+      expect(worker?.beadsTimedOut).toBe(0);
+      expect(worker?.beadsSucceeded).toBe(0); // beadsSucceeded only increments on bead.completed
+    });
+
     it('should set currentBead from bead.claim.succeeded event', () => {
       store.add(createEvent({ worker: 'w-test', msg: 'bead.claim.succeeded', bead: 'bd-abc123' }));
 
