@@ -24,6 +24,7 @@ import FleetSummaryBar from './components/FleetSummaryBar';
 import HistoricalSessionsPanel from './components/HistoricalSessionsPanel';
 import WorkerAnalyticsPanel from './components/WorkerAnalyticsPanel';
 import CommandPalette from './components/CommandPalette';
+import { Agentation } from 'agentation';
 import { extractReplayFromUrl, ReplayExport } from './utils/replayExport';
 import { FocusPresetManager, createWebPresetManager, FocusPreset } from './utils/focusPresets';
 
@@ -1108,6 +1109,12 @@ const App: React.FC = () => {
         onCommand={handleCommandExecute}
         workers={workers}
         events={events}
+      />
+
+      <Agentation
+        onSubmit={(markdown) => {
+          navigator.clipboard.writeText(markdown).catch(console.error);
+        }}
       />
     </div>
   );
