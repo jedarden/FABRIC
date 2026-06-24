@@ -4,6 +4,8 @@
 
 A live display for NEEDLE worker activity, available as TUI or web dashboard.
 
+NEEDLE is an AI agent fleet orchestrator that dispatches parallel Claude Code workers to complete software tasks. FABRIC is NEEDLE's observability layer.
+
 ## Purpose
 
 FABRIC tails NEEDLE's logging output and renders it in real-time. It answers:
@@ -32,6 +34,20 @@ Live browser dashboard at `localhost:3000`:
 - Real-time activity feed
 - Timeline visualization
 - WebSocket-powered updates
+
+## Installation
+
+```bash
+# Install from npm
+npm install -g @needle/fabric
+
+# Or clone and build from source
+git clone https://github.com/jedarden/FABRIC
+cd FABRIC
+npm install
+npm run build
+npm run build:web
+```
 
 ## Quick Start
 
@@ -193,7 +209,7 @@ fabric logs --worker tcb-a --otlp-grpc :4317
 
 | Receiver flag | Default port | Protocol |
 |---------------|-------------|----------|
-| `--otlp-grpc` | `4317` | OTLP/gRPC ( tonic) |
+| `--otlp-grpc` | `4317` | OTLP/gRPC (tonic) |
 | `--otlp-http` | `4318` | OTLP/HTTP (protobuf + JSON) |
 
 Everything stays on your machine — FABRIC is a local collector, not a third-party service. Telemetry is read-only: FABRIC ingests spans/logs/metrics for display but never writes back to NEEDLE or modifies worker state.
@@ -232,14 +248,14 @@ The pruner emits `mend.logs_pruned` events to `~/.needle/logs/fabric-mend.jsonl`
 
 ## Remote Access via Tailscale
 
-The web dashboard is served over HTTPS on the Tailscale tailnet (not the public internet):
+The web dashboard can be served over HTTPS on your Tailscale tailnet (not the public internet):
 
 ```
-https://hetzner-ex44.tail1b1987.ts.net/
+https://<your-machine>.tail<your-tailnet>.ts.net/
 ```
 
 **Access model:**
-- Available only to devices joined to the `tail1b1987.ts.net` tailnet (laptop, phone, etc.)
+- Available only to devices joined to your tailnet (laptop, phone, etc.)
 - TLS provided by Tailscale's managed certificates — no self-signed cert warnings
 - GET requests (dashboard, workers list, event feed) are unauthenticated
 - POST requests (`/api/events`, `/api/events/batch`) require `Authorization: Bearer <FABRIC_AUTH_TOKEN>`
@@ -277,7 +293,7 @@ ss -tlnp | grep 4318
 | Component | Port/URL | Purpose |
 |-----------|----------|---------|
 | Web dashboard (local) | `:3000` | Browser UI + REST API |
-| Web dashboard (remote) | `https://hetzner-ex44.tail1b1987.ts.net/` | Tailscale HTTPS (tailnet only) |
+| Web dashboard (remote) | `https://<your-machine>.tail<your-tailnet>.ts.net/` | Tailscale HTTPS (tailnet only) |
 | OTLP/HTTP | `:4318` | NEEDLE metric ingestion |
 
 NEEDLE's `otlp_metric_sink` is enabled in `~/.needle/config.yaml`, pushing aggregated token/cost/bead metrics to `http://localhost:4318/v1/metrics`. FABRIC deduplicates these against JSONL-tailed events and writes them to `~/.needle/fabric.db` with `metrics_source='otlp-metric'`.
