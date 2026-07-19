@@ -1,16 +1,16 @@
 {
-  "bead_id": "bd-3rf",
+  "bead_id": "bf-vjrc",
   "agent": "claude-code-glm-4.7",
   "provider": "zai",
   "model": "glm-4.7",
-  "exit_code": 1,
-  "outcome": "failure",
-  "duration_ms": 316493,
+  "exit_code": 0,
+  "outcome": "success",
+  "duration_ms": 66058,
   "input_tokens": null,
   "output_tokens": null,
   "cost_usd": null,
-  "captured_at": "2026-05-01T12:14:42.297048927Z",
+  "captured_at": "2026-06-07T15:25:00.306860957Z",
   "trace_format": "claude_json",
-  "pruned": false,
+  "pruned": true,
   "template_version": null
 }
