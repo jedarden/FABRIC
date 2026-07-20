@@ -1595,3 +1595,111 @@ FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detec
 
 **Status**: Phases 1–9 complete.
 **Last Updated**: 2026-05-26
+
+## ADR-1: 2026-07-20 — Centralize FABRIC as a Multi-Host OTLP Collector
+
+### Context
+
+FABRIC's stated purpose (README, `docs/plan.md` Overview) is to be the observability
+layer for *all* NEEDLE worker activity: "What is each worker doing right now? ...
+across all workers?" In practice, on this workspace's actual infrastructure, NEEDLE
+workers run on at least two independent hosts — this server (`ex44`, the primary
+Hetzner box) and the `lab` server (100.81.129.38) — per `CLAUDE.md`'s Rust
+build/NEEDLE notes ("NEEDLE workers on both servers inherit this behavior
+transparently via PATH") and this repo's own multi-host README section
+("Option 2: OTLP (recommended for multi-host or production)").
+
+FABRIC itself, however, is only deployed on one host (`lab`), and each host's NEEDLE
+install is wired independently via the config-based HTTP POST option
+(`fabric.enabled: true`, `endpoint: http://localhost:3000/api/events` in
+`~/.needle/config.yaml`) rather than the OTLP option the README already recommends
+for this exact situation. Confirmed live on 2026-07-20:
+
+- On `ex44` (this machine), `~/.needle/config.yaml` has `fabric.enabled: true` with
+  `endpoint: http://localhost:3000/api/events` — but nothing listens on `ex44:3000`
+  (`fabric` isn't even installed on this host: `which fabric` → not found; `ss -tlnp`
+  shows no listener on 3000/4317/4318). Every event POST from `ex44`'s NEEDLE workers
+  has been silently failing (2s timeout, non-fatal to NEEDLE) since this config was
+  written — `ex44`'s worker activity has never been visible in any FABRIC dashboard.
+- On `lab`, FABRIC is deployed and (nominally) watches `lab`'s own
+  `~/.needle/logs/` only. So even when `lab`'s instance is healthy, it only ever
+  shows half (or less, as more hosts are added) of the actual fleet.
+- Compounding this: `lab`'s `fabric-web.service` has itself been down since
+  2026-07-09 (11 days, confirmed via `systemctl --user status`), and something else
+  (the unrelated `vista` app, also listening on port 3000 on `lab`) has been silently
+  squatting the port that `tailscale serve` proxies to — so the tailnet URL in
+  FABRIC's own README currently serves VISTA's page, not FABRIC's, with no visible
+  error (HTTP 200 both for `/` and for `/api/health`, which VISTA also happens to
+  implement with a different, non-FABRIC response shape). This class of failure is
+  already tracked in `bf-4grhf` (dashboard down) and `bf-18ib2` (its sibling failure,
+  the `fabric-prune.service` tar-archiving job, has failed nightly for ~2 months and
+  the watched logs directory has grown to the point the whole disk is now 96% full,
+  20GB free of 444GB). Those two beads cover *fixing the current instance*; this ADR
+  is about the *topology* those fixes should land into.
+
+Put together: the single-host, per-host-config architecture means (a) FABRIC never
+had fleet-wide visibility in the first place — the `ex44` half of the fleet was
+always dark — and (b) because only one instance exists and nothing external verifies
+it, an outage of that one instance goes unnoticed for as long as 11 days. Fixing
+today's specific outages (bf-4grhf, bf-18ib2) without addressing the topology just
+restores a single point of failure that is already known to be silently blind to
+part of the fleet.
+
+### Decision
+
+Adopt the OTLP push model FABRIC's own README already documents as
+"recommended for multi-host or production" as the canonical wiring, instead of the
+per-host `localhost:3000` HTTP POST config:
+
+- Designate exactly one FABRIC instance (the `lab`-hosted one, reachable over
+  Tailscale) as the fleet's canonical collector.
+- Every NEEDLE host (starting with `ex44`) sets
+  `OTEL_EXPORTER_OTLP_ENDPOINT=http://<lab-tailscale-address>:4318` and
+  `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` (or the gRPC :4317 equivalent) instead
+  of relying on `fabric.enabled`/`endpoint` pointing at `localhost`. NEEDLE's `otlp`
+  feature already exists and needs no rebuild — this is a config change only.
+- FABRIC's own `NeedleEvent` schema and Prometheus metrics (`docs/schema.md`,
+  `docs/metrics.md`) gain a `host` label/field so events and metrics from different
+  machines remain distinguishable in one dashboard (workers on different hosts can
+  otherwise collide on the same worker-name conventions).
+- Because a single collector instance now carries the whole fleet's observability
+  instead of just one host's, its own liveness stops being a "nice to have" and
+  becomes load-bearing — this makes the existing outage beads (bf-4grhf, bf-18ib2)
+  higher-priority than they already are, and motivates adding an independent,
+  identity-verifying watchdog for that one instance (filed separately below rather
+  than folded into this ADR, to keep this decision scoped to topology).
+
+### Alternatives Considered
+
+1. **Fix `ex44`'s config to POST at `lab`'s Tailscale IP over HTTP instead of
+   localhost, keep the HTTP POST model.** Simplest one-line fix, but couples every
+   host's NEEDLE install to remembering and hand-editing an IP/hostname per machine,
+   has no batching, and is exactly the config style that already silently drifted
+   (nobody noticed `ex44` was pointed at `localhost` until this audit). Rejected as a
+   permanent fix, though it's a fine stopgap.
+2. **Run an independent `fabric-web` instance on every NEEDLE host.** Guarantees each
+   host's dashboard reflects that host's workers with no network dependency, but
+   directly contradicts FABRIC's purpose ("what is each worker doing *across all
+   workers*") — you'd need to check N separate dashboards to see the whole fleet, and
+   memory/disk/CPU overhead is paid N times over for a tool whose own resource
+   footprint is already under active investigation (bf-4grhf). Rejected.
+3. **Central OTLP collector (chosen).** One dashboard, one instance to keep healthy,
+   matches the multi-host guidance FABRIC's README already gives, no rebuild needed
+   on the NEEDLE side. Trade-off: the collector becomes a single point of failure for
+   fleet-wide visibility, which is why liveness verification for that one instance
+   becomes more important, not less, after this change.
+
+### Consequences
+
+- **Positive:** one dashboard shows the true state of the whole fleet (`ex44` +
+  `lab`, and any future host) instead of silently showing only whichever host
+  happens to be configured correctly; matches the architecture FABRIC's own docs
+  already recommend for this situation; no NEEDLE-side rebuild required.
+- **Negative:** the `lab`-hosted collector becomes load-bearing for observability
+  into `ex44` as well as `lab` — its uptime now matters fleet-wide, not just
+  locally, which raises the stakes on the existing outage/prune beads and on adding
+  external liveness verification (tracked as a separate bead below).
+- **Follow-up work required:** update `ex44`'s (and any future host's)
+  `~/.needle/config.yaml` or environment to point at the `lab` OTLP endpoint; add a
+  `host` label to `NeedleEvent`/Prometheus metrics so multi-host data doesn't
+  collide; both filed as beads referencing this ADR.
