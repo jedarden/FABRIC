@@ -430,11 +430,21 @@ function findCriticalPath(
   // Use dynamic programming to find longest path
   const componentIds = new Set(component.nodes.map(n => n.id));
   const memo = new Map<string, { length: number; path: string[] }>();
+  const visiting = new Set<string>(); // Track nodes on the recursion stack to detect cycles
 
   function longestPath(nodeId: string): { length: number; path: string[] } {
+    // Cycle detection: if this node is already being visited, return zero-length result
+    if (visiting.has(nodeId)) {
+      return { length: 0, path: [] };
+    }
+
+    // Check memo cache for previously computed result
     if (memo.has(nodeId)) {
       return memo.get(nodeId)!;
     }
+
+    // Mark this node as being visited
+    visiting.add(nodeId);
 
     const deps = adjacencyList.get(nodeId);
     let maxLength = 0;
@@ -457,6 +467,8 @@ function findCriticalPath(
       path: [nodeId, ...maxPath],
     };
 
+    // Remove from visiting set and cache the result
+    visiting.delete(nodeId);
     memo.set(nodeId, result);
     return result;
   }

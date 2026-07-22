@@ -320,9 +320,7 @@ describe('buildDependencyGraph', () => {
     expect(graph.totalNodes).toBe(2);
   });
 
-  // NOTE: Cycle detection works but findCriticalPath causes stack overflow with cycles
-  // This is a known implementation limitation - should skip critical path calculation for cyclic components
-  it.skip('should detect cycles', () => {
+  it('should detect cycles', () => {
     const beads = [
       createMockBead({
         id: 'bd-1',
@@ -1054,9 +1052,7 @@ describe('Edge cases', () => {
     expect(graph.totalNodes).toBe(1);
   });
 
-  // NOTE: Self-referential dependency causes stack overflow in longestPath function
-  // This is a known implementation limitation - cycles should be handled before critical path calculation
-  it.skip('should handle self-referential dependency', () => {
+  it('should handle self-referential dependency', () => {
     const beads = [
       createMockBead({
         id: 'bd-1',
