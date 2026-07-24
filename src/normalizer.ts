@@ -7,6 +7,7 @@
  * a uniform stream.
  */
 
+import * as os from 'os';
 import {
   LogEvent,
   LogLevel,
@@ -754,14 +755,15 @@ export function needleEventToLogEvent(ne: NeedleEvent): LogEvent {
  * Used for legacy JSONL sources and local log tailing.
  */
 function getLocalHostname(): string {
-  // Try to get hostname from environment or use 'localhost'
+  // Prefer environment variables if set (container/pod context)
   if (typeof process !== 'undefined' && process.env.HOSTNAME) {
     return process.env.HOSTNAME;
   }
   if (typeof process !== 'undefined' && process.env.HOST) {
     return process.env.HOST;
   }
-  return 'localhost';
+  // Use system hostname as default
+  return os.hostname();
 }
 
 function isValidLogLevel(level: unknown): level is LogLevel {
