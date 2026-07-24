@@ -687,7 +687,7 @@ program
   .command('digest')
   .description('Generate session digest from log source (directory or file)')
   .option('-f, --file <path>', 'Log file to analyze (single-file mode)')
-  .option('--source <path>', 'Log source (file or directory)')
+  .option('-s, --source <path>', 'Log source (file or directory)', undefined)
   .option('-o, --output <path>', 'Output file (default: stdout)')
   .option('-w, --worker <ids>', 'Filter by worker IDs (comma-separated)')
   .option('--since <timestamp>', 'Start time (Unix timestamp in ms)')
