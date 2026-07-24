@@ -213,6 +213,10 @@ function parseCanonicalNeedleEvent(raw: unknown): NeedleEvent | null {
     event.bead_id = obj.bead_id;
   }
 
+  if (typeof obj.host === 'string') {
+    event.host = obj.host;
+  }
+
   return event;
 }
 
@@ -240,6 +244,7 @@ function normalizeNeedleLogEntry(entry: NeedleLogEntry): NeedleEvent {
     session_id: entry.session,
     sequence: -1, // not available in legacy NEEDLE JSONL
     data: { ...data },
+    host: getLocalHostname(), // Default to local hostname for legacy JSONL
   };
 
   // Preserve level in data for downstream conversion
@@ -291,6 +296,7 @@ function normalizeLegacyLogEntry(parsed: unknown): NeedleEvent | null {
       ...data,
       level: obj.level,
     },
+    host: getLocalHostname(), // Default to local hostname for legacy format
   };
 
   if (typeof obj.tool === 'string') ne.data.tool = obj.tool;
@@ -346,14 +352,18 @@ const OTLP_ATTR_ALIASES: ReadonlyMap<string, string> = new Map([
   ['needle.session_id', 'session_id'],
   ['needle.sequence',   'sequence'],
   ['needle.bead.id',    'bead_id'],
+  ['needle.host',       'host'],
   // Dot-separated forms (for compatibility with some exporters)
   ['needle.worker.id',  'worker_id'],
   ['needle.session.id', 'session_id'],
+  ['needle.host',       'host'],
+  // Standard OpenTelemetry resource attributes
+  ['service.instance.id', 'host'],
 ]);
 
 /** All attribute keys that map to structural NeedleEvent fields */
 const STRUCTURAL_ATTR_KEYS = new Set([
-  'event_type', 'worker_id', 'session_id', 'sequence', 'bead_id',
+  'event_type', 'worker_id', 'session_id', 'sequence', 'bead_id', 'host',
   ...OTLP_ATTR_ALIASES.keys(),
 ]);
 
@@ -391,11 +401,40 @@ function normalizeOtlpLog(raw: unknown): NeedleEvent | null {
     session_id: session_id ? String(session_id) : '',
     sequence: typeof sequence === 'number' ? sequence : -1,
     data,
+    host: extractHostFromAttributes(attrs),
   };
 
   if (bead_id) ne.bead_id = String(bead_id);
 
   return ne;
+}
+
+/**
+ * Extract host from resource attributes with proper priority.
+ *
+ * Priority order:
+ * 1. needle.host (custom NEEDLE attribute - highest priority)
+ * 2. service.instance.id (standard OpenTelemetry attribute - fallback)
+ * 3. getLocalHostname() (last resort)
+ *
+ * @param attrs - OTLP attributes map from resource or record
+ * @returns Host identifier string
+ */
+export function extractHostFromAttributes(attrs: Map<string, unknown>): string {
+  // First check for custom needle.host attribute
+  const needleHost = attrs.get('needle.host');
+  if (typeof needleHost === 'string' && needleHost) {
+    return needleHost;
+  }
+
+  // Fallback to standard OpenTelemetry service.instance.id
+  const serviceInstanceId = attrs.get('service.instance.id');
+  if (typeof serviceInstanceId === 'string' && serviceInstanceId) {
+    return serviceInstanceId;
+  }
+
+  // Final fallback to local hostname
+  return getLocalHostname();
 }
 
 /** Resolve an attribute by trying the namespaced alias first, then the plain key. */
@@ -514,6 +553,7 @@ function normalizeOtlpSpanStart(raw: unknown): NeedleEvent | null {
     session_id: session_id ? String(session_id) : '',
     sequence: typeof sequence === 'number' ? sequence : -1,
     data,
+    host: extractHostFromAttributes(attrs),
   };
 
   if (bead_id) ne.bead_id = String(bead_id);
@@ -597,6 +637,7 @@ function normalizeOtlpSpanEnd(raw: unknown): NeedleEvent | null {
     session_id: session_id ? String(session_id) : '',
     sequence: typeof sequence === 'number' ? sequence : -1,
     data,
+    host: extractHostFromAttributes(attrs),
   };
 
   if (bead_id) ne.bead_id = String(bead_id);
@@ -650,6 +691,7 @@ function normalizeOtlpMetric(raw: unknown): NeedleEvent | null {
     session_id: session_id ? String(session_id) : '',
     sequence: -1,
     data,
+    host: extractHostFromAttributes(attrs),
   };
 
   if (bead_id) ne.bead_id = String(bead_id);
@@ -678,6 +720,7 @@ export function needleEventToLogEvent(ne: NeedleEvent): LogEvent {
 
   if (ne.session_id) event.session = ne.session_id;
   if (ne.bead_id !== undefined) event.bead = ne.bead_id;
+  if (ne.host !== undefined) event.host = ne.host;
 
   const data = ne.data;
   if (typeof data.duration_ms === 'number') event.duration_ms = data.duration_ms;
@@ -705,6 +748,21 @@ export function needleEventToLogEvent(ne: NeedleEvent): LogEvent {
 }
 
 // ── Shared helpers ────────────────────────────────────────────
+
+/**
+ * Get the local hostname for events without an explicit host field.
+ * Used for legacy JSONL sources and local log tailing.
+ */
+function getLocalHostname(): string {
+  // Try to get hostname from environment or use 'localhost'
+  if (typeof process !== 'undefined' && process.env.HOSTNAME) {
+    return process.env.HOSTNAME;
+  }
+  if (typeof process !== 'undefined' && process.env.HOST) {
+    return process.env.HOST;
+  }
+  return 'localhost';
+}
 
 function isValidLogLevel(level: unknown): level is LogLevel {
   return level === 'debug' || level === 'info' || level === 'warn' || level === 'error';
