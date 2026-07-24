@@ -1,0 +1,197 @@
+# ex44 NEEDLE configuration for centralized FABRIC OTLP collection
+# This file should be placed at ~/.needle/config.yaml on ex44
+#
+# Per ADR-1, ex44 sends OTLP telemetry to the lab-hosted FABRIC collector
+# instead of using localhost HTTP POST (which has no listener on ex44)
+
+agent:
+  default: claude-code-glm-4.7
+  args: []
+  timeout: 1800
+  adapters_dir: /home/coding/.config/needle/adapters
+  routing: null
+
+worker:
+  max_workers: 15
+  launch_stagger_seconds: 3
+  idle_timeout: 900
+  idle_action: wait
+  max_claim_retries: 5
+  claim_race_lost_skip: 5
+  identifier_scheme: hostname_random
+  cpu_load_warn: 0.8
+  memory_free_warn_mb: 512
+  building_timeout: 600
+
+workspace:
+  default: /home/coding
+  home: /home/coding/.needle
+  labels: []
+
+strands:
+  pluck:
+    exclude_labels:
+    - deferred
+    - human
+    - blocked
+    split_after_failures: 3
+  mend:
+    stuck_threshold_secs: 300
+    lock_ttl_secs: 600
+    db_check_interval: 50
+    idle_timeout: 120
+  explore:
+    enabled: true
+    workspaces: []
+    workspace_root: /home/coding/
+  knot:
+    alert_destination: null
+    alert_cooldown_minutes: 60
+    exhaustion_threshold: 15
+  mitosis:
+    enabled: true
+    first_failure_only: false
+    force_failure_threshold: 2
+    repeat_interval: 0
+  weave:
+    enabled: true
+    max_beads_per_run: 5
+    cooldown_hours: 24
+    exclude_workspaces: []
+    doc_patterns:
+    - README*
+    - AGENTS.md
+    - docs/**/*
+    - '**/plan.md'
+    - '**/PLAN.md'
+    prompt_template: null
+  unravel:
+    enabled: true
+    max_beads_per_run: 5
+    max_alternatives_per_bead: 3
+    cooldown_hours: 168
+    prompt_template: null
+  pulse:
+    enabled: true
+    scanners: []
+    max_beads_per_run: 5
+    cooldown_hours: 48
+    severity_threshold: 3
+    prompt_template: null
+  reflect:
+    enabled: true
+    min_beads_since_last: 10
+    cooldown_hours: 24
+    max_learnings_per_run: 10
+    max_skills_per_run: 3
+    learning_retention_days: 90
+    max_learnings: 80
+    extraction_agent: null
+    extraction_prompt_template: null
+    max_extraction_per_run: 5
+    transcript_recency_days: 7
+    transcript_max_sessions: 50
+    drift_similarity_threshold: 0.6
+    drift_enabled: true
+    adr_enabled: true
+    claude_md_placement: true
+  splice:
+    enabled: true
+    stale_threshold_secs: 300
+    report_workspace: null
+    detect_live_loops: true
+    live_loop_scan_events: 200
+    claim_churn_threshold: 20
+    log_runaway_bytes: 10485760
+    live_loop_window_secs: 300
+  learning:
+    trace_retention_failed_days: 30
+    trace_retention_success_days: 7
+    max_learnings: 80
+    trace_sanitization:
+      enabled: true
+      custom_patterns: []
+    global_learnings_file: /home/coding/.config/needle/global-learnings.md
+    max_global_learnings: 40
+
+# KEY CHANGE: Enable OTLP push to lab FABRIC collector
+telemetry:
+  file_sink:
+    enabled: true
+    log_dir: null
+    retention_days: 30
+  stdout_sink:
+    enabled: false
+    format: normal
+    color: auto
+  hooks: []
+  otlp_sink:
+    enabled: true
+    endpoint: http://100.81.129.38:4318  # Lab FABRIC OTLP receiver
+    protocol: http/protobuf
+    timeout_secs: 10
+    compression: gzip
+    tls: none
+    headers: []
+    resource_attributes: []
+    metrics_interval_secs: 10
+    service_namespace: needle-fleet
+
+prompt:
+  context_files: []
+  instructions: null
+  templates: {}
+  variants: {}
+
+health:
+  heartbeat_interval_secs: 30
+  heartbeat_ttl_secs: 300
+  heartbeat_dir: null
+
+limits:
+  providers:
+    anthropic:
+      max_concurrent: 20
+      requests_per_minute: 60
+    zai:
+      max_concurrent: 40
+      requests_per_minute: null
+  models:
+    glm-4.7:
+      max_concurrent: 20
+    glm-5:
+      max_concurrent: 10
+    glm-5-turbo:
+      max_concurrent: 10
+    glm-5.1:
+      max_concurrent: 10
+
+pricing:
+  claude-sonnet-4-6:
+    input_per_million: 3.0
+    output_per_million: 15.0
+
+budget:
+  warn_usd: 0.0
+  stop_usd: 0.0
+
+verification: []
+gates: []
+
+self_modification:
+  enabled: false
+  canary_workspace: /home/coding/.needle/canary
+  auto_promote: false
+  canary_timeout: 300
+  hot_reload: true
+
+# DISABLED: Use OTLP instead of HTTP POST to localhost
+fabric:
+  enabled: false
+  # endpoint: http://localhost:3000  # No listener on ex44
+  # timeout: 2
+  # batching: false
+
+supervisor:
+  heartbeat_path: null
+  socket_path: null
