@@ -47,6 +47,7 @@ export class FilterPanel {
   private form: blessed.Widgets.FormElement<unknown>;
   private workerInput: blessed.Widgets.TextboxElement;
   private levelInput: blessed.Widgets.TextboxElement;
+  private hostInput: blessed.Widgets.TextboxElement;
   private searchInput: blessed.Widgets.TextboxElement;
   private sinceInput: blessed.Widgets.TextboxElement;
   private untilInput: blessed.Widgets.TextboxElement;
@@ -138,10 +139,36 @@ export class FilterPanel {
       },
     });
 
-    // Search filter
+    // Host filter
     blessed.text({
       parent: this.form,
       top: 6,
+      left: 0,
+      content: 'Host:',
+    });
+
+    this.hostInput = blessed.textbox({
+      parent: this.form,
+      name: 'host',
+      top: 7,
+      left: 0,
+      width: '100%',
+      height: 1,
+      inputOnFocus: true,
+      style: {
+        fg: colors.text,
+        bg: colors.inputBg,
+        focus: {
+          fg: colors.text,
+          bg: colors.inputFocusBg,
+        },
+      },
+    });
+
+    // Search filter
+    blessed.text({
+      parent: this.form,
+      top: 9,
       left: 0,
       content: 'Search:',
     });
@@ -149,7 +176,7 @@ export class FilterPanel {
     this.searchInput = blessed.textbox({
       parent: this.form,
       name: 'search',
-      top: 7,
+      top: 10,
       left: 0,
       width: '100%',
       height: 1,
@@ -167,7 +194,7 @@ export class FilterPanel {
     // Time range - Since
     blessed.text({
       parent: this.form,
-      top: 9,
+      top: 13,
       left: 0,
       content: 'Since (HH:MM or minutes ago):',
     });
@@ -175,7 +202,7 @@ export class FilterPanel {
     this.sinceInput = blessed.textbox({
       parent: this.form,
       name: 'since',
-      top: 10,
+      top: 14,
       left: 0,
       width: '100%',
       height: 1,
@@ -193,7 +220,7 @@ export class FilterPanel {
     // Time range - Until
     blessed.text({
       parent: this.form,
-      top: 12,
+      top: 16,
       left: 0,
       content: 'Until (HH:MM or minutes ago):',
     });
@@ -201,7 +228,7 @@ export class FilterPanel {
     this.untilInput = blessed.textbox({
       parent: this.form,
       name: 'until',
-      top: 13,
+      top: 17,
       left: 0,
       width: '100%',
       height: 1,
@@ -253,6 +280,7 @@ export class FilterPanel {
     // Apply filter on submit (Enter key in any input)
     this.workerInput.on('submit', () => this.applyFilter());
     this.levelInput.on('submit', () => this.applyFilter());
+    this.hostInput.on('submit', () => this.applyFilter());
     this.searchInput.on('submit', () => this.applyFilter());
     this.sinceInput.on('submit', () => this.applyFilter());
     this.untilInput.on('submit', () => this.applyFilter());
@@ -313,6 +341,7 @@ export class FilterPanel {
   private applyFilter(): void {
     const workerValue = this.workerInput.getValue().trim();
     const levelValue = this.levelInput.getValue().trim();
+    const hostValue = this.hostInput.getValue().trim();
     const searchValue = this.searchInput.getValue().trim();
     const sinceValue = this.sinceInput.getValue().trim();
     const untilValue = this.untilInput.getValue().trim();
@@ -320,6 +349,7 @@ export class FilterPanel {
     this.filter = {
       workerId: workerValue || undefined,
       level: levelValue || undefined,
+      host: hostValue || undefined,
       search: searchValue || undefined,
       since: this.parseTimeInput(sinceValue),
       until: this.parseTimeInput(untilValue),
@@ -339,6 +369,7 @@ export class FilterPanel {
     this.filter = {};
     this.workerInput.setValue('');
     this.levelInput.setValue('');
+    this.hostInput.setValue('');
     this.searchInput.setValue('');
     this.sinceInput.setValue('');
     this.untilInput.setValue('');
@@ -373,6 +404,7 @@ export class FilterPanel {
       const state = {
         workerId: this.workerInput.getValue(),
         level: this.levelInput.getValue(),
+        host: this.hostInput.getValue(),
         search: this.searchInput.getValue(),
         since: this.sinceInput.getValue(),
         until: this.untilInput.getValue(),
@@ -394,6 +426,7 @@ export class FilterPanel {
 
         if (state.workerId) this.workerInput.setValue(state.workerId);
         if (state.level) this.levelInput.setValue(state.level);
+        if (state.host) this.hostInput.setValue(state.host);
         if (state.search) this.searchInput.setValue(state.search);
         if (state.since) this.sinceInput.setValue(state.since);
         if (state.until) this.untilInput.setValue(state.until);
@@ -411,6 +444,7 @@ export class FilterPanel {
 
     this.workerInput.setValue(filter.workerId || '');
     this.levelInput.setValue(filter.level || '');
+    this.hostInput.setValue(filter.host || '');
     this.searchInput.setValue(filter.search || '');
     // Note: For time inputs, we'd need to convert back to display format
     // For now, leaving them empty when set programmatically

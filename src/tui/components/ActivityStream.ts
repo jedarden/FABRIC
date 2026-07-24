@@ -49,6 +49,9 @@ export interface ActivityFilter {
 
   /** Filter by file pattern (glob-style) */
   filePattern?: string;
+
+  /** Filter by host */
+  host?: string;
 }
 
 /**
@@ -110,6 +113,7 @@ export class ActivityStream {
     const time = new Date(event.ts).toLocaleTimeString();
     const levelColor = getLevelColor(event.level as 'debug' | 'info' | 'warn' | 'error');
     const workerShort = event.worker.slice(0, 8);
+    const host = event.host ? `{magenta-fg}@${event.host.slice(0, 8)}{/} ` : '';
 
     let msg = event.msg;
     if (event.tool) {
@@ -131,7 +135,7 @@ export class ActivityStream {
     const dimPrefix = shouldDim ? '{gray-fg}' : '';
     const dimSuffix = shouldDim ? '{/}' : '';
 
-    return `${dimPrefix}{gray-fg}${time}{/} {bold}${workerShort}{/} {${levelColor}-fg}${event.level.toUpperCase()}{/} ${msg}${dimSuffix}`;
+    return `${dimPrefix}{gray-fg}${time}{/} {bold}${workerShort}{/} ${host}{${levelColor}-fg}${event.level.toUpperCase()}{/} ${msg}${dimSuffix}`;
   }
 
   /**
@@ -142,6 +146,9 @@ export class ActivityStream {
       return false;
     }
     if (this.filter.level && event.level !== this.filter.level) {
+      return false;
+    }
+    if (this.filter.host && event.host !== this.filter.host) {
       return false;
     }
     if (this.filter.since && event.ts < this.filter.since) {
