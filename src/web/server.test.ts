@@ -318,14 +318,27 @@ describe('Web Server API Endpoints', () => {
     });
 
     it('should include event count from store', async () => {
-      store.add(createEvent());
-      store.add(createEvent());
-      store.add(createEvent());
+      // Create events with host field
+      const event1 = createEvent({ host: 'test-host-1' });
+      const event2 = createEvent({ host: 'test-host-2' });
+      const event3 = createEvent({ host: 'test-host-1' });
+
+      // Add events to store AND record them in metrics
+      store.add(event1);
+      server.recordEvent(event1.host, event1.worker);
+
+      store.add(event2);
+      server.recordEvent(event2.host, event2.worker);
+
+      store.add(event3);
+      server.recordEvent(event3.host, event3.worker);
 
       const response = await fetchApi('/api/metrics');
       const text = await response.text();
 
-      expect(text).toContain('fabric_event_count 3');
+      // Event count should be emitted with host labels
+      expect(text).toMatch(/fabric_event_count\{host="test-host-1"\} 2/);
+      expect(text).toMatch(/fabric_event_count\{host="test-host-2"\} 1/);
     });
 
     it('should have valid Prometheus metric names', async () => {
@@ -353,6 +366,7 @@ describe('Web Server API Endpoints', () => {
         'fabric_ingest_rate_per_second',
         'fabric_websocket_clients',
         'fabric_tailer_files_watched',
+        'fabric_active_workers',
         'fabric_dedup_dropped_total',
         'fabric_process_resident_memory_bytes',
       ];
@@ -375,6 +389,7 @@ describe('Web Server API Endpoints', () => {
         'fabric_ingest_rate_per_second',
         'fabric_websocket_clients',
         'fabric_tailer_files_watched',
+        'fabric_active_workers',
         'fabric_dedup_dropped_total',
         'fabric_process_resident_memory_bytes',
       ];

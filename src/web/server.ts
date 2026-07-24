@@ -188,7 +188,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const otlpRouter = createOtlpHttpRouter({
         onEvent: (event: LogEvent) => {
           store.add(event);
-          metrics.recordEvent(event.host);
+          metrics.recordEvent(event.host, event.worker);
           broadcast(event);
         },
       });
@@ -613,7 +613,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
         // Store the event
         store.add(logEvent);
-        metrics.recordEvent(logEvent.host);
+        metrics.recordEvent(logEvent.host, logEvent.worker);
 
         // Broadcast to all connected WebSocket clients
         broadcast(logEvent);
@@ -682,7 +682,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
           // Store the event
           store.add(logEvent);
-          metrics.recordEvent();
+          metrics.recordEvent(logEvent.host, logEvent.worker);
           ingestedEvents.push(logEvent);
         }
 
@@ -2067,8 +2067,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
     }
   }
 
-  function recordEvent(): void {
-    metrics.recordEvent();
+  function recordEvent(host?: string, workerId?: string): void {
+    metrics.recordEvent(host, workerId);
   }
 
   function setTailerFilesWatched(count: number): void {

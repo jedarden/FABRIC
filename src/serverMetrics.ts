@@ -36,8 +36,10 @@ export class ServerMetrics {
   // Track events per host for multi-host aggregation
   private eventsPerHost: Map<string, number> = new Map();
   private eventTimestampsPerHost: Map<string, number[]> = new Map();
+  // Track active workers per host
+  private workersPerHost: Map<string, Set<string>> = new Map();
 
-  recordEvent(host?: string): void {
+  recordEvent(host?: string, workerId?: string): void {
     this._eventCount++;
     this.eventTimestamps.push(Date.now());
 
@@ -51,6 +53,14 @@ export class ServerMetrics {
       this.eventTimestampsPerHost.set(hostKey, []);
     }
     this.eventTimestampsPerHost.get(hostKey)!.push(Date.now());
+
+    // Track active workers per host
+    if (workerId) {
+      if (!this.workersPerHost.has(hostKey)) {
+        this.workersPerHost.set(hostKey, new Set());
+      }
+      this.workersPerHost.get(hostKey)!.add(workerId);
+    }
   }
 
   private getLocalHostname(): string {
@@ -114,6 +124,7 @@ export class ServerMetrics {
     this._logsDirBytes = 0;
     this.eventsPerHost.clear();
     this.eventTimestampsPerHost.clear();
+    this.workersPerHost.clear();
   }
 
   private ingestRate(): number {
@@ -183,19 +194,30 @@ export class ServerMetrics {
     metric('status', 'gauge', 'Server status (1=ok)', snap.status === 'ok' ? 1 : 0);
     metric('uptime_seconds', 'gauge', 'Server uptime in seconds', snap.uptime_sec);
     metric('info', 'gauge', 'Build info', 1, `version="${snap.version}"`);
-    metric('event_count', 'gauge', 'Total events in store', snap.event_count);
-    metric('ingest_rate_per_second', 'gauge', 'Events ingested per second (60s window)', snap.ingest_rate_per_sec);
     metric('websocket_clients', 'gauge', 'Connected WebSocket clients', snap.ws_clients);
-    metric('tailer_files_watched', 'gauge', 'Log files being watched', snap.tailer_files_watched);
     metric('dedup_dropped_total', 'counter', 'Total duplicate events dropped', snap.dedup_dropped);
     metric('process_resident_memory_bytes', 'gauge', 'Process RSS in bytes', snap.process_resident_memory_bytes);
 
     // Per-host metrics for multi-host aggregation
-    for (const [host, count] of this.eventsPerHost) {
+    const localHost = this.getLocalHostname();
+    const hostsToEmit = this.eventsPerHost.size > 0 ? Array.from(this.eventsPerHost.keys()) : [localHost];
+
+    for (const host of hostsToEmit) {
       const hostLabel = host ? `host="${host}"` : 'host="unknown"';
+      const count = this.eventsPerHost.get(host) || 0;
       const ingestRate = this.ingestRateForHost(host);
       metric('event_count', 'gauge', 'Total events in store by host', count, hostLabel);
       metric('ingest_rate_per_second', 'gauge', 'Events ingested per second by host (60s window)', ingestRate, hostLabel);
+
+      // Active workers per host
+      const workers = this.workersPerHost.get(host);
+      const workerCount = workers ? workers.size : 0;
+      metric('active_workers', 'gauge', 'Active workers by host', workerCount, hostLabel);
+
+      // Tailer files watched (only for local host)
+      if (host === localHost) {
+        metric('tailer_files_watched', 'gauge', 'Log files being watched by host', snap.tailer_files_watched, hostLabel);
+      }
     }
 
     // Log retention metrics
