@@ -11,6 +11,20 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createWebServer } from './web/server.js';
 import { InMemoryEventStore } from './store.js';
 import { EventDeduplicator } from './normalizer.js';
+import type { AddressInfo } from 'node:net';
+
+// API response types
+interface Worker {
+  id: string;
+  needleState: string;
+  status: string;
+  [key: string]: unknown;
+}
+
+interface HealthResponse {
+  dedup_dropped: number;
+  [key: string]: unknown;
+}
 
 describe('E2E OTLP Integration', () => {
   let server: ReturnType<typeof createWebServer>;
@@ -124,21 +138,21 @@ describe('E2E OTLP Integration', () => {
     const workersRes = await fetch(`${baseUrl}/api/workers`);
     expect(workersRes.status).toBe(200);
 
-    const workers = await workersRes.json();
+    const workers = await workersRes.json() as Worker[];
     expect(workers).toBeInstanceOf(Array);
     expect(workers.length).toBeGreaterThan(0);
 
     // Find our test worker
-    const testWorker = workers.find((w: { id: string }) => w.id === testWorkerId);
+    const testWorker = workers.find((w: Worker) => w.id === testWorkerId);
     expect(testWorker).toBeDefined();
-    expect(testWorker.id).toBe(testWorkerId);
+    expect(testWorker!.id).toBe(testWorkerId);
 
     // Worker should have a non-STOPPED needleState (SELECTING for active worker)
-    expect(testWorker.needleState).toBeDefined();
-    expect(testWorker.needleState).not.toBe('STOPPED');
+    expect(testWorker!.needleState).toBeDefined();
+    expect(testWorker!.needleState).not.toBe('STOPPED');
 
     // Status should be 'active' for a worker with an active bead
-    expect(testWorker.status).toBe('active');
+    expect(testWorker!.status).toBe('active');
   });
 
   it('POST /v1/metrics with worker_id attributes updates worker state', async () => {
@@ -183,12 +197,12 @@ describe('E2E OTLP Integration', () => {
     const workersRes = await fetch(`${baseUrl}/api/workers`);
     expect(workersRes.status).toBe(200);
 
-    const workers = await workersRes.json();
-    const testWorker = workers.find((w: { id: string }) => w.id === testWorkerId);
+    const workers = await workersRes.json() as Worker[];
+    const testWorker = workers.find((w: Worker) => w.id === testWorkerId);
 
     expect(testWorker).toBeDefined();
-    expect(testWorker.needleState).toBeDefined();
-    expect(testWorker.needleState).not.toBe('STOPPED');
+    expect(testWorker!.needleState).toBeDefined();
+    expect(testWorker!.needleState).not.toBe('STOPPED');
   });
 
   it('POST /v1/logs with worker.started event creates active worker', async () => {
@@ -256,13 +270,13 @@ describe('E2E OTLP Integration', () => {
     const workersRes = await fetch(`${baseUrl}/api/workers`);
     expect(workersRes.status).toBe(200);
 
-    const workers = await workersRes.json();
-    const newWorker = workers.find((w: { id: string }) => w.id === newWorkerId);
+    const workers = await workersRes.json() as Worker[];
+    const newWorker = workers.find((w: Worker) => w.id === newWorkerId);
 
     expect(newWorker).toBeDefined();
-    expect(newWorker.id).toBe(newWorkerId);
-    expect(newWorker.needleState).toBeDefined();
-    expect(newWorker.needleState).not.toBe('STOPPED');
+    expect(newWorker!.id).toBe(newWorkerId);
+    expect(newWorker!.needleState).toBeDefined();
+    expect(newWorker!.needleState).not.toBe('STOPPED');
   });
 
   it('POST /v1/logs with worker.state_transition to STOPPED produces stopped worker', async () => {
@@ -301,11 +315,11 @@ describe('E2E OTLP Integration', () => {
     const workersRes1 = await fetch(`${baseUrl}/api/workers`);
     expect(workersRes1.status).toBe(200);
 
-    const workers1 = await workersRes1.json();
-    const workerBefore = workers1.find((w: { id: string }) => w.id === workerId);
+    const workers1 = await workersRes1.json() as Worker[];
+    const workerBefore = workers1.find((w: Worker) => w.id === workerId);
     expect(workerBefore).toBeDefined();
-    expect(workerBefore.needleState).toBe('SELECTING');
-    expect(workerBefore.needleState).not.toBe('STOPPED');
+    expect(workerBefore!.needleState).toBe('SELECTING');
+    expect(workerBefore!.needleState).not.toBe('STOPPED');
 
     // Now send a state transition to STOPPED
     const stoppedPayload = {
@@ -341,19 +355,19 @@ describe('E2E OTLP Integration', () => {
     const workersRes2 = await fetch(`${baseUrl}/api/workers`);
     expect(workersRes2.status).toBe(200);
 
-    const workers2 = await workersRes2.json();
-    const stoppedWorker = workers2.find((w: { id: string }) => w.id === workerId);
+    const workers2 = await workersRes2.json() as Worker[];
+    const stoppedWorker = workers2.find((w: Worker) => w.id === workerId);
 
     expect(stoppedWorker).toBeDefined();
-    expect(stoppedWorker.needleState).toBe('STOPPED');
-    expect(stoppedWorker.status).toBe('idle'); // STOPPED maps to idle
+    expect(stoppedWorker!.needleState).toBe('STOPPED');
+    expect(stoppedWorker!.status).toBe('idle'); // STOPPED maps to idle
   });
 
   it('GET /api/health returns dedup_dropped when deduplicator is active', async () => {
     const healthRes = await fetch(`${baseUrl}/api/health`);
     expect(healthRes.status).toBe(200);
 
-    const health = await healthRes.json();
+    const health = await healthRes.json() as HealthResponse;
     expect(health).toHaveProperty('dedup_dropped');
     expect(typeof health.dedup_dropped).toBe('number');
   });
@@ -406,7 +420,7 @@ describe('E2E OTLP Integration', () => {
     const healthRes = await fetch(`${baseUrl}/api/health`);
     expect(healthRes.status).toBe(200);
 
-    const health = await healthRes.json();
+    const health = await healthRes.json() as HealthResponse;
     expect(health.dedup_dropped).toBeGreaterThanOrEqual(initialDropped);
   });
 
@@ -447,8 +461,8 @@ describe('E2E OTLP Integration', () => {
     const workersRes = await fetch(`${baseUrl}/api/workers`);
     expect(workersRes.status).toBe(200);
 
-    const workers = await workersRes.json();
-    const activeWorkers = workers.filter((w: { needleState?: string }) =>
+    const workers = await workersRes.json() as Worker[];
+    const activeWorkers = workers.filter((w: Worker) =>
       w.needleState && w.needleState !== 'STOPPED'
     );
 
@@ -468,7 +482,7 @@ async function getFreePort(): Promise<number> {
     server.unref();
     server.on('error', reject);
     server.listen(0, () => {
-      const port = (server.address() as net.AddressInfo).port;
+      const port = (server.address() as AddressInfo).port;
       server.close(() => resolve(port));
     });
   });

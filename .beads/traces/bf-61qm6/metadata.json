@@ -5,11 +5,11 @@
   "model": null,
   "exit_code": 124,
   "outcome": "timeout",
-  "duration_ms": 1001,
+  "duration_ms": 1002,
   "input_tokens": null,
   "output_tokens": null,
   "cost_usd": null,
-  "captured_at": "2026-07-16T02:03:33.992248509Z",
+  "captured_at": "2026-07-20T14:12:56.926782563Z",
   "trace_format": "raw_text",
   "pruned": false,
   "template_version": null
