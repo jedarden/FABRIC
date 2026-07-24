@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import blessed from 'blessed';
+import * as fs from 'fs';
 
 // Track all mock box instances
 const mockBoxes: any[] = [];
@@ -57,6 +58,24 @@ vi.mock('../utils/colors.js', () => ({
     dim: 'gray',
     muted: 'gray',
   },
+}));
+
+// Mock fs module
+vi.mock('fs', () => ({
+  default: {
+    existsSync: vi.fn(() => true),
+    statSync: vi.fn(() => ({
+      isFile: () => true,
+      size: 1024,
+    })),
+    readFileSync: vi.fn(() => 'file content'),
+  },
+  existsSync: vi.fn(() => true),
+  statSync: vi.fn(() => ({
+    isFile: () => true,
+    size: 1024,
+  })),
+  readFileSync: vi.fn(() => 'file content'),
 }));
 
 // Import after mocking
@@ -619,6 +638,26 @@ describe('FileContextPanel', () => {
       expect(mockBoxes[1]?.setContent).toHaveBeenCalled();
     });
 
+    it('should show actual file content when available', () => {
+      const event = createMockEvent({ path: '/src/test.ts' });
+
+      panel.setContextFromEvent(event);
+
+      const context = panel.getContext();
+      expect(context?.content).toBeDefined();
+      expect(context?.content).toBe('file content');
+    });
+
+    it('should show placeholder when file cannot be read', () => {
+      (fs.existsSync as Mock).mockReturnValue(false);
+
+      const event = createMockEvent({ path: '/nonexistent.ts' });
+      panel.setContextFromEvent(event);
+
+      const context = panel.getContext();
+      expect(context?.content).toBeUndefined();
+    });
+
     it('should include file path in header', () => {
       const event = createMockEvent({ path: '/src/component.ts' });
       panel.setContextFromEvent(event);
@@ -696,6 +735,137 @@ describe('FileContextPanel', () => {
         const event = createMockEvent({ path: `/test.${ext}` });
         expect(() => panel.setContextFromEvent(event)).not.toThrow();
       });
+    });
+  });
+
+  describe('file content reading', () => {
+    beforeEach(() => {
+      // Re-apply fs mocks for each test in this describe block
+      (fs.existsSync as Mock).mockReturnValue(true);
+      (fs.statSync as Mock).mockReturnValue({
+        isFile: () => true,
+        size: 1024,
+      });
+      (fs.readFileSync as Mock).mockReturnValue('file content');
+    });
+
+    it('should read file content when setting context from event', () => {
+      const event = createMockEvent({ path: '/src/test.ts' });
+
+      panel.setContextFromEvent(event);
+
+      expect(fs.existsSync).toHaveBeenCalledWith('/src/test.ts');
+      expect(fs.statSync).toHaveBeenCalledWith('/src/test.ts');
+
+      const context = panel.getContext();
+      expect(context?.content).toBe('file content');
+    });
+
+    it('should not read content for non-existent files', () => {
+      (fs.existsSync as Mock).mockReturnValue(false);
+
+      const event = createMockEvent({ path: '/nonexistent.ts' });
+      panel.setContextFromEvent(event);
+
+      const context = panel.getContext();
+      expect(context?.content).toBeUndefined();
+    });
+
+    it('should not read content for directories', () => {
+      (fs.statSync as Mock).mockReturnValue({
+        isFile: () => false,
+        size: 4096,
+      });
+
+      const event = createMockEvent({ path: '/src' });
+      panel.setContextFromEvent(event);
+
+      const context = panel.getContext();
+      expect(context?.content).toBeUndefined();
+    });
+
+    it('should truncate files larger than 1MB', () => {
+      (fs.statSync as Mock).mockReturnValue({
+        isFile: () => true,
+        size: 2 * 1024 * 1024, // 2MB
+      });
+
+      const event = createMockEvent({ path: '/large.ts' });
+      panel.setContextFromEvent(event);
+
+      const context = panel.getContext();
+      expect(context?.content).toBeUndefined();
+    });
+
+    it('should truncate files larger than 100KB with message', () => {
+      const largeContent = 'x'.repeat(150 * 1024); // 150KB
+      (fs.readFileSync as Mock).mockReturnValue(largeContent);
+      (fs.statSync as Mock).mockReturnValue({
+        isFile: () => true,
+        size: largeContent.length,
+      });
+
+      const event = createMockEvent({ path: '/large.ts' });
+      panel.setContextFromEvent(event);
+
+      const context = panel.getContext();
+      expect(context?.content).toBeDefined();
+      expect(context?.content?.length).toBeLessThan(largeContent.length);
+      expect(context?.content).toContain('... (file truncated)');
+    });
+
+    it('should handle read errors gracefully', () => {
+      (fs.existsSync as Mock).mockImplementation(() => {
+        throw new Error('Permission denied');
+      });
+
+      const event = createMockEvent({ path: '/restricted.ts' });
+      expect(() => panel.setContextFromEvent(event)).not.toThrow();
+
+      const context = panel.getContext();
+      expect(context?.content).toBeUndefined();
+    });
+
+    it('should refresh content on subsequent context updates', () => {
+      const event = createMockEvent({ path: '/test.ts' });
+
+      panel.setContextFromEvent(event);
+
+      // First read should call fs methods
+      expect(fs.existsSync).toHaveBeenCalled();
+      expect(fs.statSync).toHaveBeenCalled();
+      expect(fs.readFileSync).toHaveBeenCalled();
+
+      // Track call counts before second update
+      const existsSyncCalls = (fs.existsSync as Mock).mock.calls.length;
+      const statSyncCalls = (fs.statSync as Mock).mock.calls.length;
+      const readFileSyncCalls = (fs.readFileSync as Mock).mock.calls.length;
+
+      // Update context with same file (simulating new event - should refresh to show latest changes)
+      panel.setContextFromEvent({ ...event, ts: Date.now() + 1000 });
+
+      // New fs calls should be made to refresh the content and show latest changes
+      expect((fs.existsSync as Mock).mock.calls.length).toBeGreaterThan(existsSyncCalls);
+      expect((fs.statSync as Mock).mock.calls.length).toBeGreaterThan(statSyncCalls);
+      expect((fs.readFileSync as Mock).mock.calls.length).toBeGreaterThan(readFileSyncCalls);
+
+      const context = panel.getContext();
+      expect(context?.content).toBe('file content');
+    });
+
+    it('should handle UTF-8 encoding correctly', () => {
+      const utf8Content = 'Hello 世界 🌍';
+      (fs.readFileSync as Mock).mockReturnValue(utf8Content);
+      (fs.statSync as Mock).mockReturnValue({
+        isFile: () => true,
+        size: utf8Content.length,
+      });
+
+      const event = createMockEvent({ path: '/utf8.ts' });
+      panel.setContextFromEvent(event);
+
+      const context = panel.getContext();
+      expect(context?.content).toBe(utf8Content);
     });
   });
 });

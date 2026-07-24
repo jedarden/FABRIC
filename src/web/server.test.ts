@@ -91,6 +91,155 @@ describe('Web Server API Endpoints', () => {
     });
   });
 
+  describe('GET /api/file-content', () => {
+    let testFilePath: string;
+
+    beforeEach(() => {
+      // Create a temporary test file
+      testFilePath = `/tmp/test-file-${Date.now()}.txt`;
+      require('fs').writeFileSync(testFilePath, 'Test file content\nLine 2\nLine 3', 'utf-8');
+    });
+
+    afterEach(() => {
+      // Clean up test file
+      try {
+        require('fs').unlinkSync(testFilePath);
+      } catch {
+        // Ignore if file doesn't exist
+      }
+    });
+
+    it('should return file content successfully', async () => {
+      const response = await fetchApi(`/api/file-content?path=${encodeURIComponent(testFilePath)}`);
+
+      expect(response.status).toBe(200);
+
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.path).toBe(testFilePath);
+      expect(data.content).toBe('Test file content\nLine 2\nLine 3');
+      expect(data.truncated).toBe(false);
+      expect(data.size).toBeGreaterThan(0);
+    });
+
+    it('should return 400 when path parameter is missing', async () => {
+      const response = await fetchApi('/api/file-content');
+
+      expect(response.status).toBe(400);
+
+      const data = await response.json() as any;
+      expect(data.error).toBe('Missing required parameter: path');
+    });
+
+    it('should return 404 when file does not exist', async () => {
+      const response = await fetchApi('/api/file-content?path=/nonexistent/file.txt');
+
+      expect(response.status).toBe(404);
+
+      const data = await response.json() as any;
+      expect(data.error).toBe('File not found');
+      expect(data.path).toBe('/nonexistent/file.txt');
+    });
+
+    it('should return 400 when path is a directory', async () => {
+      const response = await fetchApi('/api/file-content?path=/tmp');
+
+      expect(response.status).toBe(400);
+
+      const data = await response.json() as any;
+      expect(data.error).toBe('Not a file');
+    });
+
+    it('should truncate large files to 100KB', async () => {
+      const fs = require('fs');
+      const largeFilePath = `/tmp/large-file-${Date.now()}.txt`;
+      const largeContent = 'x'.repeat(150 * 1024); // 150KB
+      fs.writeFileSync(largeFilePath, largeContent, 'utf-8');
+
+      try {
+        const response = await fetchApi(`/api/file-content?path=${encodeURIComponent(largeFilePath)}`);
+
+        expect(response.status).toBe(200);
+
+        const data = await response.json() as any;
+        expect(data.success).toBe(true);
+        expect(data.truncated).toBe(true);
+        expect(data.size).toBeLessThanOrEqual(100 * 1024);
+        expect(data.originalSize).toBe(largeContent.length);
+        expect(data.message).toContain('truncated');
+      } finally {
+        fs.unlinkSync(largeFilePath);
+      }
+    });
+
+    it('should handle files larger than 1MB', async () => {
+      const fs = require('fs');
+      const hugeFilePath = `/tmp/huge-file-${Date.now()}.txt`;
+      const hugeContent = 'x'.repeat(2 * 1024 * 1024); // 2MB
+      fs.writeFileSync(hugeFilePath, hugeContent, 'utf-8');
+
+      try {
+        const response = await fetchApi(`/api/file-content?path=${encodeURIComponent(hugeFilePath)}`);
+
+        expect(response.status).toBe(200);
+
+        const data = await response.json() as any;
+        expect(data.success).toBe(true);
+        expect(data.truncated).toBe(true);
+        expect(data.size).toBeLessThanOrEqual(100 * 1024);
+      } finally {
+        fs.unlinkSync(hugeFilePath);
+      }
+    });
+
+    it('should handle UTF-8 encoded content correctly', async () => {
+      const fs = require('fs');
+      const utf8FilePath = `/tmp/utf8-file-${Date.now()}.txt`;
+      const utf8Content = 'Hello 世界 🌍\nTest emoji 🎉';
+      fs.writeFileSync(utf8FilePath, utf8Content, 'utf-8');
+
+      try {
+        const response = await fetchApi(`/api/file-content?path=${encodeURIComponent(utf8FilePath)}`);
+
+        expect(response.status).toBe(200);
+
+        const data = await response.json() as any;
+        expect(data.content).toBe(utf8Content);
+      } finally {
+        fs.unlinkSync(utf8FilePath);
+      }
+    });
+
+    it('should handle URL-encoded paths correctly', async () => {
+      const fs = require('fs');
+      const encodedPath = `/tmp/file with spaces ${Date.now()}.txt`;
+      fs.writeFileSync(encodedPath, 'content', 'utf-8');
+
+      try {
+        const response = await fetchApi(`/api/file-content?path=${encodeURIComponent(encodedPath)}`);
+
+        expect(response.status).toBe(200);
+
+        const data = await response.json() as any;
+        expect(data.success).toBe(true);
+        expect(data.content).toBe('content');
+      } finally {
+        fs.unlinkSync(encodedPath);
+      }
+    });
+
+    it('should return error on read failure', async () => {
+      // Try to read a file we don't have access to (if it exists)
+      const response = await fetchApi('/api/file-content?path=/root/.ssh/id_rsa');
+
+      // Should either get 404 (not found) or 500 (permission denied)
+      expect([404, 500]).toContain(response.status);
+
+      const data = await response.json() as any;
+      expect(data.error).toBeDefined();
+    });
+  });
+
   describe('GET /api/health overload guard', () => {
     let overloadServer: WebServer;
     let overloadPort: number;

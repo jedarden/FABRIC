@@ -793,6 +793,97 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // ============================================
+    // File Content API Endpoints
+    // ============================================
+
+    // Get file content for File Context Panel
+    app.get('/api/file-content', (req: Request, res: Response) => {
+      try {
+        const path = req.query.path as string;
+
+        if (!path) {
+          res.status(400).json({ error: 'Missing required parameter: path' });
+          return;
+        }
+
+        // Validate path is a string and not empty
+        if (typeof path !== 'string' || path.trim() === '') {
+          res.status(400).json({ error: 'Invalid path parameter' });
+          return;
+        }
+
+        // Check if file exists
+        if (!fs.existsSync(path)) {
+          res.status(404).json({
+            error: 'File not found',
+            path,
+            message: 'The requested file does not exist on the server'
+          });
+          return;
+        }
+
+        // Get file stats
+        const stats = fs.statSync(path);
+
+        // Ensure it's a file, not a directory
+        if (!stats.isFile()) {
+          res.status(400).json({
+            error: 'Not a file',
+            path,
+            message: 'The requested path is not a file'
+          });
+          return;
+        }
+
+        // Limit file size to 100KB for performance and bandwidth
+        const MAX_FILE_SIZE = 100 * 1024;
+        if (stats.size > MAX_FILE_SIZE) {
+          // Read first 100KB and indicate truncation
+          const buffer = Buffer.alloc(MAX_FILE_SIZE);
+          let fd: number | null = null;
+          try {
+            fd = fs.openSync(path, 'r');
+            const bytesRead = fs.readSync(fd, buffer, 0, MAX_FILE_SIZE, 0);
+            if (fd !== null) fs.closeSync(fd);
+
+            const content = buffer.toString('utf-8', 0, bytesRead);
+            res.json({
+              success: true,
+              path,
+              content,
+              truncated: true,
+              originalSize: stats.size,
+              size: content.length,
+              message: `File truncated from ${formatBytes(stats.size)} to first 100KB`
+            });
+            return;
+          } catch (readError) {
+            if (fd !== null) fs.closeSync(fd);
+            throw readError;
+          }
+        }
+
+        // Read full file content
+        const content = fs.readFileSync(path, 'utf-8');
+
+        res.json({
+          success: true,
+          path,
+          content,
+          truncated: false,
+          size: content.length,
+          originalSize: stats.size,
+        });
+      } catch (error) {
+        console.error('Error reading file content:', error);
+        res.status(500).json({
+          error: 'Failed to read file',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    });
+
+    // ============================================
     // Dependency DAG API Endpoints
     // ============================================
 

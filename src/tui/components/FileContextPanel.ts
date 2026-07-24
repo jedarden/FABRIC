@@ -8,6 +8,7 @@
 import blessed from 'blessed';
 import { LogEvent } from '../../types.js';
 import { colors } from '../utils/colors.js';
+import * as fs from 'fs';
 
 export interface FileContextPanelOptions {
   /** Parent screen */
@@ -305,10 +306,41 @@ export class FileContextPanel {
   }
 
   /**
+   * Safely read file content from disk
+   */
+  private readFileContent(path: string): string | undefined {
+    try {
+      // Check if file exists and is readable
+      if (!fs.existsSync(path)) {
+        return undefined;
+      }
+
+      const stats = fs.statSync(path);
+      // Skip directories and very large files (>1MB)
+      if (!stats.isFile() || stats.size > 1024 * 1024) {
+        return undefined;
+      }
+
+      // Read file content (limit to 100KB for performance)
+      const content = fs.readFileSync(path, 'utf-8');
+      if (content.length > 100 * 1024) {
+        return content.substring(0, 100 * 1024) + '\n\n... (file truncated)';
+      }
+      return content;
+    } catch {
+      // Return undefined on any error (permissions, encoding, etc.)
+      return undefined;
+    }
+  }
+
+  /**
    * Set file context from event
    */
   setContextFromEvent(event: LogEvent): void {
     if (!event.path) return;
+
+    // Read file content when setting context from event
+    const content = this.readFileContent(event.path);
 
     // Check if we already have this file in recent
     const existing = this.recentFiles.find(f => f.path === event.path);
@@ -324,14 +356,18 @@ export class FileContextPanel {
       existing.lastModifiedBy = event.worker;
       existing.lastModifiedAt = event.ts;
 
+      // Update content (refresh on each event to show latest changes)
+      existing.content = content;
+
       // Limit operations history
       existing.operations = existing.operations.slice(0, 20);
 
       this.currentContext = existing;
     } else {
-      // Create new context
+      // Create new context with file content
       const context: FileContext = {
         path: event.path,
+        content,
         operations: [{
           event,
           type: this.getOperationType(event),

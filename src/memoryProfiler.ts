@@ -194,21 +194,16 @@ class MemoryProfiler {
   }
 
   /** Write a V8 heap snapshot to disk */
-  writeHeapSnapshot(): Promise<string> {
-    return new Promise((resolve, reject) => {
-      try {
-        // @ts-ignore - v8 module exists in Node.js but not in TypeScript types
-        const v8 = require('v8');
-        const filename = `heap-${Date.now()}.heapsnapshot`;
-        const filepath = join(SNAPSHOT_DIR, filename);
+  async writeHeapSnapshot(): Promise<string> {
+    const filename = `heap-${Date.now()}.heapsnapshot`;
+    const filepath = join(SNAPSHOT_DIR, filename);
 
-        v8.writeHeapSnapshot(filepath);
+    // Use dynamic import for v8 module (Node.js built-in)
+    const v8 = await import('v8');
+    // @ts-ignore - v8.writeHeapSnapshot exists in Node.js but not in TypeScript types
+    v8.writeHeapSnapshot(filepath);
 
-        resolve(filepath);
-      } catch (err) {
-        reject(err);
-      }
-    });
+    return filepath;
   }
 
   /** Start periodic memory capture and snapshot writing */

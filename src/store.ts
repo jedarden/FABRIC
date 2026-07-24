@@ -68,6 +68,7 @@ import {
   getWorkerMemoryLimit,
   DEFAULT_MEMORY_LIMIT_BYTES,
 } from './workerMemoryLimiter.js';
+import { getMemorySampler } from './memorySampler.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -648,7 +649,6 @@ export class InMemoryEventStore implements EventStore {
     if (pid && typeof pid === 'number') {
       worker.pid = pid;
       // Register with MemorySampler
-      const { getMemorySampler } = require('./memorySampler.js');
       const sampler = getMemorySampler();
       sampler.registerWorkerPid(event.worker, pid);
     }

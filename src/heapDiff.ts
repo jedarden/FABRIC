@@ -5,7 +5,7 @@
  * Provides comparison between snapshots and identifies growing retainers.
  */
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -268,7 +268,6 @@ export function saveTrendReport(): string | null {
   const trend = analyzeTrend();
   if (trend.overallAssessment === 'insufficient-data') return null;
 
-  const { writeFileSync, mkdirSync } = require('fs');
   const reportsDir = join(SNAPSHOT_DIR, 'reports');
   if (!existsSync(reportsDir)) {
     mkdirSync(reportsDir, { recursive: true });

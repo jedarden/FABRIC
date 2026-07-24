@@ -1,0 +1,14 @@
+[Unit]
+Description=FABRIC Health Watchdog Timer
+Requires=fabric-web.service
+
+[Timer]
+# Run health check every 60 seconds
+OnCalendar=*:0/1
+# Allow some jitter to avoid exact alignment
+RandomizedDelaySec=5
+# If the system is suspended, run immediately on resume
+Persistent=true
+
+[Install]
+WantedBy=timers.target

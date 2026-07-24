@@ -69,6 +69,13 @@ const KEYWORDS: Record<string, string[]> = {
   shell: ['if', 'then', 'else', 'elif', 'fi', 'for', 'do', 'done', 'while', 'until', 'case', 'esac', 'function', 'return', 'exit', 'export', 'source', 'alias', 'unset', 'readonly', 'local', 'declare', 'echo', 'printf', 'read', 'test', 'true', 'false'],
 };
 
+// Helper function to escape HTML for XSS protection
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 const FileContextPanel: React.FC<FileContextPanelProps> = ({
   visible,
   onClose,
@@ -81,6 +88,9 @@ const FileContextPanel: React.FC<FileContextPanelProps> = ({
   const [recentFiles, setRecentFiles] = useState<FileContext[]>([]);
   const [isPoppedOut, setIsPoppedOut] = useState(false);
   const [popOutWindow, setPopOutWindow] = useState<Window | null>(null);
+  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map());
+  const [loadingFiles, setLoadingFiles] = useState<Set<string>>(new Set());
+  const [fileErrors, setFileErrors] = useState<Map<string, string>>(new Map());
 
   // Extract file operations from events
   const fileEvents = useMemo(() => {
@@ -161,6 +171,49 @@ const FileContextPanel: React.FC<FileContextPanelProps> = ({
     }
   }, [fileEvents, extractPath, getOperationType, selectedFile]);
 
+  // Fetch file content when selected file changes
+  useEffect(() => {
+    if (!selectedFile) return;
+
+    // Check if we already have the content cached
+    if (fileContents.has(selectedFile)) {
+      return;
+    }
+
+    // Fetch file content from API
+    const fetchFileContent = async () => {
+      setLoadingFiles(prev => new Set(prev).add(selectedFile));
+      setFileErrors(prev => {
+        const next = new Map(prev);
+        next.delete(selectedFile);
+        return next;
+      });
+
+      try {
+        const response = await fetch(`/api/file-content?path=${encodeURIComponent(selectedFile)}`);
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          setFileContents(prev => new Map(prev).set(selectedFile, data.content));
+        } else {
+          setFileErrors(prev => new Map(prev).set(selectedFile, data.message || data.error || 'Failed to load file'));
+        }
+      } catch (error) {
+        setFileErrors(prev =>
+          new Map(prev).set(selectedFile, error instanceof Error ? error.message : 'Network error')
+        );
+      } finally {
+        setLoadingFiles(prev => {
+          const next = new Set(prev);
+          next.delete(selectedFile);
+          return next;
+        });
+      }
+    };
+
+    fetchFileContent();
+  }, [selectedFile, fileContents]);
+
   // Get current file context
   const currentContext = useMemo(() => {
     return recentFiles.find(f => f.path === selectedFile) || null;
@@ -237,6 +290,16 @@ const FileContextPanel: React.FC<FileContextPanelProps> = ({
         setPopOutWindow(newWindow);
 
         // Write content to new window
+        const fileContent = fileContents.get(currentContext?.path || '') || '';
+        const contentHtml = fileContent
+          ? fileContent.split('\n').map((line, i) => `
+            <div class="line">
+              <span class="line-number">${i + 1}</span>
+              <span class="line-content">${escapeHtml(line) || ' '}</span>
+            </div>
+          `).join('')
+          : '<div style="color: #6a9955; text-align: center; padding: 40px;">File content not available</div>';
+
         newWindow.document.write(`
           <!DOCTYPE html>
           <html>
@@ -280,6 +343,8 @@ const FileContextPanel: React.FC<FileContextPanelProps> = ({
               }
               .line-content {
                 flex: 1;
+                white-space: pre-wrap;
+                word-break: break-all;
               }
               .operations {
                 margin-top: 20px;
@@ -301,13 +366,11 @@ const FileContextPanel: React.FC<FileContextPanelProps> = ({
           </head>
           <body>
             <div class="file-header">
-              <div class="file-path">${currentContext?.path || 'No file selected'}</div>
-              <div class="file-info">Last modified by ${currentContext?.lastModifiedBy || 'unknown'}</div>
+              <div class="file-path">${escapeHtml(currentContext?.path || 'No file selected')}</div>
+              <div class="file-info">Last modified by ${escapeHtml(currentContext?.lastModifiedBy || 'unknown')}</div>
             </div>
             <div class="file-content">
-              <div style="color: #6a9955; text-align: center; padding: 40px;">
-                File content preview (simulated)
-              </div>
+              ${contentHtml}
             </div>
             <div class="operations">
               <h3 style="color: #4fc1ff; margin-bottom: 10px;">Recent Operations</h3>
@@ -315,7 +378,7 @@ const FileContextPanel: React.FC<FileContextPanelProps> = ({
                 <div class="operation">
                   <span class="operation-time">${formatTime(op.ts)}</span>
                   <span>${getOperationIcon(op.type)} ${op.type}</span>
-                  <span class="operation-worker">by ${op.worker}</span>
+                  <span class="operation-worker">by ${escapeHtml(op.worker)}</span>
                 </div>
               `).join('') || '<div style="color: #858585;">No operations recorded</div>'}
             </div>
@@ -408,25 +471,38 @@ const FileContextPanel: React.FC<FileContextPanelProps> = ({
         </div>
       )}
 
-      {/* File content placeholder */}
+      {/* File content */}
       <div className="file-content">
         {currentContext ? (
-          <div className="content-placeholder">
-            <div className="placeholder-message">
-              📄 File content preview
+          loadingFiles.has(currentContext.path) ? (
+            <div className="content-loading">
+              <div className="loading-spinner">⟳</div>
+              <div className="loading-text">Loading file content...</div>
             </div>
-            <div className="placeholder-hint">
-              Click on file events in the activity stream to see context
+          ) : fileErrors.has(currentContext.path) ? (
+            <div className="content-error">
+              <div className="error-icon">⚠️</div>
+              <div className="error-message">{fileErrors.get(currentContext.path)}</div>
             </div>
-            <div className="simulated-lines">
-              {Array.from({ length: 10 }, (_, i) => (
-                <div key={i} className="simulated-line">
+          ) : fileContents.has(currentContext.path) ? (
+            <div className="content-lines">
+              {fileContents.get(currentContext.path)!.split('\n').map((line, i) => (
+                <div key={i} className="content-line">
                   <span className="line-num">{i + 1}</span>
-                  <span className="line-text">{/* Simulated content */}</span>
+                  <span className="line-text">{line || ' '}</span>
                 </div>
               ))}
             </div>
-          </div>
+          ) : (
+            <div className="content-placeholder">
+              <div className="placeholder-message">
+                📄 File content not available
+              </div>
+              <div className="placeholder-hint">
+                File may not exist on the server or could not be read
+              </div>
+            </div>
+          )
         ) : (
           <div className="no-file">
             <div className="no-file-icon">📂</div>

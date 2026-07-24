@@ -53,6 +53,13 @@ export interface DirectoryTailerOptions {
    * recently used file can displace a stale one.  Default: 400 MB.
    */
   maxRssBytes?: number;
+
+  /**
+   * Files modified within this window of now are read from position 0 on
+   * startup (replay history). Older files start at EOF (no replay).
+   * Default: 4 hours. Set to Infinity to read all files from the beginning.
+   */
+  startupRereadMs?: number;
 }
 
 interface FileInfo {
@@ -71,6 +78,7 @@ export class DirectoryTailer extends EventEmitter {
   private recentMtimeMs: number;
   private inactiveCheckIntervalMs: number;
   private maxRssBytes: number;
+  private startupRereadMs: number;
 
   /** Metadata for every discovered *.jsonl file (active and inactive). */
   private fileInfo: Map<string, FileInfo> = new Map();
@@ -89,6 +97,9 @@ export class DirectoryTailer extends EventEmitter {
     this.recentMtimeMs = options.recentMtimeMs ?? 86_400_000;
     this.inactiveCheckIntervalMs = options.inactiveCheckIntervalMs ?? 30_000;
     this.maxRssBytes = options.maxRssBytes ?? 400 * 1024 * 1024;
+    this.startupRereadMs = options.startupRereadMs ?? 4 * 60 * 60 * 1000; // Default: 4 hours
+    this.inactiveCheckIntervalMs = options.inactiveCheckIntervalMs ?? 30_000;
+    this.maxRssBytes = options.maxRssBytes ?? 400 * 1024 * 1024;
   }
 
   start(): void {
@@ -100,16 +111,15 @@ export class DirectoryTailer extends EventEmitter {
     const now = Date.now();
     const candidates: Array<{ fullPath: string; mtime: number; size: number }> = [];
 
-    // Files modified within this window are read from the start on startup so
-    // FABRIC can reconstruct current worker state after a restart.
-    const STARTUP_REREAD_MS = 4 * 60 * 60 * 1000; // 4 hours
-
     for (const entry of fs.readdirSync(this.directory)) {
       if (!entry.endsWith('.jsonl')) continue;
       const fullPath = path.join(this.directory, entry);
       try {
         const stat = fs.statSync(fullPath);
-        const isRecent = now - stat.mtimeMs <= STARTUP_REREAD_MS;
+        // Files modified within startupRereadMs window are read from the start on startup so
+        // FABRIC can reconstruct current worker state after a restart. Use startupRereadMs
+        // option (configurable, default 4 hours) instead of hardcoded value.
+        const isRecent = now - stat.mtimeMs <= this.startupRereadMs;
         // Recent files: read from the beginning so state is reconstructed.
         // Old files: start at EOF — don't replay ancient history on restart.
         this.fileInfo.set(fullPath, {
