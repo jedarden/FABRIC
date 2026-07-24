@@ -74,6 +74,45 @@ export interface FileGroup {
 
 const SKIP_NAMES = new Set(['archive', 'fabric-mend.jsonl']);
 
+/** Find the absolute path to the tar binary.
+ * Checks PATH entries first, then falls back to common absolute paths.
+ * Throws an error if tar cannot be found in any location.
+ */
+export function resolveTarPath(): string {
+  // Common absolute paths where tar might live (in order of preference)
+  const COMMON_PATHS = [
+    '/run/current-system/sw/bin/tar',  // NixOS/Nix
+    '/usr/bin/tar',
+    '/bin/tar',
+    '/usr/local/bin/tar',
+  ];
+
+  // First check PATH if it exists
+  const pathEnv = process.env.PATH;
+  if (pathEnv) {
+    const pathEntries = pathEnv.split(path.delimiter);
+    for (const entry of pathEntries) {
+      const tarPath = path.join(entry, 'tar');
+      if (fs.existsSync(tarPath)) {
+        return tarPath;
+      }
+    }
+  }
+
+  // Fall back to common absolute paths
+  for (const tarPath of COMMON_PATHS) {
+    if (fs.existsSync(tarPath)) {
+      return tarPath;
+    }
+  }
+
+  // If we get here, tar is nowhere to be found
+  throw new Error(
+    `tar binary not found. Searched PATH: ${pathEnv || '(none)'} and common paths: ${COMMON_PATHS.join(', ')}. ` +
+    `Ensure tar is installed and accessible.`
+  );
+}
+
 function defaultLogDir(): string {
   const home = process.env.HOME || '';
   return path.join(home, '.needle', 'logs');
@@ -117,6 +156,7 @@ function createTarball(archiveDir: string, date: string, files: string[], dryRun
   const tarballPath = path.join(archiveDir, `${date}.tar.gz`);
   const extractDir = path.join(archiveDir, `.tmp-${date}`);
   const logDir = path.dirname(files[0]);
+  const tarPath = resolveTarPath();
 
   if (!dryRun) {
     fs.mkdirSync(extractDir, { recursive: true });
@@ -124,7 +164,7 @@ function createTarball(archiveDir: string, date: string, files: string[], dryRun
     // Extract existing archive if present
     if (fs.existsSync(tarballPath)) {
       try {
-        execFileSync('tar', ['-xzf', tarballPath, '-C', extractDir], { timeout: 60000 });
+        execFileSync(tarPath, ['-xzf', tarballPath, '-C', extractDir], { timeout: 60000 });
       } catch {
         // If extraction fails, archive might be corrupted - start fresh
       }
@@ -142,7 +182,7 @@ function createTarball(archiveDir: string, date: string, files: string[], dryRun
 
     // Create new tarball from merged content
     // Use '.' to archive entire directory (avoids ARG_MAX limit with many files)
-    execFileSync('tar', ['-czf', tarballPath, '.'], {
+    execFileSync(tarPath, ['-czf', tarballPath, '.'], {
       cwd: extractDir,
       timeout: 60000,
     });
