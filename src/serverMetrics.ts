@@ -21,6 +21,9 @@ export interface ServerMetricsSnapshot {
   dedup_dropped: number;
   process_resident_memory_bytes: number;
   retention?: RetentionState;
+  prune_last_run_timestamp_seconds?: number;
+  prune_last_success_timestamp_seconds?: number;
+  logs_dir_bytes?: number;
 }
 
 export class ServerMetrics {
@@ -58,6 +61,22 @@ export class ServerMetrics {
     this._retentionState = state;
   }
 
+  private _pruneLastRunTimestamp = 0;
+  private _pruneLastSuccessTimestamp = 0;
+  private _logsDirBytes = 0;
+
+  set pruneLastRunTimestamp(timestamp: number) {
+    this._pruneLastRunTimestamp = timestamp;
+  }
+
+  set pruneLastSuccessTimestamp(timestamp: number) {
+    this._pruneLastSuccessTimestamp = timestamp;
+  }
+
+  set logsDirBytes(bytes: number) {
+    this._logsDirBytes = bytes;
+  }
+
   reset(): void {
     this.startTime = Date.now();
     this.eventTimestamps = [];
@@ -65,6 +84,9 @@ export class ServerMetrics {
     this._tailerFilesWatched = 0;
     this._eventCount = 0;
     this._dedupDropped = 0;
+    this._pruneLastRunTimestamp = 0;
+    this._pruneLastSuccessTimestamp = 0;
+    this._logsDirBytes = 0;
   }
 
   private ingestRate(): number {
@@ -94,6 +116,9 @@ export class ServerMetrics {
       dedup_dropped: this._dedupDropped,
       process_resident_memory_bytes: rss,
       retention: this._retentionState,
+      prune_last_run_timestamp_seconds: this._pruneLastRunTimestamp || undefined,
+      prune_last_success_timestamp_seconds: this._pruneLastSuccessTimestamp || undefined,
+      logs_dir_bytes: this._logsDirBytes || undefined,
     };
   }
 
@@ -119,6 +144,17 @@ export class ServerMetrics {
     metric('tailer_files_watched', 'gauge', 'Log files being watched', snap.tailer_files_watched);
     metric('dedup_dropped_total', 'counter', 'Total duplicate events dropped', snap.dedup_dropped);
     metric('process_resident_memory_bytes', 'gauge', 'Process RSS in bytes', snap.process_resident_memory_bytes);
+
+    // Log retention metrics
+    if (snap.prune_last_run_timestamp_seconds !== undefined) {
+      metric('prune_last_run_timestamp_seconds', 'gauge', 'Last prune run attempt (Unix timestamp)', snap.prune_last_run_timestamp_seconds);
+    }
+    if (snap.prune_last_success_timestamp_seconds !== undefined) {
+      metric('prune_last_success_timestamp_seconds', 'gauge', 'Last successful prune run (Unix timestamp)', snap.prune_last_success_timestamp_seconds);
+    }
+    if (snap.logs_dir_bytes !== undefined) {
+      metric('logs_dir_bytes', 'gauge', 'Size of watched logs directory in bytes', snap.logs_dir_bytes);
+    }
 
     return lines.join('\n') + '\n';
   }

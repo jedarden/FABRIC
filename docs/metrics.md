@@ -45,6 +45,14 @@ All metrics are prefixed with `fabric_` to avoid naming conflicts.
 |--------|------|-------------|
 | `fabric_process_resident_memory_bytes` | gauge | Process RSS (resident set size) in bytes |
 
+### Log Retention
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `fabric_prune_last_run_timestamp_seconds` | gauge | Unix timestamp of last prune run attempt (regardless of outcome) |
+| `fabric_prune_last_success_timestamp_seconds` | gauge | Unix timestamp of last successful prune run |
+| `fabric_logs_dir_bytes` | gauge | Total size of watched logs directory in bytes (refreshed every 5 minutes) |
+
 ## Example Output
 
 ```
@@ -83,6 +91,18 @@ fabric_dedup_dropped_total 127
 # HELP fabric_process_resident_memory_bytes Process RSS in bytes
 # TYPE fabric_process_resident_memory_bytes gauge
 fabric_process_resident_memory_bytes 245366784
+
+# HELP fabric_prune_last_run_timestamp_seconds Last prune run attempt (Unix timestamp)
+# TYPE fabric_prune_last_run_timestamp_seconds gauge
+fabric_prune_last_run_timestamp_seconds 1720123456
+
+# HELP fabric_prune_last_success_timestamp_seconds Last successful prune run (Unix timestamp)
+# TYPE fabric_prune_last_success_timestamp_seconds gauge
+fabric_prune_last_success_timestamp_seconds 1720123456
+
+# HELP fabric_logs_dir_bytes Size of watched logs directory in bytes
+# TYPE fabric_logs_dir_bytes gauge
+fabric_logs_dir_bytes 52428800
 ```
 
 ## Prometheus Configuration
@@ -165,6 +185,15 @@ groups:
         annotations:
           summary: "FABRIC high duplicate event rate"
           description: "Dropping {{ $value }} duplicates/sec"
+
+      - alert: FabricPruneStale
+        expr: (time() - fabric_prune_last_success_timestamp_seconds) > 36*3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "FABRIC log pruning is stale"
+          description: "Last successful prune run was {{ $value | humanizeDuration }} ago (>36h)"
 ```
 
 ## Health Endpoint vs Metrics Endpoint
@@ -202,5 +231,6 @@ Potential metrics for future enhancement:
 - Bead completion rate (`fabric_beads_completed_total`)
 - Cost tracking (`fabric_cost_usd_total`)
 - OTLP receiver stats (`fabric_otlp_requests_total`)
+- Detailed prune metrics (files deleted, bytes freed per run)
 
 These would require additional instrumentation in the event store and analytics modules.

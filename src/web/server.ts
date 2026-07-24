@@ -9,6 +9,8 @@ import { createServer, Server as HttpServer } from 'http';
 import { EventEmitter } from 'events';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as systemdNotify from 'systemd-notify';
 import { WebSocketServer, WebSocket } from 'ws';
 import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus, SemanticNarrative, NarrativeSegment, SpanDagResponse, SpanNode } from '../types.js';
@@ -27,14 +29,25 @@ import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } fro
 import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
 import { getMemorySampler, type WorkerMemorySample } from '../memorySampler.js';
 
-/** Get the v8 module (available in Node.js) */
-function getV8() {
+/** Cache for the v8 module */
+let v8Module: typeof import('v8') | null = null;
+
+/** Get the v8 module (available in Node.js) - cached for performance */
+async function getV8(): Promise<typeof import('v8') | null> {
+  if (v8Module !== null) {
+    return v8Module;
+  }
   try {
-    // @ts-ignore - v8 module exists in Node.js but not in TypeScript types
-    return require('v8');
+    v8Module = await import('v8');
+    return v8Module;
   } catch {
     return null;
   }
+}
+
+/** Synchronously get cached v8 module (returns null if not yet loaded) */
+function getV8Sync(): typeof import('v8') | null {
+  return v8Module;
 }
 
 /** Format bytes to human readable string. */
@@ -43,6 +56,30 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)}KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)}GB`;
+}
+
+/** Compute total size of a directory recursively in bytes. */
+function computeDirSize(dirPath: string): number {
+  let totalSize = 0;
+  try {
+    if (!fs.existsSync(dirPath)) return 0;
+
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === 'archive') continue; // Skip archive directory
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isFile()) {
+        try {
+          totalSize += fs.statSync(fullPath).size;
+        } catch { /* skip */ }
+      } else if (entry.isDirectory()) {
+        totalSize += computeDirSize(fullPath);
+      }
+    }
+  } catch {
+    /* If directory doesn't exist or can't be read, return 0 */
+  }
+  return totalSize;
 }
 
 /** Maximum payload size for POST requests (64KB) */
@@ -106,6 +143,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   let running = false;
   const clients: Set<WebSocket> = new Set();
   let memoryUpdateInterval: NodeJS.Timeout | null = null;
+  let logsDirSizeInterval: NodeJS.Timeout | null = null;
 
   function start() {
     if (running) return;
@@ -189,6 +227,19 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // ── Memory Sampler Setup ──
     const memorySampler = getMemorySampler();
     memorySampler.start();
+
+    // Periodic logs directory size refresh (every 5 minutes)
+    // Refresh on interval rather than every scrape to avoid stat-ing thousands of files per request
+    const refreshLogsDirSize = () => {
+      try {
+        const size = computeDirSize(logPath);
+        metrics.logsDirBytes = size;
+      } catch (err) {
+        console.error('Error computing logs directory size:', err);
+      }
+    };
+    refreshLogsDirSize(); // Initial refresh
+    logsDirSizeInterval = setInterval(refreshLogsDirSize, 5 * 60 * 1000); // Every 5 minutes
 
     // Periodic memory updates broadcast (every 10 seconds)
     memoryUpdateInterval = setInterval(() => {
@@ -345,8 +396,16 @@ export function createWebServer(options: WebServerOptions): WebServer {
         }
       }
 
+      // Record last run timestamp (regardless of outcome)
+      const now = Date.now() / 1000; // Prometheus uses Unix timestamp in seconds
+      metrics.pruneLastRunTimestamp = now;
+
       try {
         const result = pruneLogs(options);
+
+        // Record last success timestamp only on successful completion
+        metrics.pruneLastSuccessTimestamp = now;
+
         res.json({
           success: true,
           result: {
@@ -1795,9 +1854,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
     // Memory pressure monitoring: log warnings when approaching heap limit
     let lastMemoryLog = 0;
-    const memoryCheckInterval = setInterval(() => {
+    const memoryCheckInterval = setInterval(async () => {
       const mem = process.memoryUsage();
-      const v8 = getV8();
+      const v8 = await getV8();
       const heapLimitBytes = v8?.getHeapStatistics?.().heap_size_limit ?? 1024 * 1024 * 1024; // 1GB default
       const heapUsagePercent = (mem.heapUsed / heapLimitBytes) * 100;
       const profiler = getMemoryProfiler();
@@ -1827,6 +1886,12 @@ export function createWebServer(options: WebServerOptions): WebServer {
     }
     const memorySampler = getMemorySampler();
     memorySampler.stop();
+
+    // Stop logs directory size refresh
+    if (logsDirSizeInterval) {
+      clearInterval(logsDirSizeInterval);
+      logsDirSizeInterval = null;
+    }
 
     // Close all WebSocket connections
     for (const client of clients) {
