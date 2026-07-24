@@ -211,6 +211,89 @@ export class SessionReplay extends EventEmitter {
   }
 
   /**
+   * Load events from a directory of JSONL files
+   */
+  loadDirectory(dirPath: string, filter?: EventFilter): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const expandedPath = dirPath.startsWith('~')
+        ? dirPath.replace('~', process.env.HOME || '')
+        : dirPath;
+
+      if (!fs.existsSync(expandedPath)) {
+        reject(new Error(`Directory not found: ${expandedPath}`));
+        return;
+      }
+
+      if (!fs.statSync(expandedPath).isDirectory()) {
+        reject(new Error(`Path is not a directory: ${expandedPath}`));
+        return;
+      }
+
+      this.sourcePath = expandedPath;
+      this.filter = filter;
+
+      this.events = [];
+
+      try {
+        // Discover all *.jsonl files in the directory
+        const entries = fs.readdirSync(expandedPath);
+        const jsonlFiles = entries.filter(entry => entry.endsWith('.jsonl'));
+
+        if (jsonlFiles.length === 0) {
+          console.log(`No *.jsonl files found in ${expandedPath}`);
+        }
+
+        // Read and parse each file
+        for (const filename of jsonlFiles) {
+          const filePath = `${expandedPath}/${filename}`;
+          try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const lines = content.split('\n');
+
+            for (const line of lines) {
+              if (line.trim()) {
+                const event = parseLogLine(line);
+                if (event) {
+                  this.events.push(event);
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`Failed to read file ${filePath}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          }
+        }
+
+        // Sort by timestamp
+        this.events.sort((a, b) => a.ts - b.ts);
+
+        // Apply filter
+        this.applyFilter();
+
+        // Reset state
+        this.currentIndex = 0;
+        this.state = 'idle';
+        this.updateDisplay();
+        this.emit('loaded', this.events.length);
+
+        resolve(this.events.length);
+      } catch (err) {
+        reject(new Error(`Failed to load directory: ${err instanceof Error ? err.message : 'Unknown error'}`));
+      }
+    });
+  }
+
+  /**
+   * Load events from a resolved source (file or directory)
+   */
+  async loadSource(source: { kind: 'file' | 'directory'; path: string }, filter?: EventFilter): Promise<number> {
+    if (source.kind === 'directory') {
+      return this.loadDirectory(source.path, filter);
+    } else {
+      return this.loadFile(source.path, filter);
+    }
+  }
+
+  /**
    * Load events from array
    */
   loadEvents(events: LogEvent[], filter?: EventFilter): void {

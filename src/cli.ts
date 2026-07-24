@@ -562,17 +562,18 @@ program
 program
   .command('replay')
   .description('Replay worker session history chronologically')
-  .option('-f, --file <path>', 'Log file to replay', '~/.needle/logs/workers.log')
+  .option('-f, --file <path>', 'Log file to replay (single-file mode)')
+  .option('--source <path>', 'Log source (file or directory)')
   .option('-w, --worker <id>', 'Filter by worker ID')
   .option('-t, --event-type <pattern>', 'Filter by event type (glob, e.g. "bead.*", "worker.started")')
   .addOption(new Option('-l, --level <level>', 'Filter by log level (deprecated: use --event-type)').hideHelp())
   .option('-s, --speed <speed>', 'Playback speed (0.5/1/2/5/10)', '1')
   .option('--auto', 'Start playback automatically')
   .action(async (options) => {
-    const filePath = options.file.replace('~', process.env.HOME || '');
+    const resolved = resolveFromOptions(options.source, options.file);
     const speed = parseFloat(options.speed) as 0.5 | 1 | 2 | 5 | 10;
 
-    console.log(`FABRIC Session Replay - Loading: ${filePath}`);
+    console.log(`FABRIC Session Replay - Loading: ${resolved.path} (${resolved.kind})`);
 
     const validLevels = ['debug', 'info', 'warn', 'error'];
     const levelFilter = options.level?.toLowerCase();
@@ -639,8 +640,8 @@ program
       if (levelFilter) filter.level = levelFilter as LogLevel;
       if (eventTypeFilter) filter.eventType = eventTypeFilter;
 
-      // Load the log file
-      await replay.loadFile(filePath, Object.keys(filter).length > 0 ? filter : undefined);
+      // Load from source (file or directory)
+      await replay.loadSource(resolved, Object.keys(filter).length > 0 ? filter : undefined);
 
       // Focus and render
       replay.focus();
@@ -684,8 +685,9 @@ program
 
 program
   .command('digest')
-  .description('Generate session digest from log file')
-  .option('-f, --file <path>', 'Log file to analyze', '~/.needle/logs/workers.log')
+  .description('Generate session digest from log source (directory or file)')
+  .option('-f, --file <path>', 'Log file to analyze (single-file mode)')
+  .option('--source <path>', 'Log source (file or directory)')
   .option('-o, --output <path>', 'Output file (default: stdout)')
   .option('-w, --worker <ids>', 'Filter by worker IDs (comma-separated)')
   .option('--since <timestamp>', 'Start time (Unix timestamp in ms)')
@@ -695,19 +697,25 @@ program
   .option('--no-cost', 'Exclude cost information')
   .option('--no-errors', 'Exclude error information')
   .action(async (options) => {
-    const filePath = options.file.replace('~', process.env.HOME || '');
+    const resolved = resolveFromOptions(options.source, options.file);
 
-    console.error(`FABRIC Digest - Analyzing: ${filePath}`);
+    console.error(`FABRIC Digest - Analyzing: ${resolved.path} (${resolved.kind})`);
 
     try {
-      // Load events from file
+      // Load events from source
       const store = getStore();
-      const tailer = new LogTailer({
-        path: filePath,
-        parseJson: true,
-        follow: false,
-        lines: 0, // Load all lines
-      });
+      const tailer = resolved.kind === 'directory'
+        ? new DirectoryTailer({
+            directory: resolved.path,
+            recentMtimeMs: Infinity, // Read all files for digest, not just recent ones
+            startupRereadMs: Infinity, // Read all files from beginning, regardless of age
+          })
+        : new LogTailer({
+            path: resolved.path,
+            parseJson: true,
+            follow: false,
+            lines: 0, // Load all lines
+          });
 
       let eventCount = 0;
       tailer.on('event', (event) => {
@@ -722,12 +730,12 @@ program
       // Start tailing and wait for completion
       tailer.start();
 
-      // Wait for file to be fully read
+      // Wait for source to be fully read, then stop
       await new Promise<void>((resolve) => {
-        setTimeout(() => {
-          tailer.stop();
-          resolve();
-        }, 500);
+        tailer.once('end', () => resolve());
+        // Give directory tailers more time to process all files
+        const delay = resolved.kind === 'directory' ? 2000 : 500;
+        setTimeout(() => tailer.stop(), delay);
       });
 
       console.error(`Loaded ${eventCount} events`);

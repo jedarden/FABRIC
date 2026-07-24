@@ -12,6 +12,8 @@ import * as fs from 'fs';
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
   readFileSync: vi.fn(),
+  statSync: vi.fn(),
+  readdirSync: vi.fn(),
 }));
 
 describe('SessionReplay', () => {
@@ -558,6 +560,237 @@ describe('SessionReplay', () => {
         });
         testReplay.destroy();
       }).not.toThrow();
+    });
+  });
+
+  describe('Directory Loading', () => {
+    beforeEach(() => {
+      // Reset all mocks
+      vi.mocked(fs.existsSync).mockReset();
+      vi.mocked(fs.readFileSync).mockReset();
+      vi.mocked(fs.statSync).mockReset();
+      vi.mocked(fs.readdirSync).mockReset();
+    });
+
+    it('should load events from directory with multiple JSONL files', async () => {
+      const testDir = '/tmp/test-logs';
+
+      const worker1Events = [
+        { ts: 1000, worker: 'w-abc123', level: 'info', msg: 'Worker 1 start' },
+        { ts: 3000, worker: 'w-abc123', level: 'info', msg: 'Worker 1 middle' },
+      ];
+
+      const worker2Events = [
+        { ts: 2000, worker: 'w-def456', level: 'info', msg: 'Worker 2 start' },
+        { ts: 4000, worker: 'w-def456', level: 'info', msg: 'Worker 2 end' },
+      ];
+
+      const file1Content = worker1Events.map(e => JSON.stringify(e)).join('\n');
+      const file2Content = worker2Events.map(e => JSON.stringify(e)).join('\n');
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+      vi.mocked(fs.readdirSync).mockReturnValue(['worker-abc123.jsonl', 'worker-def456.jsonl']);
+
+      // Mock readFileSync to return different content based on file path
+      vi.mocked(fs.readFileSync).mockImplementation((path) => {
+        const pathStr = path as string;
+        if (pathStr.includes('worker-abc123.jsonl')) {
+          return file1Content;
+        } else if (pathStr.includes('worker-def456.jsonl')) {
+          return file2Content;
+        }
+        return '';
+      });
+
+      const count = await replay.loadDirectory(testDir);
+      expect(count).toBe(4);
+
+      const progress = replay.getProgress();
+      expect(progress.total).toBe(4);
+
+      // Events should be sorted by timestamp
+      const timeRange = replay.getTimeRange();
+      expect(timeRange?.start).toBe(1000);
+      expect(timeRange?.end).toBe(4000);
+    });
+
+    it('should handle empty directory (no JSONL files)', async () => {
+      const testDir = '/tmp/empty-logs';
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+      vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+      const count = await replay.loadDirectory(testDir);
+      expect(count).toBe(0);
+    });
+
+    it('should reject loading non-existent directory', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      await expect(replay.loadDirectory('/non/existent/dir')).rejects.toThrow('Directory not found');
+    });
+
+    it('should reject loading path that is not a directory', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => false } as fs.Stats);
+      await expect(replay.loadDirectory('/not/a/dir')).rejects.toThrow('Path is not a directory');
+    });
+
+    it('should expand tilde in directory path', async () => {
+      const testDir = '~/test-logs';
+      const expandedPath = `${process.env.HOME}/test-logs`;
+
+      vi.mocked(fs.existsSync).mockImplementation((path) => {
+        const pathStr = path as string;
+        return pathStr === expandedPath;
+      });
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+      vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+      await replay.loadDirectory(testDir);
+      expect(fs.statSync).toHaveBeenCalledWith(expandedPath);
+    });
+
+    it('should handle readFileSync errors gracefully', async () => {
+      const testDir = '/tmp/test-logs';
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+      vi.mocked(fs.readdirSync).mockReturnValue(['good-file.jsonl', 'bad-file.jsonl']);
+
+      const goodEvents = [{ ts: 1000, worker: 'w-1', level: 'info', msg: 'Good event' }];
+      const goodContent = goodEvents.map(e => JSON.stringify(e)).join('\n');
+
+      let readCallCount = 0;
+      vi.mocked(fs.readFileSync).mockImplementation(() => {
+        readCallCount++;
+        if (readCallCount === 1) {
+          return goodContent;
+        } else {
+          throw new Error('File read error');
+        }
+      });
+
+      // Should still load events from the good file
+      const count = await replay.loadDirectory(testDir);
+      expect(count).toBe(1);
+    });
+
+    it('should apply filter after loading directory', async () => {
+      const testDir = '/tmp/test-logs';
+      const filter: EventFilter = { worker: 'w-abc123' };
+
+      const worker1Events = [
+        { ts: 1000, worker: 'w-abc123', level: 'info', msg: 'Worker 1 event 1' },
+        { ts: 3000, worker: 'w-abc123', level: 'info', msg: 'Worker 1 event 2' },
+      ];
+
+      const worker2Events = [
+        { ts: 2000, worker: 'w-def456', level: 'info', msg: 'Worker 2 event' },
+      ];
+
+      const file1Content = worker1Events.map(e => JSON.stringify(e)).join('\n');
+      const file2Content = worker2Events.map(e => JSON.stringify(e)).join('\n');
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+      vi.mocked(fs.readdirSync).mockReturnValue(['worker-abc123.jsonl', 'worker-def456.jsonl']);
+
+      vi.mocked(fs.readFileSync).mockImplementation((path) => {
+        const pathStr = path as string;
+        if (pathStr.includes('worker-abc123.jsonl')) {
+          return file1Content;
+        } else if (pathStr.includes('worker-def456.jsonl')) {
+          return file2Content;
+        }
+        return '';
+      });
+
+      await replay.loadDirectory(testDir, filter);
+
+      const progress = replay.getProgress();
+      // Should filter to only w-abc123 events (2 out of 4 total)
+      expect(progress.total).toBe(2);
+    });
+
+    it('should loadSource with file kind', async () => {
+      const testFile = '/tmp/test.log';
+      const logContent = mockEvents.map(e => JSON.stringify(e)).join('\n');
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(logContent);
+
+      const count = await replay.loadSource({ kind: 'file', path: testFile });
+      expect(count).toBe(mockEvents.length);
+    });
+
+    it('should loadSource with directory kind', async () => {
+      const testDir = '/tmp/test-logs';
+      const dirEvents = [
+        { ts: 1000, worker: 'w-1', level: 'info', msg: 'Event 1' },
+        { ts: 2000, worker: 'w-2', level: 'info', msg: 'Event 2' },
+      ];
+      const dirContent = dirEvents.map(e => JSON.stringify(e)).join('\n');
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+      vi.mocked(fs.readdirSync).mockReturnValue(['worker.jsonl']);
+      vi.mocked(fs.readFileSync).mockReturnValue(dirContent);
+
+      const count = await replay.loadSource({ kind: 'directory', path: testDir });
+      expect(count).toBe(dirEvents.length);
+    });
+
+    it('should sort events across multiple files by timestamp', async () => {
+      const testDir = '/tmp/test-logs';
+
+      // Create events out of order in files
+      const file1Events = [
+        { ts: 5000, worker: 'w-1', level: 'info', msg: 'File 1 - Late' },
+        { ts: 1000, worker: 'w-1', level: 'info', msg: 'File 1 - Early' },
+      ];
+
+      const file2Events = [
+        { ts: 3000, worker: 'w-2', level: 'info', msg: 'File 2 - Middle' },
+        { ts: 2000, worker: 'w-2', level: 'info', msg: 'File 2 - Early-ish' },
+      ];
+
+      const file1Content = file1Events.map(e => JSON.stringify(e)).join('\n');
+      const file2Content = file2Events.map(e => JSON.stringify(e)).join('\n');
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+      vi.mocked(fs.readdirSync).mockReturnValue(['file1.jsonl', 'file2.jsonl']);
+
+      vi.mocked(fs.readFileSync).mockImplementation((path) => {
+        const pathStr = path as string;
+        if (pathStr.includes('file1.jsonl')) {
+          return file1Content;
+        } else if (pathStr.includes('file2.jsonl')) {
+          return file2Content;
+        }
+        return '';
+      });
+
+      await replay.loadDirectory(testDir);
+
+      const timeRange = replay.getTimeRange();
+      expect(timeRange?.start).toBe(1000);
+      expect(timeRange?.end).toBe(5000);
+
+      // Verify all 4 events loaded
+      expect(replay.getProgress().total).toBe(4);
+
+      // Navigate through events to verify order
+      replay.stepForward(); // Event at 1000
+      expect(replay.getProgress().current).toBe(1);
+      replay.stepForward(); // Event at 2000
+      expect(replay.getProgress().current).toBe(2);
+      replay.stepForward(); // Event at 3000
+      expect(replay.getProgress().current).toBe(3);
+      replay.stepForward(); // Event at 5000 (stays at 3 because it's the last valid index)
+      expect(replay.getProgress().current).toBe(3);
     });
   });
 });
