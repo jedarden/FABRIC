@@ -21,6 +21,7 @@ export interface HeapSnapshotSummary {
   timestamp: number;
   sizeBytes: number;
   sizeMb: number;
+  trigger?: string; // Extracted from filename if present
 }
 
 export interface HeapDiffResult {
@@ -55,12 +56,18 @@ export function getHeapSnapshots(): HeapSnapshotSummary[] {
     .map(f => {
       const filepath = join(SNAPSHOT_DIR, f);
       const stat = statSync(filepath);
+
+      // Extract trigger reason from filename if present (format: heap-{timestamp}-{trigger}.heapsnapshot)
+      const match = f.match(/heap-\d+-(.+)\.heapsnapshot$/);
+      const trigger = match ? match[1] : undefined;
+
       return {
         filename: f,
         filepath,
         timestamp: stat.mtime.getTime(),
         sizeBytes: stat.size,
         sizeMb: stat.size / (1024 * 1024),
+        trigger,
       };
     })
     .sort((a, b) => a.timestamp - b.timestamp);

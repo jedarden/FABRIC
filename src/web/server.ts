@@ -188,7 +188,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       const otlpRouter = createOtlpHttpRouter({
         onEvent: (event: LogEvent) => {
           store.add(event);
-          metrics.recordEvent();
+          metrics.recordEvent(event.host);
           broadcast(event);
         },
       });
@@ -481,10 +481,12 @@ export function createWebServer(options: WebServerOptions): WebServer {
     app.post('/api/memory/heap-snapshot', (req: Request, res: Response) => {
       try {
         const profiler = getMemoryProfiler();
-        profiler.writeHeapSnapshot().then(filepath => {
+        const trigger = req.body.trigger as 'manual' | 'memory-pressure' | 'test' || 'manual';
+        profiler.writeHeapSnapshot(trigger).then(filepath => {
           res.json({
             success: true,
             filepath,
+            trigger,
             message: `Heap snapshot written to ${filepath}`,
           });
         }).catch(err => {
@@ -611,7 +613,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
         // Store the event
         store.add(logEvent);
-        metrics.recordEvent();
+        metrics.recordEvent(logEvent.host);
 
         // Broadcast to all connected WebSocket clients
         broadcast(logEvent);

@@ -5,7 +5,7 @@
  * Tracks memory usage over time, captures snapshots, and provides diff analysis.
  */
 
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -17,6 +17,15 @@ const MAX_IN_MEMORY_SNAPSHOTS = 100;
 
 /** Snapshot interval in milliseconds */
 const SNAPSHOT_INTERVAL_MS = 30 * 1000; // 30 seconds
+
+/** Maximum number of heap snapshots to retain on disk */
+const MAX_DISK_SNAPSHOTS = 50;
+
+/** Maximum age of heap snapshots in days */
+const MAX_SNAPSHOT_AGE_DAYS = 30;
+
+/** Trigger reasons for heap snapshots */
+export type SnapshotTrigger = 'manual' | 'memory-pressure' | 'periodic' | 'oom-risk' | 'test';
 
 export interface MemorySnapshot {
   timestamp: number;
@@ -193,17 +202,69 @@ class MemoryProfiler {
     return `RSS=${format(snapshot.rss)}, Heap=${format(snapshot.heapUsed)}/${format(snapshot.heapTotal)}, External=${format(snapshot.external)}`;
   }
 
-  /** Write a V8 heap snapshot to disk */
-  async writeHeapSnapshot(): Promise<string> {
-    const filename = `heap-${Date.now()}.heapsnapshot`;
+  /** Write a V8 heap snapshot to disk with trigger reason */
+  async writeHeapSnapshot(trigger: SnapshotTrigger = 'manual'): Promise<string> {
+    const timestamp = Date.now();
+    const filename = `heap-${timestamp}-${trigger}.heapsnapshot`;
     const filepath = join(SNAPSHOT_DIR, filename);
+
+    // Ensure snapshot directory exists
+    if (!existsSync(SNAPSHOT_DIR)) {
+      mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    }
 
     // Use dynamic import for v8 module (Node.js built-in)
     const v8 = await import('v8');
     // @ts-ignore - v8.writeHeapSnapshot exists in Node.js but not in TypeScript types
     v8.writeHeapSnapshot(filepath);
 
+    // Apply retention policy after writing
+    this.applyRetentionPolicy();
+
     return filepath;
+  }
+
+  /** Apply retention policy to old snapshots */
+  private applyRetentionPolicy(): void {
+    if (!existsSync(SNAPSHOT_DIR)) return;
+
+    const files = readdirSync(SNAPSHOT_DIR)
+      .filter(f => f.endsWith('.heapsnapshot'))
+      .map(f => {
+        const filepath = join(SNAPSHOT_DIR, f);
+        const stat = statSync(filepath);
+        return { filename: f, filepath, mtime: stat.mtime.getTime() };
+      })
+      .sort((a, b) => b.mtime - a.mtime); // Sort by modification time, newest first
+
+    const now = Date.now();
+    const maxAgeMs = MAX_SNAPSHOT_AGE_DAYS * 24 * 60 * 60 * 1000;
+
+    // Remove old snapshots beyond retention limits
+    for (let i = MAX_DISK_SNAPSHOTS; i < files.length; i++) {
+      try {
+        unlinkSync(files[i].filepath);
+      } catch (err) {
+        console.error(`Failed to delete old snapshot ${files[i].filename}:`, err);
+      }
+    }
+
+    // Remove snapshots beyond age limit
+    for (const file of files) {
+      if (now - file.mtime > maxAgeMs) {
+        try {
+          unlinkSync(file.filepath);
+        } catch (err) {
+          console.error(`Failed to delete aged snapshot ${file.filename}:`, err);
+        }
+      }
+    }
+  }
+
+  /** Get count of snapshots on disk */
+  getSnapshotCount(): number {
+    if (!existsSync(SNAPSHOT_DIR)) return 0;
+    return readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.heapsnapshot')).length;
   }
 
   /** Start periodic memory capture and snapshot writing */
