@@ -25,7 +25,7 @@ import { FileContextPanel } from './components/FileContextPanel.js';
 import { ConversationTranscript } from './components/ConversationTranscript.js';
 import { CrossReferencePanel } from './components/CrossReferencePanel.js';
 import { BudgetAlertPanel } from './components/BudgetAlertPanel.js';
-import { getCostTracker } from './utils/costTracking.js';
+import { getCostTracker, CostTracker } from './utils/costTracking.js';
 import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
 import { parseGitEvents } from '../gitParser.js';
@@ -1354,7 +1354,12 @@ export class FabricTuiApp {
         lastActivity: w.lastActivity,
       }));
 
-      const digest = generateSessionDigest(allEvents, workerSummaries);
+      // Create a fresh CostTracker for this digest to avoid double-counting
+      // if the digest is generated multiple times
+      const digestCostTracker = new CostTracker();
+      const digest = generateSessionDigest(allEvents, workerSummaries, {
+        costTracker: digestCostTracker,
+      });
       this.sessionDigest.setDigest(digest);
       this.sessionDigest.focus();
 

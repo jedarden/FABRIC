@@ -41,6 +41,7 @@ import {
   generateSessionDigest,
 } from './SessionDigest.js';
 import { LogEvent, WorkerSessionSummary, SessionDigest as SessionDigestData } from '../../types.js';
+import { CostTracker } from '../utils/costTracking.js';
 
 // Helper to create mock LogEvent
 function createMockEvent(overrides: Partial<LogEvent> = {}): LogEvent {
@@ -414,16 +415,16 @@ describe('generateSessionDigest', () => {
 
   it('should aggregate token information from events', () => {
     const events: LogEvent[] = [
-      createMockEvent({ msg: 'Event 1' }),
-      createMockEvent({ msg: 'Event 2' }),
+      createMockEvent({ msg: 'Event 1', input_tokens: 100, output_tokens: 50 }) as LogEvent,
+      createMockEvent({ msg: 'Event 2', input_tokens: 200, output_tokens: 100 }) as LogEvent,
     ];
-    // Add tokens to events (using any to bypass type check for testing)
-    (events[0] as any).tokens = 100;
-    (events[1] as any).tokens = 200;
 
-    const digest = generateSessionDigest(events, []);
+    const costTracker = new CostTracker();
+    const digest = generateSessionDigest(events, [], { costTracker });
 
-    expect(digest.cost.totalTokens).toBe(300);
+    expect(digest.cost.totalTokens).toBe(450); // 100+50+200+100
+    expect(digest.cost.inputTokens).toBe(300);
+    expect(digest.cost.outputTokens).toBe(150);
   });
 
   it('should include workers in digest', () => {
@@ -450,5 +451,41 @@ describe('generateSessionDigest', () => {
     const digest = generateSessionDigest(events, []);
 
     expect(digest.beadsCompleted[0].durationMs).toBe(5000);
+  });
+
+  it('should use real CostTracker when provided and calculate nonzero cost', () => {
+    const events: LogEvent[] = [
+      createMockEvent({
+        msg: 'API call with tokens',
+        input_tokens: 1000,
+        output_tokens: 500,
+      }) as LogEvent,
+      createMockEvent({
+        msg: 'Another API call',
+        input_tokens: 2000,
+        output_tokens: 1000,
+      }) as LogEvent,
+    ];
+
+    const costTracker = new CostTracker();
+    const digest = generateSessionDigest(events, [], { costTracker });
+
+    // Should have nonzero cost from the CostTracker
+    expect(digest.cost.totalTokens).toBeGreaterThan(0);
+    expect(digest.cost.inputTokens).toBe(3000);
+    expect(digest.cost.outputTokens).toBe(1500);
+    expect(digest.cost.estimatedCostUsd).toBeGreaterThan(0);
+  });
+
+  it('should return zero cost when no CostTracker provided', () => {
+    const events: LogEvent[] = [
+      createMockEvent({ msg: 'Event without token tracking' }),
+    ];
+
+    const digest = generateSessionDigest(events, []);
+
+    // Without CostTracker, cost should be zero
+    expect(digest.cost.totalTokens).toBe(0);
+    expect(digest.cost.estimatedCostUsd).toBe(0);
   });
 });

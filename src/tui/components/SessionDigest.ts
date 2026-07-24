@@ -21,6 +21,7 @@ import {
   ErrorCategory,
 } from '../../types.js';
 import { colors, getLevelColor } from '../utils/colors.js';
+import { CostTracker } from '../utils/costTracking.js';
 
 export interface SessionDigestOptions {
   /** Parent screen */
@@ -790,6 +791,7 @@ export function generateSessionDigest(
     startTime?: number;
     endTime?: number;
     includeCost?: boolean;
+    costTracker?: CostTracker; // Optional: if provided, use real cost tracking
   } = {}
 ): SessionDigestData {
   const startTime = options.startTime || (events.length > 0 ? events[0].ts : Date.now());
@@ -865,20 +867,32 @@ export function generateSessionDigest(
   const totalFiles = filesModified.length;
   const totalErrors = errors.length;
 
-  // Calculate cost (placeholder - would need actual token tracking)
-  const cost = {
-    totalTokens: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    estimatedCostUsd: 0,
+  // Calculate cost using CostTracker if provided, otherwise use placeholder
+  let cost: {
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
   };
 
-  // If we have token info in events, aggregate it
-  for (const event of events) {
-    const tokens = (event as any).tokens;
-    if (tokens) {
-      cost.totalTokens += tokens;
-    }
+  if (options.costTracker) {
+    // Process events through the cost tracker and get summary
+    events.forEach(event => options.costTracker!.processEvent(event));
+    const costSummary = options.costTracker.getSummary();
+    cost = {
+      totalTokens: costSummary.total.total,
+      inputTokens: costSummary.total.input,
+      outputTokens: costSummary.total.output,
+      estimatedCostUsd: costSummary.totalCostUsd,
+    };
+  } else {
+    // Fallback to placeholder (no cost tracking available)
+    cost = {
+      totalTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+    };
   }
 
   return {
