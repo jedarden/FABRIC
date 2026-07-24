@@ -34,6 +34,8 @@ describe('parseLogLine', () => {
         worker: 'w-abc123',
         level: 'info',
         msg: 'Test message',
+        host: 'localhost',
+        sequence: undefined,
       });
     });
 
@@ -62,6 +64,8 @@ describe('parseLogLine', () => {
         bead: 'bd-xyz',
         duration_ms: 5000,
         error: 'some error',
+        host: 'localhost',
+        sequence: undefined,
       });
     });
 

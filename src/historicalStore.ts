@@ -51,6 +51,7 @@ export interface TaskMetricsRecord {
   tokens_out: number;
   success: boolean;
   retry_count: number;
+  host?: string;
 }
 
 /**
@@ -66,6 +67,7 @@ export interface ErrorHistoryRecord {
   timestamp: number;
   resolution: string | null;
   resolution_successful: boolean | null;
+  host?: string;
 }
 
 /**
@@ -126,7 +128,7 @@ export interface LearnedRecoveryEntry {
 // Database Schema
 // ============================================
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const CREATE_SESSIONS_TABLE = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -234,6 +236,14 @@ const MIGRATE_V2_ADD_METRICS_SOURCE = `
 ALTER TABLE sessions ADD COLUMN metrics_source TEXT NOT NULL DEFAULT 'log-derived';
 `;
 
+// Schema v3 migration: add host column to task_metrics, error_history, metric_samples, session_worker_summaries
+const MIGRATE_V3_ADD_HOST_COLUMNS = `
+ALTER TABLE task_metrics ADD COLUMN host TEXT;
+ALTER TABLE error_history ADD COLUMN host TEXT;
+ALTER TABLE metric_samples ADD COLUMN host TEXT;
+ALTER TABLE session_worker_summaries ADD COLUMN host TEXT;
+`;
+
 // ============================================
 // Historical Store Class
 // ============================================
@@ -299,6 +309,15 @@ export class HistoricalStore {
         this.db.exec(MIGRATE_V2_ADD_METRICS_SOURCE);
       } catch {
         // Column already exists — safe to ignore
+      }
+    }
+
+    if (currentVersion < 3) {
+      // v3: add host column to task_metrics, error_history, metric_samples, session_worker_summaries
+      try {
+        this.db.exec(MIGRATE_V3_ADD_HOST_COLUMNS);
+      } catch {
+        // Columns already exist — safe to ignore
       }
     }
 
@@ -372,6 +391,7 @@ export class HistoricalStore {
     tokensOut: number;
     success: boolean;
     retryCount: number;
+    host?: string;
   }): string {
     if (!this.currentSessionId) {
       this.startSession();
@@ -383,8 +403,8 @@ export class HistoricalStore {
     this.db.prepare(`
       INSERT INTO task_metrics (
         id, session_id, worker_id, task_type, started_at, ended_at,
-        duration_ms, cost, tokens_in, tokens_out, success, retry_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        duration_ms, cost, tokens_in, tokens_out, success, retry_count, host
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       taskId,
       this.currentSessionId,
@@ -397,7 +417,8 @@ export class HistoricalStore {
       task.tokensIn,
       task.tokensOut,
       task.success ? 1 : 0,
-      task.retryCount
+      task.retryCount,
+      task.host || null
     );
 
     // Update session task count
@@ -417,6 +438,7 @@ export class HistoricalStore {
     errorMessage: string;
     filePath?: string;
     timestamp: number;
+    host?: string;
   }): number {
     if (!this.currentSessionId) {
       this.startSession();
@@ -424,15 +446,16 @@ export class HistoricalStore {
 
     const result = this.db.prepare(`
       INSERT INTO error_history (
-        session_id, worker_id, error_type, error_message, file_path, timestamp
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        session_id, worker_id, error_type, error_message, file_path, timestamp, host
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       this.currentSessionId,
       error.workerId,
       error.errorType,
       error.errorMessage,
       error.filePath || null,
-      error.timestamp
+      error.timestamp,
+      error.host || null
     );
 
     return result.lastInsertRowid as number;
@@ -467,14 +490,15 @@ export class HistoricalStore {
     timestamp: number;
     source: string;
     beadId?: string;
+    host?: string;
   }): void {
     if (!this.currentSessionId) {
       this.startSession();
     }
 
     this.db.prepare(`
-      INSERT INTO metric_samples (worker_id, metric_name, value, timestamp, source, bead_id, session_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO metric_samples (worker_id, metric_name, value, timestamp, source, bead_id, session_id, host)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       sample.workerId,
       sample.metricName,
@@ -483,6 +507,7 @@ export class HistoricalStore {
       sample.source,
       sample.beadId || null,
       this.currentSessionId,
+      sample.host || null,
     );
   }
 
@@ -499,6 +524,7 @@ export class HistoricalStore {
     beadsFailed: number;
     errors: number;
     metricsSource: string;
+    host?: string;
   }): void {
     if (!this.currentSessionId) {
       this.startSession();
@@ -511,8 +537,8 @@ export class HistoricalStore {
 
     this.db.prepare(`
       INSERT INTO session_worker_summaries
-        (session_id, worker_id, tokens_in, tokens_out, cost_usd, beads_completed, beads_failed, errors, metrics_source, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (session_id, worker_id, tokens_in, tokens_out, cost_usd, beads_completed, beads_failed, errors, metrics_source, updated_at, host)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id, worker_id) DO UPDATE SET
         tokens_in      = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.tokens_in      ELSE tokens_in END,
         tokens_out     = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.tokens_out     ELSE tokens_out END,
@@ -521,6 +547,7 @@ export class HistoricalStore {
         beads_failed   = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.beads_failed   ELSE beads_failed END,
         errors         = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.errors         ELSE errors END,
         metrics_source = CASE WHEN ${incomingRank} <= CASE metrics_source WHEN 'otlp-metric' THEN 0 WHEN 'otlp-span' THEN 1 ELSE 2 END THEN excluded.metrics_source ELSE metrics_source END,
+        host           = excluded.host,
         updated_at = excluded.updated_at
     `).run(
       this.currentSessionId,
@@ -533,6 +560,7 @@ export class HistoricalStore {
       summary.errors,
       summary.metricsSource,
       Date.now(),
+      summary.host || null,
     );
   }
 

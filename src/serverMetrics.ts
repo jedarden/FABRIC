@@ -33,10 +33,35 @@ export class ServerMetrics {
   private _tailerFilesWatched = 0;
   private _eventCount = 0;
   private _dedupDropped = 0;
+  // Track events per host for multi-host aggregation
+  private eventsPerHost: Map<string, number> = new Map();
+  private eventTimestampsPerHost: Map<string, number[]> = new Map();
 
-  recordEvent(): void {
+  recordEvent(host?: string): void {
     this._eventCount++;
     this.eventTimestamps.push(Date.now());
+
+    // Track per-host metrics
+    // If no host provided, try to get local hostname
+    const hostKey = host || this.getLocalHostname();
+    const currentCount = this.eventsPerHost.get(hostKey) || 0;
+    this.eventsPerHost.set(hostKey, currentCount + 1);
+
+    if (!this.eventTimestampsPerHost.has(hostKey)) {
+      this.eventTimestampsPerHost.set(hostKey, []);
+    }
+    this.eventTimestampsPerHost.get(hostKey)!.push(Date.now());
+  }
+
+  private getLocalHostname(): string {
+    // Try to get hostname from environment or use 'localhost'
+    if (typeof process !== 'undefined' && process.env.HOSTNAME) {
+      return process.env.HOSTNAME;
+    }
+    if (typeof process !== 'undefined' && process.env.HOST) {
+      return process.env.HOST;
+    }
+    return 'localhost';
   }
 
   set wsClients(count: number) {
@@ -87,6 +112,8 @@ export class ServerMetrics {
     this._pruneLastRunTimestamp = 0;
     this._pruneLastSuccessTimestamp = 0;
     this._logsDirBytes = 0;
+    this.eventsPerHost.clear();
+    this.eventTimestampsPerHost.clear();
   }
 
   private ingestRate(): number {
@@ -101,6 +128,24 @@ export class ServerMetrics {
     if (spanSec < 0.001) return 0;
 
     return this.eventTimestamps.length / spanSec;
+  }
+
+  /** Get ingest rate for a specific host */
+  private ingestRateForHost(host: string): number {
+    const now = Date.now();
+    const cutoff = now - 60_000;
+    const timestamps = this.eventTimestampsPerHost.get(host);
+    if (!timestamps) return 0;
+
+    // Filter to last 60s
+    const recentTimestamps = timestamps.filter(t => t >= cutoff);
+
+    if (recentTimestamps.length < 2) return 0;
+
+    const spanSec = (now - recentTimestamps[0]) / 1000;
+    if (spanSec < 0.001) return 0;
+
+    return recentTimestamps.length / spanSec;
   }
 
   snapshot(): ServerMetricsSnapshot {
@@ -144,6 +189,14 @@ export class ServerMetrics {
     metric('tailer_files_watched', 'gauge', 'Log files being watched', snap.tailer_files_watched);
     metric('dedup_dropped_total', 'counter', 'Total duplicate events dropped', snap.dedup_dropped);
     metric('process_resident_memory_bytes', 'gauge', 'Process RSS in bytes', snap.process_resident_memory_bytes);
+
+    // Per-host metrics for multi-host aggregation
+    for (const [host, count] of this.eventsPerHost) {
+      const hostLabel = host ? `host="${host}"` : 'host="unknown"';
+      const ingestRate = this.ingestRateForHost(host);
+      metric('event_count', 'gauge', 'Total events in store by host', count, hostLabel);
+      metric('ingest_rate_per_second', 'gauge', 'Events ingested per second by host (60s window)', ingestRate, hostLabel);
+    }
 
     // Log retention metrics
     if (snap.prune_last_run_timestamp_seconds !== undefined) {

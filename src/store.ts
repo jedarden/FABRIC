@@ -374,6 +374,7 @@ export class InMemoryEventStore implements EventStore {
       for (const wm of allWorkerMetrics) {
         const metricSnap = accumulator.getSnapshot(wm.workerId);
         if (!metricSnap) continue;
+        const workerInfo = this.workers.get(wm.workerId);
         this.historicalStore.upsertSessionWorkerSummary({
           workerId: wm.workerId,
           tokensIn: metricSnap.tokensIn,
@@ -383,6 +384,7 @@ export class InMemoryEventStore implements EventStore {
           beadsFailed: metricSnap.beadsFailed,
           errors: metricSnap.errors,
           metricsSource: 'otlp-metric',
+          host: workerInfo?.host,
         });
       }
     }
@@ -543,6 +545,7 @@ export class InMemoryEventStore implements EventStore {
           errorMessage: group.fingerprint.sampleMessage,
           filePath: event.path,
           timestamp: event.ts,
+          host: event.host,
         });
       }
     }
@@ -634,6 +637,7 @@ export class InMemoryEventStore implements EventStore {
         activeDirectories: [],
         collisionTypes: [],
         eventCount: 1,
+        host: event.host, // Set host from first event
       };
       this.workers.set(event.worker, worker);
     } else {
@@ -651,6 +655,11 @@ export class InMemoryEventStore implements EventStore {
       // Register with MemorySampler
       const sampler = getMemorySampler();
       sampler.registerWorkerPid(event.worker, pid);
+    }
+
+    // Track host from event if available (for multi-host aggregation)
+    if (event.host !== undefined && worker.host !== event.host) {
+      worker.host = event.host;
     }
 
     // Track active bead
@@ -834,6 +843,7 @@ export class InMemoryEventStore implements EventStore {
           tokensOut,
           success: event.level !== 'error',
           retryCount: 0,
+          host: event.host,
         });
 
         // Clean up

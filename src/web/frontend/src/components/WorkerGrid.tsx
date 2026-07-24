@@ -142,6 +142,11 @@ const WorkerGrid: React.FC<WorkerGridProps> = ({
               <div className="worker-card-header">
                 <span className="worker-id">
                   {worker.id}
+                  {worker.host && (
+                    <span className="host-badge" title={`Host: ${worker.host}`}>
+                      @{worker.host}
+                    </span>
+                  )}
                   {worker.hasCollision && (
                     <span className="collision-indicator" title="File collision detected!">
                       ⚠️

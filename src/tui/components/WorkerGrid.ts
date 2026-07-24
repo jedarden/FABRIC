@@ -139,6 +139,7 @@ export class WorkerGrid {
     const color = this.getStateColor(worker);
     const stateLabel = this.getStateLabel(worker);
     const workerId = worker.id.slice(0, 12);
+    const host = worker.host || 'localhost';
 
     // Show currentBead when WORKING, otherwise show '-' or lastEvent.bead if available
     let currentBead = '-';
@@ -168,7 +169,7 @@ export class WorkerGrid {
       ? ` ${worker.lastEvent.msg.slice(0, 25)}${worker.lastEvent.msg.length > 25 ? '…' : ''}`
       : '';
 
-    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/}} {{bold}}${workerId}{{/}} ${pinIndicator} {${color}-fg}${stateLabel}{/}} ${stuckIndicator} {{gray-fg}}${currentBead}{{/}} {{cyan-fg}}${completedCount} done{{/}} {{blue-fg}}${duration}{{/}} ${taskMsg}${collisionIndicator}${dimSuffix}`;
+    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/}} {{bold}}${workerId}{{/}} {magenta-fg}[${host.slice(0, 8)}]{/} ${pinIndicator} {${color}-fg}${stateLabel}{/}} ${stuckIndicator} {{gray-fg}}${currentBead}{{/}} {{cyan-fg}}${completedCount} done{{/}} {{blue-fg}}${duration}{{/}} ${taskMsg}${collisionIndicator}${dimSuffix}`;
   }
 
   /**

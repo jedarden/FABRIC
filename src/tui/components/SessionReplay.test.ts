@@ -590,7 +590,7 @@ describe('SessionReplay', () => {
 
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
-      vi.mocked(fs.readdirSync).mockReturnValue(['worker-abc123.jsonl', 'worker-def456.jsonl']);
+      vi.mocked(fs.readdirSync).mockReturnValue(['worker-abc123.jsonl', 'worker-def456.jsonl'] as any);
 
       // Mock readFileSync to return different content based on file path
       vi.mocked(fs.readFileSync).mockImplementation((path) => {
@@ -657,7 +657,7 @@ describe('SessionReplay', () => {
 
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
-      vi.mocked(fs.readdirSync).mockReturnValue(['good-file.jsonl', 'bad-file.jsonl']);
+      vi.mocked(fs.readdirSync).mockReturnValue(['good-file.jsonl', 'bad-file.jsonl'] as any);
 
       const goodEvents = [{ ts: 1000, worker: 'w-1', level: 'info', msg: 'Good event' }];
       const goodContent = goodEvents.map(e => JSON.stringify(e)).join('\n');
@@ -695,7 +695,7 @@ describe('SessionReplay', () => {
 
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
-      vi.mocked(fs.readdirSync).mockReturnValue(['worker-abc123.jsonl', 'worker-def456.jsonl']);
+      vi.mocked(fs.readdirSync).mockReturnValue(['worker-abc123.jsonl', 'worker-def456.jsonl'] as any);
 
       vi.mocked(fs.readFileSync).mockImplementation((path) => {
         const pathStr = path as string;
@@ -735,7 +735,7 @@ describe('SessionReplay', () => {
 
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
-      vi.mocked(fs.readdirSync).mockReturnValue(['worker.jsonl']);
+      vi.mocked(fs.readdirSync).mockReturnValue(['worker.jsonl'] as any);
       vi.mocked(fs.readFileSync).mockReturnValue(dirContent);
 
       const count = await replay.loadSource({ kind: 'directory', path: testDir });
@@ -761,7 +761,7 @@ describe('SessionReplay', () => {
 
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
-      vi.mocked(fs.readdirSync).mockReturnValue(['file1.jsonl', 'file2.jsonl']);
+      vi.mocked(fs.readdirSync).mockReturnValue(['file1.jsonl', 'file2.jsonl'] as any);
 
       vi.mocked(fs.readFileSync).mockImplementation((path) => {
         const pathStr = path as string;

@@ -714,7 +714,8 @@ program
             path: resolved.path,
             parseJson: true,
             follow: false,
-            lines: 0, // Load all lines
+            lines: 0,
+            startPosition: 0, // Read from beginning for digest (files may be old)
           });
 
       let eventCount = 0;

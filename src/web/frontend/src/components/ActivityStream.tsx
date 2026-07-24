@@ -203,6 +203,11 @@ const ActivityStream: React.FC<ActivityStreamProps> = ({
                   {!selectedWorker && (
                     <span className="event-worker">[{truncateWorker(event.worker)}]</span>
                   )}
+                  {event.host && (
+                    <span className="event-host" title={`Host: ${event.host}`}>
+                      @{event.host.slice(0, 8)}
+                    </span>
+                  )}
                   {event.bead && (
                     <span className="event-bead" title={`Bead: ${event.bead}`}>
                       [{event.bead}]
