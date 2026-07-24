@@ -251,6 +251,9 @@ export interface NeedleEvent {
 
   /** Event-specific payload */
   data: Record<string, unknown>;
+
+  /** Optional: Host/machine identifier where the event originated (for multi-host aggregation) */
+  host?: string;
 }
 
 // ============================================
@@ -515,6 +518,9 @@ export interface LogEvent {
   /** AI model identifier extracted from NEEDLE worker string (e.g. 'sonnet', 'gpt-4o') */
   model?: string;
 
+  /** Optional: Host/machine identifier where the event originated (for multi-host aggregation) */
+  host?: string;
+
   /** Any additional fields */
   [key: string]: unknown;
 }
@@ -607,6 +613,9 @@ export interface WorkerInfo {
 
   /** Process ID for this worker (from OTLP telemetry or needle state) */
   pid?: number;
+
+  /** Host/machine identifier where this worker is running (for multi-host aggregation) */
+  host?: string;
 
   /** Current RSS from /proc/<pid>/status in KB */
   rssKb?: number;

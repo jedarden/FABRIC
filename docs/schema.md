@@ -20,6 +20,7 @@ shape:
   "session_id": "d7261357",
   "sequence": 1,
   "bead_id": "bd-abc123",
+  "host": "ex44",
   "data": {}
 }
 ```
@@ -36,6 +37,7 @@ shape:
 | `sequence` | `number` | **yes** | Per-worker monotonic counter. Authoritative for ordering within a worker. |
 | `bead_id` | `string` | no | Present when the event pertains to a specific bead. |
 | `data` | `object` | **yes** | Event-specific payload (see taxonomy table for notable fields). May be empty `{}`. |
+| `host` | `string` | no | Host/machine identifier where the event originated. Enables multi-host aggregation when multiple NEEDLE instances push to one FABRIC. |
 
 ## Ordering Contract
 
