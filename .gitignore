@@ -22,3 +22,13 @@ npm-debug.log*
 
 # Test coverage
 coverage/
+
+# TypeScript build cache
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Marathon logs (large session files)
+.marathon/logs/
+
+# Bead traces (temporary execution artifacts)
+.beads/traces/
