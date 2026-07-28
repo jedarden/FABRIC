@@ -107,6 +107,189 @@ describe('digest command (integration)', () => {
     }, 10000);
   });
 
+  describe('--source option edge cases', () => {
+    test('handles non-existent file path gracefully', () => {
+      const nonExistentPath = join(FIXTURES_DIR, 'does-not-exist.jsonl');
+
+      // Should exit with error message
+      expect(() => {
+        execSync(`node ${DIST_CLI} digest --source ${nonExistentPath}`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        });
+      }).toThrow();
+    }, 10000);
+
+    test('handles relative file paths correctly', () => {
+      // Create a temp file in current directory
+      const tempFileName = 'test-relative-path.jsonl';
+      const testEvent = '{"ts":1709337600,"worker":"test-worker","level":"info","msg":"Test event"}\n';
+
+      try {
+        writeFileSync(tempFileName, testEvent, 'utf8');
+
+        // Test with relative path (just filename, no directory)
+        const { stdout, stderr } = execCaptureStderr(
+          `node ${DIST_CLI} digest --source ${tempFileName}`
+        );
+
+        // Should successfully process the file
+        expect(stderr).toContain('Loaded 1 events');
+        expect(stdout).toContain('test-worker');
+        expect(stdout).toContain('# Session Digest');
+      } finally {
+        // Clean up
+        if (existsSync(tempFileName)) {
+          unlinkSync(tempFileName);
+        }
+      }
+    }, 10000);
+
+    test('handles absolute file paths correctly', () => {
+      // Create a temp file with absolute path
+      const tempFile = join(process.cwd(), 'test-absolute-path.jsonl');
+      const testEvent = '{"ts":1709337600,"worker":"test-worker-abs","level":"info","msg":"Test event"}\n';
+
+      try {
+        writeFileSync(tempFile, testEvent, 'utf8');
+
+        // Test with absolute path
+        const { stdout, stderr } = execCaptureStderr(
+          `node ${DIST_CLI} digest --source ${tempFile}`
+        );
+
+        // Should successfully process the file
+        expect(stderr).toContain('Loaded 1 events');
+        expect(stdout).toContain('test-worker-abs');
+        expect(stdout).toContain('# Session Digest');
+
+        // Verify the absolute path is logged correctly
+        expect(stderr).toContain(tempFile);
+      } finally {
+        // Clean up
+        if (existsSync(tempFile)) {
+          unlinkSync(tempFile);
+        }
+      }
+    }, 10000);
+
+    test('handles paths with tilde home expansion', () => {
+      // This test verifies that paths starting with ~ are expanded correctly
+      // We'll use a temp directory in home and access it via ~/path
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      if (!homeDir) {
+        console.log('Skipping test: HOME directory not found');
+        return;
+      }
+
+      const tempFileName = 'test-tilde-expansion.jsonl';
+      const tempFilePath = join(homeDir, tempFileName);
+      const testEvent = '{"ts":1709337600,"worker":"test-worker-tilde","level":"info","msg":"Test event"}\n';
+
+      try {
+        writeFileSync(tempFilePath, testEvent, 'utf8');
+
+        // Test with tilde path
+        const { stdout, stderr } = execCaptureStderr(
+          `node ${DIST_CLI} digest --source ~/${tempFileName}`
+        );
+
+        // Should successfully process the file
+        expect(stderr).toContain('Loaded 1 events');
+        expect(stdout).toContain('test-worker-tilde');
+        expect(stdout).toContain('# Session Digest');
+      } finally {
+        // Clean up
+        if (existsSync(tempFilePath)) {
+          unlinkSync(tempFilePath);
+        }
+      }
+    }, 10000);
+
+    test('handles empty string as source path', () => {
+      // Empty string should trigger default behavior (use ~/.needle/logs/)
+      const { stdout, stderr } = execCaptureStderr(
+        `node ${DIST_CLI} digest --source ""`
+      );
+
+      // Should produce a valid digest with default source
+      const output = stdout + stderr;
+      expect(output).toContain('# Session Digest');
+
+      // Should indicate it's using the default logs directory
+      expect(stderr).toContain('.needle/logs');
+    }, 10000);
+
+    test('handles file paths with special characters', () => {
+      // Test paths with spaces, parentheses, and other special chars
+      const specialCases = [
+        'test file with spaces.jsonl',
+        'test-file-with(parentheses).jsonl',
+        'test-file-with[brackets].jsonl',
+        "test-file-with'quotes'.jsonl",
+      ];
+
+      for (const filename of specialCases) {
+        const tempFile = join(process.cwd(), filename);
+        const testEvent = '{"ts":1709337600,"worker":"test-worker-special","level":"info","msg":"Test event"}\n';
+
+        try {
+          writeFileSync(tempFile, testEvent, 'utf8');
+
+          // Test with special character filename (properly quoted)
+          const { stdout, stderr } = execCaptureStderr(
+            `node ${DIST_CLI} digest --source "${tempFile}"`
+          );
+
+          // Should successfully process the file
+          expect(stderr).toContain('Loaded 1 events');
+          expect(stdout).toContain('test-worker-special');
+          expect(stdout).toContain('# Session Digest');
+        } finally {
+          // Clean up
+          if (existsSync(tempFile)) {
+            unlinkSync(tempFile);
+          }
+        }
+      }
+    }, 15000);
+
+    test('handles directory path with trailing slash', () => {
+      // Test that directory paths with trailing slashes work correctly
+      const { stdout, stderr } = execCaptureStderr(
+        `node ${DIST_CLI} digest --source "${FIXTURES_DIR}/"`
+      );
+
+      // Should process directory correctly despite trailing slash
+      expect(stderr).toContain('(directory)');
+      expect(stdout).toContain('alpha-d6288428');
+      expect(stdout).toContain('bravo-44c92b93');
+      expect(stdout).toContain('# Session Digest');
+    }, 10000);
+
+    test('handles relative directory paths correctly', () => {
+      // Change to a different directory and use relative path
+      const originalDir = process.cwd();
+
+      try {
+        // Navigate to tests directory
+        process.chdir(join(process.cwd(), 'tests'));
+
+        const { stdout, stderr } = execCaptureStderr(
+          `node ${join(originalDir, 'dist', 'cli.js')} digest --source fixtures/needle-logs`
+        );
+
+        // Should successfully process the directory with relative path
+        expect(stderr).toContain('(directory)');
+        expect(stdout).toContain('alpha-d6288428');
+        expect(stdout).toContain('# Session Digest');
+      } finally {
+        // Restore original directory
+        process.chdir(originalDir);
+      }
+    }, 10000);
+  });
+
   describe('--source option with file path', () => {
     test('resolves file path: resolved.kind is file and resolved.path matches input', () => {
       // Create a temporary log file for this test
