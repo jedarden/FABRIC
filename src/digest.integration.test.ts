@@ -12,10 +12,9 @@
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync, ExecSyncOptionsWithStringEncoding } from 'node:child_process';
-import { unlinkSync, existsSync as exists } from 'node:fs';
 
 /** Helper to run command and capture both stdout and stderr */
 function execCaptureStderr(cmd: string): { stdout: string; stderr: string } {
@@ -108,6 +107,41 @@ describe('digest command (integration)', () => {
   });
 
   describe('--source option with file path', () => {
+    test('resolves file path: resolved.kind is file and resolved.path matches input', () => {
+      // Create a temporary log file for this test
+      const tempFile = join(process.cwd(), 'test-temp-log-file.jsonl');
+      const testEvent = '{"ts":1709337600,"worker":"test-worker","level":"info","msg":"Test event"}\n';
+
+      try {
+        // Write test event to temporary file
+        writeFileSync(tempFile, testEvent, 'utf8');
+
+        // Run digest command with --source pointing to the temporary file
+        const { stdout, stderr } = execCaptureStderr(
+          `node ${DIST_CLI} digest --source ${tempFile}`
+        );
+
+        // Verify resolved.kind === 'file' (logged to stderr)
+        expect(stderr).toContain('(file)');
+
+        // Verify resolved.path matches the input file path
+        expect(stderr).toContain(tempFile);
+
+        // Verify the command processes the file correctly
+        expect(stderr).toContain('Loaded 1 events');
+        expect(stdout).toContain('test-worker');
+
+        // Verify digest structure is valid
+        expect(stdout).toContain('# Session Digest');
+        expect(stdout).toContain('## Summary');
+      } finally {
+        // Clean up temporary file
+        if (existsSync(tempFile)) {
+          unlinkSync(tempFile);
+        }
+      }
+    }, 10000);
+
     test('correctly processes file source and shows kind=file', () => {
       const alphaLog = join(FIXTURES_DIR, 'alpha-d6288428.jsonl');
       if (!existsSync(alphaLog)) {
@@ -209,7 +243,7 @@ describe('digest command (integration)', () => {
 
     afterAll(() => {
       // Clean up test output file
-      if (exists(outputFile)) {
+      if (existsSync(outputFile)) {
         unlinkSync(outputFile);
       }
     });
@@ -227,7 +261,7 @@ describe('digest command (integration)', () => {
       expect(stdout).toBe('');
 
       // File should exist and contain digest
-      expect(exists(outputFile)).toBe(true);
+      expect(existsSync(outputFile)).toBe(true);
       const content = readFileSync(outputFile, 'utf-8');
       expect(content).toContain('# Session Digest');
       expect(content).toContain('alpha-d6288428');
