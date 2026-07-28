@@ -750,13 +750,30 @@ program
     // Resolve source from CLI options
     // Flow: options.source → resolveFromOptions(options.source, options.file) → ResolvedSource
     //
-    // - If --source is provided, resolveSource() checks if the path exists and determines
-    //   if it's a directory or file. Errors if the path doesn't exist.
-    // - If -f/--file is provided (legacy backward compatibility), treats it as a file path
-    //   without existence checking.
-    // - If neither is provided, defaults to ~/.needle/logs directory.
+    // The resolveFromOptions() function (line 95 in src/cli.ts) implements backward-compatible
+    // source resolution with the following priority:
     //
-    // Returns: { kind: 'directory', path: string } | { kind: 'file', path: string }
+    // 1. --source <path> (modern option, recommended):
+    //    - Calls resolveSource() which validates path existence via fs.statSync()
+    //    - Auto-detects if path is a directory or file
+    //    - Exits with error if path doesn't exist
+    //    - Supports ~ expansion for home directory
+    //
+    // 2. -f/--file <path> (legacy option, for backward compatibility):
+    //    - Treats path as a file without existence checking
+    //    - Supports ~ expansion for home directory
+    //    - Used by older FABRIC invocations that predate --source
+    //
+    // 3. Default (neither option provided):
+    //    - Resolves to ~/.needle/logs as a directory
+    //
+    // Returns: ResolvedSource = { kind: 'directory', path: string } | { kind: 'file', path: string }
+    //
+    // Examples:
+    //   fabric digest --source /path/to/logs.jsonl      → file kind
+    //   fabric digest --source ~/.needle/logs/          → directory kind
+    //   fabric digest -f /path/to/file.jsonl            → file kind (legacy)
+    //   fabric digest                                    → ~/.needle/logs directory
     const resolved = resolveFromOptions(options.source, options.file);
 
     console.error(`FABRIC Digest - Analyzing: ${resolved.path} (${resolved.kind})`);
