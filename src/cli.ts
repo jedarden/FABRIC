@@ -27,7 +27,28 @@ type ResolvedSource = { kind: 'directory'; path: string } | { kind: 'file'; path
 
 const HOME = process.env.HOME || '';
 
-/** Resolve --source to a typed source. Errors if path doesn't exist. */
+/**
+ * Resolve --source option value to a typed source with validation.
+ *
+ * This is called by resolveFromOptions() when the --source option is provided.
+ * It performs actual filesystem validation to determine whether the path is a directory
+ * or file, and exits with an error if the path doesn't exist.
+ *
+ * @param source - The --source option value (file or directory path). Can include ~ as
+ *                 home directory shorthand.
+ * @returns A ResolvedSource object with 'kind' set to 'directory' or 'file' based on
+ *          fs.statSync(), and the expanded absolute path.
+ *
+ * Validation behavior:
+ *   - Expands leading ~ to $HOME environment variable
+ *   - Calls fs.statSync() to check path existence and type
+ *   - Returns { kind: 'directory', path: expanded } for directories
+ *   - Returns { kind: 'file', path: expanded } for files
+ *   - Exits process(1) with error message if path doesn't exist
+ *
+ * Note: This is only called when --source is explicitly provided. The legacy -f/--file
+ * option bypasses this validation (see resolveFromOptions()).
+ */
 function resolveSource(source: string): ResolvedSource {
   const expanded = source.startsWith('~') ? source.replace('~', HOME) : source;
   try {
@@ -41,7 +62,36 @@ function resolveSource(source: string): ResolvedSource {
   }
 }
 
-/** Resolve CLI source options into a typed source. */
+/**
+ * Resolve CLI source options into a typed source.
+ *
+ * This function implements the backward-compatible source resolution logic for FABRIC commands.
+ * It prioritizes --source over -f/--file, with a default to ~/.needle/logs if neither is provided.
+ *
+ * @param source - The --source option value (file or directory path). If provided, this takes
+ *                 precedence over `file` and is validated via resolveSource().
+ * @param file - The legacy -f/--file option value (file path only). Used for backward compatibility
+ *               with older FABRIC invocations that predate --source.
+ * @returns A ResolvedSource object indicating the kind ('directory' | 'file') and expanded path.
+ *
+ * Flow:
+ *   1. If `source` is provided → call resolveSource(source), which:
+ *      - Expands ~ to $HOME
+ *      - Checks if path exists (fs.statSync)
+ *      - Returns { kind: 'directory', path } or { kind: 'file', path }
+ *      - Exits with error if path doesn't exist
+ *   2. Else if `file` is provided → treat as file path:
+ *      - Expands ~ to $HOME if present
+ *      - Returns { kind: 'file', path } (no existence check)
+ *   3. Else → default to ~/.needle/logs as directory
+ *
+ * Usage examples:
+ *   - `fabric digest --source /path/to/logs` → resolves to directory or file based on fs.stat
+ *   - `fabric digest -f /path/to/file.jsonl` → resolves as file (legacy)
+ *   - `fabric digest` → resolves to ~/.needle/logs as directory
+ *
+ * See also: resolveSource() (handles the actual path validation), ResolvedSource type.
+ */
 function resolveFromOptions(source?: string, file?: string): ResolvedSource {
   if (source) return resolveSource(source);
   if (file) return { kind: 'file', path: file.startsWith('~') ? file.replace('~', HOME) : file };
@@ -687,7 +737,7 @@ program
   .command('digest')
   .description('Generate session digest from log source (directory or file)')
   .option('-f, --file <path>', 'Log file to analyze (single-file mode)')
-  .option('-s, --source <path>', 'Log source (file or directory)', undefined)
+  .option('--source <path>', 'Log source (file or directory)', undefined)
   .option('-o, --output <path>', 'Output file (default: stdout)')
   .option('-w, --worker <ids>', 'Filter by worker IDs (comma-separated)')
   .option('--since <timestamp>', 'Start time (Unix timestamp in ms)')
@@ -697,6 +747,16 @@ program
   .option('--no-cost', 'Exclude cost information')
   .option('--no-errors', 'Exclude error information')
   .action(async (options) => {
+    // Resolve source from CLI options
+    // Flow: options.source → resolveFromOptions(options.source, options.file) → ResolvedSource
+    //
+    // - If --source is provided, resolveSource() checks if the path exists and determines
+    //   if it's a directory or file. Errors if the path doesn't exist.
+    // - If -f/--file is provided (legacy backward compatibility), treats it as a file path
+    //   without existence checking.
+    // - If neither is provided, defaults to ~/.needle/logs directory.
+    //
+    // Returns: { kind: 'directory', path: string } | { kind: 'file', path: string }
     const resolved = resolveFromOptions(options.source, options.file);
 
     console.error(`FABRIC Digest - Analyzing: ${resolved.path} (${resolved.kind})`);
