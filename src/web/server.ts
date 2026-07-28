@@ -124,7 +124,7 @@ export interface WebServer extends EventEmitter {
   getPort(): number;
   broadcast(event: LogEvent): void;
   broadcastCollisions(): void;
-  recordEvent(): void;
+  recordEvent(host?: string, workerId?: string): void;
   setTailerFilesWatched(count: number): void;
 }
 
