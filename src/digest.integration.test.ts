@@ -107,6 +107,50 @@ describe('digest command (integration)', () => {
     }, 10000);
   });
 
+  describe('--source option with file path', () => {
+    test('correctly processes file source and shows kind=file', () => {
+      const alphaLog = join(FIXTURES_DIR, 'alpha-d6288428.jsonl');
+      if (!existsSync(alphaLog)) {
+        throw new Error(`Fixture not found: ${alphaLog}`);
+      }
+
+      const { stdout, stderr } = execCaptureStderr(
+        `node ${DIST_CLI} digest --source ${alphaLog}`
+      );
+
+      // Verify resolved.kind is 'file' (shown in stderr)
+      expect(stderr).toContain('(file)');
+
+      // Verify resolved.path matches the input
+      expect(stderr).toContain(alphaLog);
+
+      // Verify command processes the file correctly (loaded events)
+      expect(stderr).toContain('Loaded 4 events');
+
+      // Verify digest output includes events from the specified file
+      expect(stdout).toContain('alpha-d6288428');
+      expect(stdout).toContain('bd-a1b2'); // Bead from the file
+      expect(stdout).not.toContain('bravo-44c92b93'); // Other worker not included
+
+      // Should be valid digest
+      expect(stdout).toContain('# Session Digest');
+      expect(stdout).toContain('## Summary');
+      expect(stdout).toContain('Total Events | 4');
+    }, 10000);
+
+    test('validates path exists and exits with error for non-existent file', () => {
+      const nonExistentPath = join(FIXTURES_DIR, 'does-not-exist.jsonl');
+
+      // Should exit with error message
+      expect(() => {
+        execSync(`node ${DIST_CLI} digest --source ${nonExistentPath}`, {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        });
+      }).toThrow();
+    }, 10000);
+  });
+
   describe('backward compatibility: single-file mode', () => {
     test('-f/--file option still works for single files', () => {
       const alphaLog = join(FIXTURES_DIR, 'alpha-d6288428.jsonl');
