@@ -15,6 +15,7 @@ import { describe, test, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync, ExecSyncOptionsWithStringEncoding } from 'node:child_process';
+import { createTempLogFile } from './testHelpers.js';
 
 /** Helper to run command and capture both stdout and stderr */
 function execCaptureStderr(cmd: string): { stdout: string; stderr: string } {
@@ -139,6 +140,39 @@ describe('digest command (integration)', () => {
         if (existsSync(tempFile)) {
           unlinkSync(tempFile);
         }
+      }
+    }, 10000);
+
+    test('resolves file path using createTempLogFile helper (bf-5qe4z)', () => {
+      // Create a temp log file using the helper from testHelpers.ts (bead bf-4xotm)
+      const { filePath, cleanup } = createTempLogFile({
+        filename: 'test-digest-source.jsonl',
+        eventCount: 2,
+        workerId: 'test-worker-resolver',
+      });
+
+      try {
+        // Call digest command with --source pointing to the temp file
+        const { stdout, stderr } = execCaptureStderr(
+          `node ${DIST_CLI} digest --source ${filePath}`
+        );
+
+        // Assert resolved.kind === 'file' (logged to stderr as '(file)')
+        expect(stderr).toContain('(file)');
+
+        // Assert resolved.path matches the input file path
+        expect(stderr).toContain(filePath);
+
+        // Verify the command processes the file correctly
+        expect(stderr).toContain('Loaded 2 events');
+        expect(stdout).toContain('test-worker-resolver');
+
+        // Verify digest structure is valid
+        expect(stdout).toContain('# Session Digest');
+        expect(stdout).toContain('## Summary');
+      } finally {
+        // Clean up the temp file using the provided cleanup function
+        cleanup();
       }
     }, 10000);
 
