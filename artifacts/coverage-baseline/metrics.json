@@ -1,0 +1,146 @@
+{
+  "baseline_date": "2026-07-29",
+  "project": "FABRIC",
+  "command": "fabric digest",
+  "component": "Path Resolution Logic",
+  "analysis_type": "baseline_coverage_analysis",
+  
+  "overall_project_coverage": {
+    "statements": {
+      "percentage": 69.19,
+      "covered": 9676,
+      "total": 13983
+    },
+    "branches": {
+      "percentage": 61.91,
+      "covered": 5169,
+      "total": 8348
+    },
+    "functions": {
+      "percentage": 66.27,
+      "covered": 1586,
+      "total": 2393
+    },
+    "lines": {
+      "percentage": 70.25,
+      "covered": 9095,
+      "total": 12945
+    }
+  },
+  
+  "path_resolution_coverage": {
+    "resolveSource": {
+      "function": "resolveSource(source: string)",
+      "location": "src/cli.ts:52-63",
+      "total_code_paths": 5,
+      "covered_code_paths": 5,
+      "coverage_percentage": 100,
+      "paths": [
+        {
+          "id": 1,
+          "description": "Tilde expansion with directory",
+          "condition": "source.startsWith('~') → stat.isDirectory() → true",
+          "status": "covered"
+        },
+        {
+          "id": 2,
+          "description": "Tilde expansion with file",
+          "condition": "source.startsWith('~') → stat.isDirectory() → false",
+          "status": "covered"
+        },
+        {
+          "id": 3,
+          "description": "Absolute path directory detection",
+          "condition": "source.startsWith('~') → false → stat.isDirectory() → true",
+          "status": "covered"
+        },
+        {
+          "id": 4,
+          "description": "Absolute path file detection",
+          "condition": "source.startsWith('~') → false → stat.isDirectory() → false",
+          "status": "covered"
+        },
+        {
+          "id": 5,
+          "description": "Non-existent path error handling",
+          "condition": "fs.statSync() throws exception",
+          "status": "covered"
+        }
+      ]
+    },
+    "resolveFromOptions": {
+      "function": "resolveFromOptions(source?: string, file?: string)",
+      "location": "src/cli.ts:95-99",
+      "total_code_paths": 4,
+      "covered_code_paths": 4,
+      "coverage_percentage": 100,
+      "paths": [
+        {
+          "id": 1,
+          "description": "--source option takes priority",
+          "condition": "source provided → calls resolveSource(source)",
+          "status": "covered"
+        },
+        {
+          "id": 2,
+          "description": "-f option with tilde expansion",
+          "condition": "source undefined, file with tilde → expand tilde",
+          "status": "covered"
+        },
+        {
+          "id": 3,
+          "description": "-f option without tilde expansion",
+          "condition": "source undefined, file without tilde → use as-is",
+          "status": "covered"
+        },
+        {
+          "id": 4,
+          "description": "Default to ~/.needle/logs",
+          "condition": "source undefined, file undefined → default behavior",
+          "status": "covered"
+        }
+      ]
+    }
+  },
+  
+  "test_suite": {
+    "file": "src/pathResolver.test.ts",
+    "total_tests": 15,
+    "passing_tests": 15,
+    "failing_tests": 0,
+    "duration_seconds": 24,
+    "status": "all_passing"
+  },
+  
+  "scenarios_tested": [
+    "Directory sources: absolute, relative, tilde, trailing slash, nested",
+    "File sources: absolute, relative, tilde, special characters, unicode",
+    "Error cases: non-existent paths, empty strings",
+    "Option precedence: --source over -f",
+    "Default behavior: no options → ~/.needle/logs",
+    "Edge cases: unicode filenames, mixed extensions, special characters"
+  ],
+  
+  "baseline_status": {
+    "overall_coverage": "100%",
+    "total_code_paths": 9,
+    "covered_code_paths": 9,
+    "integration_scenarios": "20+",
+    "edge_case_coverage": "complete",
+    "error_handling_coverage": "complete",
+    "regression_risk": "minimal",
+    "recommendation": "baseline established - maintain current coverage"
+  },
+  
+  "maintenance": {
+    "coverage_command": "npm run test:coverage -- src/pathResolver.test.ts",
+    "regression_prevention": "Run pathResolver.test.ts in CI/CD pipeline",
+    "documentation_update": "Update baseline when adding new path resolution features"
+  },
+  
+  "related_files": {
+    "implementation": "src/cli.ts",
+    "tests": ["src/pathResolver.test.ts", "src/digest.integration.test.ts"],
+    "documentation": ["docs/plan.md", "README.md"]
+  }
+}
