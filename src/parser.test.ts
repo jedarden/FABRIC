@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import * as os from 'os';
+import * as hostnameModule from './hostname.js';
 import {
   parseNeedleEvent,
   parseLogLine,
@@ -20,8 +20,8 @@ import { LogEvent, LogLevel, ConversationEvent, NeedleEvent, NeedleEventType, NE
 
 describe('parseLogLine', () => {
   beforeEach(() => {
-    // Mock os.hostname() to return 'localhost' for consistent testing
-    vi.spyOn(os, 'hostname').mockReturnValue('localhost');
+    // Mock getLocalHostname to return 'localhost' for consistent testing
+    vi.spyOn(hostnameModule, 'getLocalHostname').mockReturnValue('localhost');
     delete process.env.HOSTNAME;
     delete process.env.HOST;
   });

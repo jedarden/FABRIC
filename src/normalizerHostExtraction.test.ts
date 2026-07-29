@@ -7,14 +7,20 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import * as os from 'os';
-import { extractHostFromAttributes, normalize } from './normalizer.js';
 import { NeedleEvent } from './types.js';
+
+// Mock the hostname module before importing the normalizer
+vi.mock('./hostname.js', () => ({
+  getLocalHostname: vi.fn(() => 'localhost'),
+}));
+
+import { extractHostFromAttributes, normalize } from './normalizer.js';
+import { getLocalHostname } from './hostname.js';
 
 describe('extractHostFromAttributes', () => {
   beforeEach(() => {
-    // Mock os.hostname() to return 'localhost' for consistent testing
-    vi.spyOn(os, 'hostname').mockReturnValue('localhost');
+    // Mock getLocalHostname to return 'localhost' for consistent testing
+    vi.mocked(getLocalHostname).mockReturnValue('localhost');
     // Ensure no hostname environment variables are set
     delete process.env.HOSTNAME;
     delete process.env.HOST;
@@ -70,6 +76,17 @@ describe('extractHostFromAttributes', () => {
 });
 
 describe('OTLP log normalization with host extraction', () => {
+  beforeEach(() => {
+    // Mock getLocalHostname to return 'localhost' for consistent testing
+    vi.mocked(getLocalHostname).mockReturnValue('localhost');
+    delete process.env.HOSTNAME;
+    delete process.env.HOST;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('extracts host from needle.host in resource attributes', () => {
     const record = {
       timeUnixNano: '1709150400000000000',
@@ -122,6 +139,17 @@ describe('OTLP log normalization with host extraction', () => {
 });
 
 describe('OTLP span normalization with host extraction', () => {
+  beforeEach(() => {
+    // Mock getLocalHostname to return 'localhost' for consistent testing
+    vi.mocked(getLocalHostname).mockReturnValue('localhost');
+    delete process.env.HOSTNAME;
+    delete process.env.HOST;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('extracts host from needle.host in span start events', () => {
     const span = {
       name: 'test-operation',
@@ -164,6 +192,17 @@ describe('OTLP span normalization with host extraction', () => {
 });
 
 describe('OTLP metric normalization with host extraction', () => {
+  beforeEach(() => {
+    // Mock getLocalHostname to return 'localhost' for consistent testing
+    vi.mocked(getLocalHostname).mockReturnValue('localhost');
+    delete process.env.HOSTNAME;
+    delete process.env.HOST;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('extracts host from needle.host in metric data points', () => {
     const metricPoint = {
       name: 'test.metric',

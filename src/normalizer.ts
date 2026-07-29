@@ -7,13 +7,13 @@
  * a uniform stream.
  */
 
-import * as os from 'os';
 import {
   LogEvent,
   LogLevel,
   NeedleEvent,
   NEEDLE_EVENT_SCHEMA_VERSION,
 } from './types.js';
+import { getLocalHostname } from './hostname.js';
 
 // ── Source types ──────────────────────────────────────────────
 
@@ -754,17 +754,7 @@ export function needleEventToLogEvent(ne: NeedleEvent): LogEvent {
  * Get the local hostname for events without an explicit host field.
  * Used for legacy JSONL sources and local log tailing.
  */
-function getLocalHostname(): string {
-  // Prefer environment variables if set (container/pod context)
-  if (typeof process !== 'undefined' && process.env.HOSTNAME) {
-    return process.env.HOSTNAME;
-  }
-  if (typeof process !== 'undefined' && process.env.HOST) {
-    return process.env.HOST;
-  }
-  // Use system hostname as default for multi-host observability
-  return os.hostname();
-}
+// getLocalHostname is now imported from ./hostname.js
 
 function isValidLogLevel(level: unknown): level is LogLevel {
   return level === 'debug' || level === 'info' || level === 'warn' || level === 'error';
