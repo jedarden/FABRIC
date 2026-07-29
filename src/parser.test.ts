@@ -2,7 +2,8 @@
  * Tests for FABRIC Log Parser
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as os from 'os';
 import {
   parseNeedleEvent,
   parseLogLine,
@@ -18,6 +19,16 @@ import {
 import { LogEvent, LogLevel, ConversationEvent, NeedleEvent, NeedleEventType, NEEDLE_EVENT_SCHEMA_VERSION } from './types.js';
 
 describe('parseLogLine', () => {
+  beforeEach(() => {
+    // Mock os.hostname() to return 'localhost' for consistent testing
+    vi.spyOn(os, 'hostname').mockReturnValue('localhost');
+    delete process.env.HOSTNAME;
+    delete process.env.HOST;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   describe('valid inputs', () => {
     it('should parse a minimal valid log line', () => {
       const line = JSON.stringify({

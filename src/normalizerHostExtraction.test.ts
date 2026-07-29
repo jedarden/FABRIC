@@ -6,11 +6,23 @@
  * and service.instance.id resource attributes.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as os from 'os';
 import { extractHostFromAttributes, normalize } from './normalizer.js';
 import { NeedleEvent } from './types.js';
 
 describe('extractHostFromAttributes', () => {
+  beforeEach(() => {
+    // Mock os.hostname() to return 'localhost' for consistent testing
+    vi.spyOn(os, 'hostname').mockReturnValue('localhost');
+    // Ensure no hostname environment variables are set
+    delete process.env.HOSTNAME;
+    delete process.env.HOST;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   it('extracts host from needle.host attribute', () => {
     const attrs = new Map<string, unknown>([
       ['needle.host', 'custom-host.example.com'],

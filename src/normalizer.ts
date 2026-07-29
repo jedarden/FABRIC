@@ -762,7 +762,7 @@ function getLocalHostname(): string {
   if (typeof process !== 'undefined' && process.env.HOST) {
     return process.env.HOST;
   }
-  // Use system hostname as default
+  // Use system hostname as default for multi-host observability
   return os.hostname();
 }
 
