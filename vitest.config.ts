@@ -11,7 +11,7 @@ export default defineConfig({
     setupFiles: ['./src/web/frontend/test/setup.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html', 'lcov'],
+      reporter: ['text', 'json', 'html', 'lcov', 'json-summary'],
       reportsDirectory: './artifacts/coverage',
       exclude: [
         'node_modules/',
@@ -31,6 +31,7 @@ export default defineConfig({
         'src/tui/components/SessionDigest.ts',
         'src/errorGrouping.ts',
         'src/analytics.ts',
+        'src/cli.ts',            // CLI entry point for digest command
       ],
       // Thresholds for digest command coverage
       thresholds: {
@@ -39,6 +40,9 @@ export default defineConfig({
         branches: 50,
         statements: 50,
       },
+      // Additional coverage options for digest analysis
+      all: true,                 // Cover all files matching the include patterns
+      cleanOnRerun: true,        // Clean coverage reports before rerunning
     },
   },
 });
