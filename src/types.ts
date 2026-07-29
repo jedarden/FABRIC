@@ -16,6 +16,11 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type WorkerStatus = 'active' | 'idle' | 'error';
 
 /**
+ * Resolved source type for CLI path resolution
+ */
+export type ResolvedSource = { kind: 'directory'; path: string } | { kind: 'file'; path: string };
+
+/**
  * NEEDLE worker state machine — first-class states emitted by
  * worker.state_transition events. These are the canonical states
  * that replace the coarse WorkerStatus in the UI.
