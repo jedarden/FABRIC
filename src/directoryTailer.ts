@@ -48,6 +48,21 @@ export interface DirectoryTailerOptions {
   inactiveCheckIntervalMs?: number;
 
   /**
+   * Maximum number of inactive fileInfo entries examined per poll tick.
+   * Keeps each tick's work bounded no matter how large fileInfo grows (e.g.
+   * when the log pruner is broken and files pile up) — a full sweep is
+   * spread round-robin across as many ticks as it takes instead of statting
+   * every known file synchronously in one go.  Default: 2_000.
+   */
+  pollBatchSize?: number;
+
+  /**
+   * Maximum number of concurrent fs.stat calls in flight while processing a
+   * poll batch.  Default: 64.
+   */
+  pollConcurrency?: number;
+
+  /**
    * Process RSS bytes threshold above which new activations are skipped
    * (back-pressure).  The LRU eviction path still runs so that the most
    * recently used file can displace a stale one.  Default: 400 MB.
@@ -77,6 +92,8 @@ export class DirectoryTailer extends EventEmitter {
   private maxActiveFiles: number;
   private recentMtimeMs: number;
   private inactiveCheckIntervalMs: number;
+  private pollBatchSize: number;
+  private pollConcurrency: number;
   private maxRssBytes: number;
   private startupRereadMs: number;
 
@@ -89,6 +106,11 @@ export class DirectoryTailer extends EventEmitter {
   private pollInterval?: ReturnType<typeof setInterval>;
   private stopped: boolean = false;
 
+  /** Round-robin cursor into fileInfo so a poll batch resumes where the last one left off. */
+  private pollCursor?: IterableIterator<[string, FileInfo]>;
+  /** True while a poll batch's async stat calls are in flight (prevents overlapping ticks). */
+  private polling: boolean = false;
+
   constructor(options: DirectoryTailerOptions) {
     super();
     this.directory = options.directory;
@@ -96,10 +118,10 @@ export class DirectoryTailer extends EventEmitter {
     this.maxActiveFiles = options.maxActiveFiles ?? 200;
     this.recentMtimeMs = options.recentMtimeMs ?? 86_400_000;
     this.inactiveCheckIntervalMs = options.inactiveCheckIntervalMs ?? 30_000;
+    this.pollBatchSize = options.pollBatchSize ?? 2_000;
+    this.pollConcurrency = options.pollConcurrency ?? 64;
     this.maxRssBytes = options.maxRssBytes ?? 400 * 1024 * 1024;
     this.startupRereadMs = options.startupRereadMs ?? 4 * 60 * 60 * 1000; // Default: 4 hours
-    this.inactiveCheckIntervalMs = options.inactiveCheckIntervalMs ?? 30_000;
-    this.maxRssBytes = options.maxRssBytes ?? 400 * 1024 * 1024;
   }
 
   start(): void {
@@ -185,6 +207,7 @@ export class DirectoryTailer extends EventEmitter {
       clearInterval(this.pollInterval);
       this.pollInterval = undefined;
     }
+    this.pollCursor = undefined;
     if (this.dirWatcher) {
       this.dirWatcher.close();
       this.dirWatcher = undefined;
@@ -298,35 +321,93 @@ export class DirectoryTailer extends EventEmitter {
   }
 
   /**
-   * Iterate inactive files and re-activate any whose mtime has advanced since
-   * we last observed it.  Also evicts under memory pressure.
+   * Iterate a bounded batch of inactive files and re-activate any whose
+   * mtime has advanced since we last observed it.  Also evicts under memory
+   * pressure.
+   *
+   * This is deliberately non-blocking and bounded per tick:
+   *   - Stats are issued via fs.promises.stat (libuv threadpool), never
+   *     fs.statSync, so this can never park Node's single JS thread no
+   *     matter how large fileInfo grows.
+   *   - Only up to pollBatchSize entries are examined per tick, round-robin
+   *     via pollCursor, so a fileInfo map with hundreds of thousands of
+   *     entries (e.g. because the log pruner is broken and files are
+   *     piling up, see bf-18ib2) still costs a bounded amount of work per
+   *     tick — a full sweep just spans more ticks instead of blowing the
+   *     event loop budget for one of them.
+   *   - Concurrency within a batch is capped (pollConcurrency) so we don't
+   *     flood the libuv threadpool and starve other fs work (active
+   *     tailers, prune, etc).
+   *   - Files that no longer exist (e.g. archived + deleted by
+   *     fabric-prune.service) are dropped from fileInfo as soon as this
+   *     poll notices the ENOENT — this is what keeps fileInfo bounded again
+   *     once pruning is actually working, instead of only ever growing.
    */
   private pollInactiveFiles(): void {
-    if (this.stopped) return;
+    if (this.stopped || this.polling) return;
 
-    // Opportunistic eviction when RSS is high.
+    // Opportunistic eviction when RSS is high (cheap — no syscalls).
     if (process.memoryUsage().rss > this.maxRssBytes && this.children.size > 0) {
       this.evictLRU();
     }
 
-    for (const [filePath, info] of this.fileInfo) {
-      if (this.children.has(filePath)) continue;
+    this.polling = true;
+    this.runPollBatch().finally(() => {
+      this.polling = false;
+    });
+  }
 
-      try {
-        const stat = fs.statSync(filePath);
-        if (stat.mtimeMs > info.mtime) {
-          info.mtime = stat.mtimeMs;
-          if (this.children.size >= this.maxActiveFiles) {
-            this.evictLRU();
-          }
-          if (this.children.size < this.maxActiveFiles) {
-            this.activateFile(filePath);
-          }
-        }
-      } catch {
-        // File was deleted — remove from tracking.
-        this.fileInfo.delete(filePath);
+  /** Process up to pollBatchSize inactive entries, resuming from pollCursor. */
+  private async runPollBatch(): Promise<void> {
+    if (!this.pollCursor) {
+      this.pollCursor = this.fileInfo.entries();
+    }
+
+    const batch: Array<[string, FileInfo]> = [];
+    let next = this.pollCursor.next();
+    while (!next.done) {
+      const [filePath] = next.value;
+      // Active files don't need stat-ing — skip without counting against
+      // the batch size cap (there are at most maxActiveFiles of these).
+      if (!this.children.has(filePath)) {
+        batch.push(next.value);
+        if (batch.length >= this.pollBatchSize) break;
       }
+      next = this.pollCursor.next();
+    }
+
+    // Reached the end of the map — next tick starts a fresh sweep.
+    if (next.done) {
+      this.pollCursor = undefined;
+    }
+
+    for (let i = 0; i < batch.length; i += this.pollConcurrency) {
+      if (this.stopped) return;
+      const chunk = batch.slice(i, i + this.pollConcurrency);
+      await Promise.all(chunk.map(([filePath, info]) => this.checkInactiveFile(filePath, info)));
+    }
+  }
+
+  /** Stat one inactive file asynchronously and re-activate/forget it as needed. */
+  private async checkInactiveFile(filePath: string, info: FileInfo): Promise<void> {
+    if (this.stopped) return;
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (this.stopped) return;
+      if (stat.mtimeMs > info.mtime) {
+        info.mtime = stat.mtimeMs;
+        if (this.children.size >= this.maxActiveFiles) {
+          this.evictLRU();
+        }
+        if (this.children.size < this.maxActiveFiles) {
+          this.activateFile(filePath);
+        }
+      }
+    } catch {
+      // File is gone (deleted directly, or archived+deleted by the log
+      // pruner) — stop tracking it so fileInfo shrinks back down instead of
+      // growing forever regardless of whether pruning is currently working.
+      this.fileInfo.delete(filePath);
     }
   }
 }

@@ -7,6 +7,10 @@ Type=oneshot
 ExecStart=/home/coding/FABRIC/scripts/fabric-health-check.sh
 Environment=PATH=/run/current-system/sw/bin:/home/coding/.nix-profile/bin:/home/coding/.local/bin:/usr/bin:/bin
 EnvironmentFile=/home/coding/.config/fabric/secrets.env
+# Defense in depth (bf-5trl9): hard ceiling so a hung health check can never
+# wedge this Type=oneshot service (and thus the whole watchdog timer)
+# indefinitely, even if some future change reintroduces an unbounded call.
+TimeoutStartSec=30
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=fabric-watchdog

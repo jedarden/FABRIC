@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -327,5 +327,92 @@ describe('DirectoryTailer', () => {
     // 'initial' should only have been emitted once (during initial activation),
     // not again when fileA was re-activated.
     expect(received.filter((r) => r.msg === 'initial').length).toBe(1);
+  });
+
+  it('polls inactive files via async fs.promises.stat, not a synchronous statSync loop', async () => {
+    // Regression test for bf-2l8f8: pollInactiveFiles() used to run
+    // fs.statSync() in a synchronous loop over the entire fileInfo map every
+    // inactiveCheckIntervalMs. With ~400k tracked files (the real incident:
+    // fabric-prune.service had been failing nightly and let ~/.needle/logs
+    // grow unbounded) that starved Node's single event loop for hours at a
+    // time -- fabric-web's HTTP server accepted connections but never
+    // responded. Assert the fix directly: the recurring poll goes through
+    // fs.promises.stat. (fs.statSync itself can't be spied on here --
+    // Vitest/ESM reports "Cannot redefine property: statSync" because it's
+    // a live-binding module export -- but the pre-fix implementation never
+    // called fs.promises.stat at all, so this call happening is already a
+    // faithful, deterministic discriminator between the two code paths.)
+    const fileA = path.join(tempDir, 'a.jsonl');
+    fs.writeFileSync(fileA, '');
+
+    const statAsyncSpy = vi.spyOn(fs.promises, 'stat');
+
+    const tailer = new DirectoryTailer({
+      directory: tempDir,
+      maxActiveFiles: 1,
+      recentMtimeMs: -1, // force the one file inactive so the poll examines it
+      inactiveCheckIntervalMs: 30,
+    });
+
+    tailer.start();
+    statAsyncSpy.mockClear(); // ignore any incidental calls from start()'s own scan
+
+    // Let several 30ms poll ticks fire.
+    await new Promise((r) => setTimeout(r, 300));
+
+    tailer.stop();
+
+    expect(statAsyncSpy).toHaveBeenCalled();
+    expect(statAsyncSpy.mock.calls.some(([p]) => p === fileA)).toBe(true);
+
+    statAsyncSpy.mockRestore();
+  });
+
+  it('processes only a bounded batch of inactive files per poll tick (round-robin across ticks)', async () => {
+    // Regression test for bf-2l8f8's second recommendation: even with async
+    // stat calls, a single tick must not examine the entire fileInfo map at
+    // once -- work is capped per tick (pollBatchSize) and a full sweep is
+    // spread round-robin across as many ticks as it takes. Verified here by
+    // directly invoking the batch runner (bypassing the interval timer) and
+    // observing fileInfo shrink by at most pollBatchSize per call.
+    const COUNT = 25;
+    const BATCH = 10;
+    const paths: string[] = [];
+    for (let i = 0; i < COUNT; i++) {
+      const p = path.join(tempDir, `w-${String(i).padStart(3, '0')}.jsonl`);
+      fs.writeFileSync(p, '');
+      paths.push(p);
+    }
+
+    const tailer = new DirectoryTailer({
+      directory: tempDir,
+      maxActiveFiles: 1,
+      recentMtimeMs: -1, // force everything inactive
+      pollBatchSize: BATCH,
+    });
+
+    tailer.start();
+    expect(tailer.knownFileCount).toBe(COUNT);
+
+    // Delete every tracked file out from under the tailer so each batch's
+    // stat calls all come back ENOENT -- which is how entries get dropped
+    // from fileInfo (see checkInactiveFile). If a tick processed the whole
+    // map at once (the pre-fix behaviour), one call would zero it out; with
+    // bounded batching it should shrink by at most `pollBatchSize` per call.
+    for (const p of paths) fs.unlinkSync(p);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const runOneBatch = () => (tailer as any).runPollBatch() as Promise<void>;
+
+    await runOneBatch();
+    expect(tailer.knownFileCount).toBe(COUNT - BATCH); // 15
+
+    await runOneBatch();
+    expect(tailer.knownFileCount).toBe(COUNT - 2 * BATCH); // 5
+
+    await runOneBatch();
+    expect(tailer.knownFileCount).toBe(0); // final, partial batch of 5
+
+    tailer.stop();
   });
 });
