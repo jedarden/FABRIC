@@ -171,10 +171,13 @@ describe('createTempLogFile', () => {
   });
 
   it('should handle file creation errors gracefully', () => {
-    // Try to create a file in a non-existent directory with invalid path
+    // Must be a path that fails for *any* uid: createTempLogFile mkdirs
+    // recursively, so root can happily create /nonexistent/... and the
+    // expectation silently inverts in a container. Descending into /dev/null
+    // is ENOTDIR for everyone, root included.
     expect(() => {
       const result = createTempLogFile({
-        directory: '/nonexistent/path/that/does/not/exist',
+        directory: '/dev/null/cannot-be-a-directory',
       });
       // Should have cleaned up any partial creation
       result.cleanup();

@@ -65,7 +65,10 @@ describe('Memory Profiler', () => {
       expect(existsSync(filepath)).toBe(true);
     });
 
-    it('should write heap snapshot with different trigger reasons', async () => {
+    // Writes four full V8 heap snapshots back to back. Each one is tens of MB
+    // and stops the world while it serializes, which overruns the default 5s
+    // budget on a single-CPU CI container.
+    it('should write heap snapshot with different trigger reasons', { timeout: 60_000 }, async () => {
       const triggers: SnapshotTrigger[] = ['manual', 'memory-pressure', 'periodic', 'test'];
       const filepaths: string[] = [];
 

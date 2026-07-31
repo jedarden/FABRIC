@@ -51,17 +51,19 @@ function pickFixtureFile(dir: string): string {
   return join(dir, files[0]);
 }
 
-describe('Real NEEDLE Log Integration', () => {
+// This suite reads whatever NEEDLE has actually written on the host. That makes
+// it a useful canary against real-world event shapes, but it can only run where
+// a NEEDLE install exists — CI containers have no ~/.needle/logs. Skip cleanly
+// there instead of throwing, so an absent NEEDLE is not a CI failure.
+const hasRealLogs =
+  existsSync(NEEDLE_LOGS_DIR) &&
+  readdirSync(NEEDLE_LOGS_DIR).some((f) => f.endsWith('.jsonl'));
+
+describe.skipIf(!hasRealLogs)('Real NEEDLE Log Integration', () => {
   let logsDir: string;
   let fixturePath: string;
 
   beforeAll(() => {
-    if (!existsSync(NEEDLE_LOGS_DIR)) {
-      throw new Error(
-        `NEEDLE logs directory not found: ${NEEDLE_LOGS_DIR}. ` +
-          `This test requires production NEEDLE log files.`,
-      );
-    }
     logsDir = NEEDLE_LOGS_DIR;
     fixturePath = pickFixtureFile(logsDir);
   });
