@@ -27,9 +27,9 @@ Previous fix in commit `8b512d2` (July 28, 2026) addressed duplicate describe bl
 
 ### Verification (Current State)
 ```bash
-npm test -- src/parser.test.ts  # ✅ All 164 tests pass
-npx tsc --noEmit                # ✅ No TypeScript errors
-npm run build                   # ✅ Build succeeds
+npm test -- parser.test.ts  # ✅ All 202 tests pass
+npx tsc --noEmit            # ✅ No TypeScript errors
+npm run build               # ✅ Build succeeds
 ```
 
 ### Status
