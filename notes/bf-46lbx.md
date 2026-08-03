@@ -1,19 +1,11 @@
-# Resolution for bf-46lbx: Unexpected end of file in parser.test.ts
+# bf-46lbx: Stale Scanner Finding - Already Fixed
 
-## Issue Reported
-The bead reported an error: `/home/coding/FABRIC/src/parser.test.ts:2635:0: ERROR: Unexpected end of file`
-
-## Investigation
-On investigation, I found:
-
-1. **Current state is clean**: All tests pass (164/164), TypeScript compilation succeeds, no linting errors
-2. **Historical context**: This error was already fixed in commit `8b512d2` (July 28, 2026) titled "test: fix duplicate describe blocks causing syntax errors"
-3. **Root cause**: The original issue was duplicate `describe` blocks in parser.test.ts that were not properly closed
+## Issue
+Scanner reported: `/home/coding/FABRIC/src/parser.test.ts:2635:0: ERROR: Unexpected end of file`
 
 ## Resolution
-This is a **stale pulse scanner finding** - the error has already been fixed.
+This error was **already fixed** in commit `685b4ce` on 2026-08-03:
 
-The issue was fixed in commit `685b4ce` (August 3, 2026 - current HEAD):
 ```
 fix(parser.test.ts): remove extra closing brace causing syntax error
 
@@ -23,15 +15,18 @@ Remove stray }); at end of test file that was causing
 All 202 parser tests now pass.
 ```
 
-Previous fix in commit `8b512d2` (July 28, 2026) addressed duplicate describe blocks.
-
-### Verification (Current State)
+## Verification
+Ran parser tests to confirm the fix:
 ```bash
-npm test -- parser.test.ts  # ✅ All 202 tests pass
-npx tsc --noEmit            # ✅ No TypeScript errors
-npm run build               # ✅ Build succeeds
+npm test -- src/parser.test.ts
+# Test Files  1 passed (1)
+#      Tests  164 passed (164)
 ```
 
-### Status
-✅ **RESOLVED** - Issue already fixed in current HEAD (685b4ce)
-No action required - closing bead as verification confirms clean state.
+All tests pass. The scanner finding is stale - it was generated before the fix was applied.
+
+## Scanner Finding Metadata
+- **Scanner:** test
+- **Severity:** 2/5 (1=critical)
+- **File:** src/parser.test.ts
+- **Status:** RESOLVED (commit 685b4ce)
