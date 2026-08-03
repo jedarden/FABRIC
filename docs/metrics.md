@@ -12,6 +12,24 @@ GET /api/metrics
 
 **Authentication:** None (GET endpoints are open)
 
+## Multi-Host Metrics
+
+FABRIC supports multi-host aggregation for fleet-wide monitoring. When multiple NEEDLE hosts (e.g., `ex44`, `lab`, production clusters) push events to a centralized FABRIC instance via OTLP, the following metrics include a `host` label to distinguish data from different physical machines:
+
+**Metrics with `host` label:**
+- `fabric_event_count{host="..."}`
+- `fabric_ingest_rate_per_second{host="..."}`
+- `fabric_active_workers{host="..."}`
+- `fabric_tailer_files_watched{host="..."}` (only for local host)
+
+**Host Label Resolution:**
+The `host` label is populated from OTLP resource attributes in the following priority order:
+1. `needle.host` - Custom NEEDLE attribute (highest priority)
+2. `service.instance.id` - Standard OpenTelemetry attribute
+3. Local hostname (for legacy JSONL sources or when attributes are missing)
+
+This allows a fleet-wide dashboard to query metrics by host and avoid silently merging or misattributing data from different machines.
+
 ## Available Metrics
 
 All metrics are prefixed with `fabric_` to avoid naming conflicts.
@@ -28,8 +46,8 @@ All metrics are prefixed with `fabric_` to avoid naming conflicts.
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `fabric_event_count` | gauge | Total events currently in the in-memory store |
-| `fabric_ingest_rate_per_second` | gauge | Events ingested per second (60-second rolling window) |
+| `fabric_event_count{host="..."}` | gauge | Total events currently in the in-memory store, per host |
+| `fabric_ingest_rate_per_second{host="..."}` | gauge | Events ingested per second (60-second rolling window), per host |
 | `fabric_dedup_dropped_total` | counter | Total duplicate events dropped by deduplicator |
 
 ### Connections
@@ -37,7 +55,8 @@ All metrics are prefixed with `fabric_` to avoid naming conflicts.
 | Metric | Type | Description |
 |--------|------|-------------|
 | `fabric_websocket_clients` | gauge | Number of currently connected WebSocket clients |
-| `fabric_tailer_files_watched` | gauge | Number of log files being watched by DirectoryTailer |
+| `fabric_active_workers{host="..."}` | gauge | Number of active workers, per host |
+| `fabric_tailer_files_watched{host="..."}` | gauge | Number of log files being watched by DirectoryTailer, per host |
 
 ### Memory
 
@@ -55,6 +74,7 @@ All metrics are prefixed with `fabric_` to avoid naming conflicts.
 
 ## Example Output
 
+**Single-host setup:**
 ```
 # HELP fabric_status Server status (1=ok)
 # TYPE fabric_status gauge
@@ -68,21 +88,25 @@ fabric_uptime_seconds 3600
 # TYPE fabric_info gauge
 fabric_info{version="0.8.0"} 1
 
-# HELP fabric_event_count Total events in store
+# HELP fabric_event_count Total events in store by host
 # TYPE fabric_event_count gauge
-fabric_event_count 15234
+fabric_event_count{host="localhost"} 15234
 
-# HELP fabric_ingest_rate_per_second Events ingested per second (60s window)
+# HELP fabric_ingest_rate_per_second Events ingested per second by host (60s window)
 # TYPE fabric_ingest_rate_per_second gauge
-fabric_ingest_rate_per_second 4.23
+fabric_ingest_rate_per_second{host="localhost"} 4.23
+
+# HELP fabric_active_workers Active workers by host
+# TYPE fabric_active_workers gauge
+fabric_active_workers{host="localhost"} 5
 
 # HELP fabric_websocket_clients Connected WebSocket clients
 # TYPE fabric_websocket_clients gauge
 fabric_websocket_clients 3
 
-# HELP fabric_tailer_files_watched Log files being watched
+# HELP fabric_tailer_files_watched Log files being watched by host
 # TYPE fabric_tailer_files_watched gauge
-fabric_tailer_files_watched 5
+fabric_tailer_files_watched{host="localhost"} 5
 
 # HELP fabric_dedup_dropped_total Total duplicate events dropped
 # TYPE fabric_dedup_dropped_total counter
@@ -103,6 +127,31 @@ fabric_prune_last_success_timestamp_seconds 1720123456
 # HELP fabric_logs_dir_bytes Size of watched logs directory in bytes
 # TYPE fabric_logs_dir_bytes gauge
 fabric_logs_dir_bytes 52428800
+```
+
+**Multi-host setup:**
+```
+# HELP fabric_event_count Total events in store by host
+# TYPE fabric_event_count gauge
+fabric_event_count{host="ex44"} 15234
+fabric_event_count{host="lab"} 8432
+fabric_event_count{host="prod-worker-1"} 45621
+
+# HELP fabric_ingest_rate_per_second Events ingested per second by host (60s window)
+# TYPE fabric_ingest_rate_per_second gauge
+fabric_ingest_rate_per_second{host="ex44"} 4.23
+fabric_ingest_rate_per_second{host="lab"} 2.15
+fabric_ingest_rate_per_second{host="prod-worker-1"} 8.92
+
+# HELP fabric_active_workers Active workers by host
+# TYPE fabric_active_workers gauge
+fabric_active_workers{host="ex44"} 5
+fabric_active_workers{host="lab"} 3
+fabric_active_workers{host="prod-worker-1"} 12
+
+# HELP fabric_tailer_files_watched Log files being watched by host
+# TYPE fabric_tailer_files_watched gauge
+fabric_tailer_files_watched{host="ex44"} 5
 ```
 
 ## Prometheus Configuration
@@ -127,12 +176,13 @@ scrape_configs:
    - `fabric_uptime_seconds` - Stat panel (formatted as duration)
 
 2. **Event Throughput**
-   - `rate(fabric_event_count[5m])` - Time series graph
-   - `fabric_ingest_rate_per_second` - Gauge panel
+   - `fabric_ingest_rate_per_second` - Time series graph (multi-host: group by host)
+   - `rate(fabric_event_count[5m])` - Time series graph (multi-host: group by host)
 
 3. **Connections**
    - `fabric_websocket_clients` - Gauge panel
    - `fabric_tailer_files_watched` - Gauge panel
+   - `fabric_active_workers` - Gauge panel (multi-host: group by host)
 
 4. **Memory Usage**
    - `fabric_process_resident_memory_bytes` - Time series graph
@@ -140,6 +190,42 @@ scrape_configs:
 
 5. **Data Quality**
    - `rate(fabric_dedup_dropped_total[5m])` - Time series graph
+
+### Multi-Host Dashboard Queries
+
+For fleet-wide monitoring with multiple NEEDLE hosts, use Grafana's `by (host)` grouping:
+
+**Event throughput by host:**
+```
+sum by (host) (rate(fabric_event_count[5m]))
+```
+
+**Active workers by host:**
+```
+fabric_active_workers
+```
+
+**Ingest rate per host (stacked):**
+```
+fabric_ingest_rate_per_second
+```
+
+**Total events across all hosts:**
+```
+sum(fabric_event_count)
+```
+
+**Host comparison table:**
+```
+# Events per host
+sum by (host) (fabric_event_count)
+
+# Workers per host
+sum by (host) (fabric_active_workers)
+
+# Ingest rate per host
+avg by (host) (fabric_ingest_rate_per_second)
+```
 
 ## Alerting Rules
 
