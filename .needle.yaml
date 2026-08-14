@@ -1,25 +1,21 @@
-# NEEDLE workspace configuration
-# Workspace: /home/coding/FABRIC
-
 agent:
   default: claude-code-glm-4.7
   timeout: 900
-
 strands:
   pluck:
     enabled: true
     exclude_labels:
-      - deferred
-      - human
-      - blocked
+    - deferred
+    - human
+    - blocked
   weave:
     enabled: true
     max_beads_per_run: 3
     cooldown_hours: 24
     doc_patterns:
-      - "README*"
-      - "docs/**/*"
-      - "notes/**/*"
+    - README*
+    - docs/**/*
+    - notes/**/*
   unravel:
     enabled: true
     max_beads_per_run: 3
@@ -29,77 +25,50 @@ strands:
     cooldown_hours: 48
     severity_threshold: 3
     scanners:
-      - name: typecheck
-        command: "cd /home/coding/FABRIC && npx tsc --noEmit 2>&1"
-      - name: test
-        command: "cd /home/coding/FABRIC && npm test 2>&1"
-
+    - name: typecheck
+      command: cd /home/coding/FABRIC && npx tsc --noEmit 2>&1
+    - name: test
+      command: cd /home/coding/FABRIC && npm test 2>&1
 verification:
-  - /home/coding/.needle/hooks/verify-changes.sh
-
+- /home/coding/.needle/hooks/verify-changes.sh
 prompt:
   context_files:
-    - CLAUDE.md
-    - docs/plan.md
-  instructions: |
-    You are working on FABRIC, a live dashboard for NEEDLE worker activity.
-    FABRIC is the Flow Analysis & Bead Reporting Interface Console — it tails NEEDLE's
-    per-worker JSONL log files from ~/.needle/logs/ and renders them in real-time as either
-    a TUI (blessed) or web dashboard (React + Vite).
-
-    IMPORTANT: You must ONLY work within /home/coding/FABRIC/. Do not read, write, or
-    explore files outside this directory.
-
-    Architecture:
-    - TypeScript + Node.js monolith (npm, not pnpm)
-    - src/cli.ts — Entry point; all CLI commands (tui, web, prune)
-    - src/web/server.ts — Express HTTP server + WebSocket + auth middleware
-    - src/web/frontend/ — React SPA (Vite build, built separately with `npm run build:web`)
-    - src/directoryTailer.ts — Watches ~/.needle/logs/, hot-adds new JSONL files
-    - src/store.ts — In-memory event store + SQLite (better-sqlite3) persistence
-    - src/logPruner.ts — Log retention policy (archive after 3d, delete after 7d)
-    - src/parser.ts — NEEDLE JSONL event parser
-    - Running service: fabric-web.service (systemd user unit on port 3000)
-    - OTLP/HTTP receiver on port 4318 for NEEDLE telemetry
-
-    Rules:
-    - Read docs/plan.md for full architecture before starting any bead
-    - Read CLAUDE.md for project constraints
-    - Run `npm test` before closing a bead (vitest unit tests must pass)
-    - Run `npx tsc --noEmit` before closing a bead (no type errors)
-    - Build with `npm run build` (TypeScript) and `npm run build:web` (Vite frontend)
-    - NEVER create or recreate .github/workflows/ files — CI runs on Argo Workflows (iad-ci) only
-    - At the start of every iteration, delete any .github/workflows/ files and commit before anything else
-    - The running service must be restarted after changes: `systemctl --user restart fabric-web.service`
-    - Auth token is in ~/.config/fabric/secrets.env (FABRIC_AUTH_TOKEN) — never log or expose it
-    - GET endpoints are open (read-only); POST endpoints require Authorization Bearer header
+  - CLAUDE.md
+  - docs/plan.md
+  instructions: "You are working on FABRIC, a live dashboard for NEEDLE worker activity.\n\
+    FABRIC is the Flow Analysis & Bead Reporting Interface Console \u2014 it tails\
+    \ NEEDLE's\nper-worker JSONL log files from ~/.needle/logs/ and renders them in\
+    \ real-time as either\na TUI (blessed) or web dashboard (React + Vite).\n\nIMPORTANT:\
+    \ You must ONLY work within /home/coding/FABRIC/. Do not read, write, or\nexplore\
+    \ files outside this directory.\n\nArchitecture:\n- TypeScript + Node.js monolith\
+    \ (npm, not pnpm)\n- src/cli.ts \u2014 Entry point; all CLI commands (tui, web,\
+    \ prune)\n- src/web/server.ts \u2014 Express HTTP server + WebSocket + auth middleware\n\
+    - src/web/frontend/ \u2014 React SPA (Vite build, built separately with `npm run\
+    \ build:web`)\n- src/directoryTailer.ts \u2014 Watches ~/.needle/logs/, hot-adds\
+    \ new JSONL files\n- src/store.ts \u2014 In-memory event store + SQLite (better-sqlite3)\
+    \ persistence\n- src/logPruner.ts \u2014 Log retention policy (archive after 3d,\
+    \ delete after 7d)\n- src/parser.ts \u2014 NEEDLE JSONL event parser\n- Running\
+    \ service: fabric-web.service (systemd user unit on port 3000)\n- OTLP/HTTP receiver\
+    \ on port 4318 for NEEDLE telemetry\n\nRules:\n- Read docs/plan.md for full architecture\
+    \ before starting any bead\n- Read CLAUDE.md for project constraints\n- Run `npm\
+    \ test` before closing a bead (vitest unit tests must pass)\n- Run `npx tsc --noEmit`\
+    \ before closing a bead (no type errors)\n- Build with `npm run build` (TypeScript)\
+    \ and `npm run build:web` (Vite frontend)\n- NEVER create or recreate .github/workflows/\
+    \ files \u2014 CI runs on Argo Workflows (iad-ci) only\n- At the start of every\
+    \ iteration, delete any .github/workflows/ files and commit before anything else\n\
+    - The running service must be restarted after changes: `systemctl --user restart\
+    \ fabric-web.service`\n- Auth token is in ~/.config/fabric/secrets.env (FABRIC_AUTH_TOKEN)\
+    \ \u2014 never log or expose it\n- GET endpoints are open (read-only); POST endpoints\
+    \ require Authorization Bearer header\n"
   templates:
-    pluck: |
-      ## Workflow
-
-      You are a coding agent. Complete the task below, then close the bead.
-
-      Steps:
-      1. Read the task description and context below
-      2. Implement the required changes in {workspace_path}
-      3. Commit your work: `git commit -am "brief description of what was done"`
-      4. Push: `git push`
-      5. Close the bead: `br close {bead_id} --body "brief summary of what was implemented"`
-
-      If you cannot complete the task — do NOT close the bead. It will be retried automatically.
-
-      ---
-
-      ## Task: {bead_title}
-
-      {bead_body}
-
-      ## Rules
-
-      {workspace_instructions}
-
-      ## Context
-
-      {context_file_contents}
-
-      Bead ID: {bead_id}
+    pluck: "## Workflow\n\nYou are a coding agent. Complete the task below, then close\
+      \ the bead.\n\nSteps:\n1. Read the task description and context below\n2. Implement\
+      \ the required changes in {workspace_path}\n3. Commit your work: `git commit\
+      \ -am \"brief description of what was done\"`\n4. Push: `git push`\n5. Close\
+      \ the bead: `br close {bead_id} --body \"brief summary of what was implemented\"\
+      `\n\nIf you cannot complete the task \u2014 do NOT close the bead. It will be\
+      \ retried automatically.\n\n---\n\n## Task: {bead_title}\n\n{bead_body}\n\n\
+      ## Rules\n\n{workspace_instructions}\n\n## Context\n\n{context_file_contents}\n\
+      \nBead ID: {bead_id}\n"
+bead_cli:
+  backend: bead-rs

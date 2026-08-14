@@ -1,4 +1,4 @@
-# Database
+# SQLite database files
 *.db
 *.db-shm
 *.db-wal
@@ -6,6 +6,9 @@
 # Lock files
 *.lock
 
-# Temporary
-last-touched
+# Temporary files
 *.tmp
+*.temp
+
+# Journals
+*.journal
