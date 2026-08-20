@@ -7,10 +7,12 @@
 
 import blessed from 'blessed';
 import * as fs from 'fs';
+import * as path from 'path';
 import { EventEmitter } from 'events';
 import { LogEvent, ReplaySpeed, ReplayState, EventFilter } from '../../types.js';
 import { parseLogLine } from '../../parser.js';
 import { colors, getLevelColor } from '../utils/colors.js';
+import { exportToMarkdown } from '../../utils/replayExport.js';
 
 export interface SessionReplayOptions {
   /** Parent screen */
@@ -653,7 +655,6 @@ export class SessionReplay extends EventEmitter {
    */
   private handleExportMarkdown(): void {
     try {
-      const { exportToMarkdown } = require('../../utils/replayExport.js');
       const eventsToExport = this.filteredEvents.length > 0 ? this.filteredEvents : this.events;
 
       if (eventsToExport.length === 0) {
@@ -674,8 +675,6 @@ export class SessionReplay extends EventEmitter {
       const filename = `session-${dateStr}-${timeStr}.md`;
 
       // Write file
-      const path = require('path');
-      const fs = require('fs');
       const exportPath = path.join(process.cwd(), filename);
       fs.writeFileSync(exportPath, markdown, 'utf-8');
 

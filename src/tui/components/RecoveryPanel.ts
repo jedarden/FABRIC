@@ -5,6 +5,7 @@
  * Shows actionable steps based on error patterns.
  */
 
+import blessed from 'blessed';
 import {
   RecoverySuggestion,
   RecoveryAction,
@@ -14,8 +15,6 @@ import {
 } from '../../types.js';
 import { formatRecoveryAction } from '../utils/recoveryPlaybook.js';
 import { colors } from '../utils/colors.js';
-
-// blessed is imported dynamically
 
 // ============================================
 // Constants
@@ -163,8 +162,6 @@ export class RecoveryPanel {
    * Create blessed widgets
    */
   private createWidgets(): void {
-    const blessed = require('blessed');
-
     // Main container
     this.container = blessed.box({
       parent: this.options.parent,

@@ -30,6 +30,10 @@ import { getErrorGroupManager } from '../errorGrouping.js';
 import { WorkerSessionSummary } from '../types.js';
 import { parseGitEvents } from '../gitParser.js';
 import { FocusPresetManager, createTuiPresetManager, FocusPreset } from '../focusPresets.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { exportToJson, generateExportFilename, exportToBase64 } from '../utils/replayExport.js';
 
 export interface TuiOptions {
   /** Log file path to tail */
@@ -746,11 +750,6 @@ export class FabricTuiApp {
     }
 
     try {
-      const { exportToJson, generateExportFilename } = require('../utils/replayExport.js');
-      const fs = require('fs');
-      const path = require('path');
-      const os = require('os');
-
       const exportData = {
         version: '1.0',
         exportedAt: Date.now(),
@@ -763,7 +762,7 @@ export class FabricTuiApp {
         },
       };
 
-      const filename = `session-${new Date(exportData.metadata.sessionStart).toISOString().split('T')[0]}.fabric-replay`;
+      const filename = generateExportFilename(exportData.metadata);
       const exportPath = path.join(os.homedir(), 'Downloads', filename);
 
       fs.writeFileSync(exportPath, JSON.stringify(exportData, null, 2), 'utf-8');
@@ -806,7 +805,6 @@ export class FabricTuiApp {
     }
 
     try {
-      const { exportToBase64 } = require('../utils/replayExport.js');
       const base64Data = exportToBase64(events);
 
       // In TUI mode, we can't copy to clipboard easily, so show the data
@@ -821,9 +819,6 @@ export class FabricTuiApp {
       console.log('Full base64 data logged to ~/.fabric/last-export.txt\n');
 
       // Save to file for reference
-      const fs = require('fs');
-      const path = require('path');
-      const os = require('os');
       const exportPath = path.join(os.homedir(), '.fabric', 'last-export.txt');
       fs.mkdirSync(path.join(os.homedir(), '.fabric'), { recursive: true });
       fs.writeFileSync(exportPath, base64Data, 'utf-8');
