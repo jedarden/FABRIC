@@ -2630,7 +2630,3 @@ describe('parseNeedleEvent', () => {
     });
   });
 });
-});
-});
-});
-});
