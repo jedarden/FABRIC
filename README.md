@@ -303,3 +303,9 @@ NEEDLE's `otlp_metric_sink` is enabled in `~/.needle/config.yaml`, pushing aggre
 - [NeedleEvent Schema](docs/schema.md) — canonical wire format shared with NEEDLE
 - [Metrics Export](docs/metrics.md) — Prometheus-compatible metrics for monitoring
 - [Implementation Plan](docs/plan.md)
+
+---
+
+Part of [jedarden.com](https://jedarden.com)
+
+*This GitHub repo is a read-only mirror of git.ardenone.com/jedarden/FABRIC — issues and PRs are welcome here either way.*
