@@ -12,18 +12,23 @@
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { execSync, ExecSyncOptionsWithStringEncoding } from 'node:child_process';
 import { createTempLogFile } from './testHelpers.js';
 
 /** Helper to run command and capture both stdout and stderr */
-function execCaptureStderr(cmd: string): { stdout: string; stderr: string } {
+function execCaptureStderr(
+  cmd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { stdout: string; stderr: string } {
   try {
     const { spawnSync } = require('child_process');
     const result = spawnSync('sh', ['-c', cmd], {
       cwd: process.cwd(),
       encoding: 'utf-8' as const,
+      env,
     });
     return { stdout: result.stdout, stderr: result.stderr };
   } catch (error: any) {
@@ -207,17 +212,33 @@ describe('digest command (integration)', () => {
     }, 10000);
 
     test('handles empty string as source path', () => {
-      // Empty string should trigger default behavior (use ~/.needle/logs/)
-      const { stdout, stderr } = execCaptureStderr(
-        `node ${DIST_CLI} digest --source ""`
-      );
+      // Empty string should trigger default behavior (use $HOME/.needle/logs/).
+      // Run against a temp HOME seeded with the repo fixtures so the test does
+      // not digest the host's live (multi-GB) default log directory.
+      const tmpHome = mkdtempSync(join(tmpdir(), 'fabric-digest-home-'));
+      const defaultLogsDir = join(tmpHome, '.needle', 'logs');
+      mkdirSync(defaultLogsDir, { recursive: true });
+      for (const fixtureFile of readdirSync(FIXTURES_DIR).filter((f) =>
+        f.endsWith('.jsonl'),
+      )) {
+        copyFileSync(join(FIXTURES_DIR, fixtureFile), join(defaultLogsDir, fixtureFile));
+      }
 
-      // Should produce a valid digest with default source
-      const output = stdout + stderr;
-      expect(output).toContain('# Session Digest');
+      try {
+        const { stdout, stderr } = execCaptureStderr(
+          `node ${DIST_CLI} digest --source ""`,
+          { ...process.env, HOME: tmpHome },
+        );
 
-      // Should indicate it's using the default logs directory
-      expect(stderr).toContain('.needle/logs');
+        // Should produce a valid digest with default source
+        const output = stdout + stderr;
+        expect(output).toContain('# Session Digest');
+
+        // Should indicate it's using the default logs directory
+        expect(stderr).toContain('.needle/logs');
+      } finally {
+        rmSync(tmpHome, { recursive: true, force: true });
+      }
     }, 10000);
 
     test('handles file paths with special characters', () => {

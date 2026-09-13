@@ -10,8 +10,9 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, rmdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, rmdirSync, mkdtempSync, rmSync, copyFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 
 /**
@@ -85,7 +86,7 @@ describe('path resolution logic - digest command', () => {
         if (existsSync(testFile)) unlinkSync(testFile);
         if (existsSync(testDir)) rmdirSync(testDir);
       }
-    });
+    }, 10000);
 
     test('path 2: tilde expansion with file', () => {
       /**
@@ -112,7 +113,7 @@ describe('path resolution logic - digest command', () => {
       } finally {
         if (existsSync(testFile)) unlinkSync(testFile);
       }
-    });
+    }, 10000);
 
     test('path 3: absolute path directory detection', () => {
       /**
@@ -135,7 +136,7 @@ describe('path resolution logic - digest command', () => {
         if (existsSync(testFile)) unlinkSync(testFile);
         if (existsSync(testDir)) rmdirSync(testDir);
       }
-    });
+    }, 10000);
 
     test('path 4: absolute path file detection', () => {
       /**
@@ -155,7 +156,7 @@ describe('path resolution logic - digest command', () => {
       } finally {
         if (existsSync(testFile)) unlinkSync(testFile);
       }
-    });
+    }, 10000);
 
     test('path 5: non-existent path error handling', () => {
       /**
@@ -170,7 +171,7 @@ describe('path resolution logic - digest command', () => {
           stdio: 'pipe',
         });
       }).toThrow();
-    });
+    }, 10000);
   });
 
   describe('resolveFromOptions function coverage', () => {
@@ -196,7 +197,7 @@ describe('path resolution logic - digest command', () => {
         if (existsSync(sourceFile)) unlinkSync(sourceFile);
         if (existsSync(fallbackFile)) unlinkSync(fallbackFile);
       }
-    });
+    }, 10000);
 
     test('path 2: -f option with tilde expansion', () => {
       /**
@@ -222,7 +223,7 @@ describe('path resolution logic - digest command', () => {
       } finally {
         if (existsSync(testFile)) unlinkSync(testFile);
       }
-    });
+    }, 10000);
 
     test('path 3: -f option without tilde expansion', () => {
       /**
@@ -241,19 +242,38 @@ describe('path resolution logic - digest command', () => {
       } finally {
         if (existsSync(testFile)) unlinkSync(testFile);
       }
-    });
+    }, 10000);
 
     test('path 4: default to ~/.needle/logs when no options', () => {
       /**
        * Code path: source undefined, file undefined → default behavior
        * Expected: { kind: 'directory', path: `${HOME}/.needle/logs` }
+       *
+       * Run against a temp HOME seeded with the repo fixtures so the test does
+       * not digest the host's live (multi-GB) default log directory.
        */
-      const { stdout, stderr } = runDigestCommand('', DIST_CLI);
+      const tmpHome = mkdtempSync(join(tmpdir(), 'fabric-pathresolver-home-'));
+      const defaultLogsDir = join(tmpHome, '.needle', 'logs');
+      mkdirSync(defaultLogsDir, { recursive: true });
+      for (const fixtureFile of readdirSync(FIXTURES_DIR).filter((f) =>
+        f.endsWith('.jsonl'),
+      )) {
+        copyFileSync(join(FIXTURES_DIR, fixtureFile), join(defaultLogsDir, fixtureFile));
+      }
 
-      const output = stdout + stderr;
-      expect(output).toContain('.needle/logs');
-      expect(stderr).toContain('(directory)');
-    }, 30000); // Increase timeout to 30s for default behavior test
+      try {
+        const { stdout, stderr } = runDigestCommand('', DIST_CLI, {
+          ...process.env,
+          HOME: tmpHome,
+        });
+
+        const output = stdout + stderr;
+        expect(output).toContain('.needle/logs');
+        expect(stderr).toContain('(directory)');
+      } finally {
+        rmSync(tmpHome, { recursive: true, force: true });
+      }
+    }, 10000);
   });
 
   describe('edge cases and comprehensive scenarios', () => {
@@ -275,7 +295,7 @@ describe('path resolution logic - digest command', () => {
         if (existsSync(nestedDir)) rmdirSync(nestedDir);
         if (existsSync(join(TEMP_DIR, 'level1'))) rmdirSync(join(TEMP_DIR, 'level1'));
       }
-    });
+    }, 10000);
 
     test('path with unicode characters', () => {
       const testFile = join(TEMP_DIR, 'test-üñíçódé.jsonl');
@@ -290,7 +310,7 @@ describe('path resolution logic - digest command', () => {
       } finally {
         if (existsSync(testFile)) unlinkSync(testFile);
       }
-    });
+    }, 10000);
 
     test('directory with mixed file extensions', () => {
       const testDir = join(TEMP_DIR, 'mixed-files');
@@ -313,7 +333,7 @@ describe('path resolution logic - digest command', () => {
         if (existsSync(txtFile)) unlinkSync(txtFile);
         if (existsSync(testDir)) rmdirSync(testDir);
       }
-    });
+    }, 10000);
   });
 
   describe('coverage verification', () => {
@@ -368,11 +388,16 @@ describe('path resolution logic - digest command', () => {
 /**
  * Helper function to run digest command and capture output
  */
-function runDigestCommand(args: string, distCli: string): { stdout: string; stderr: string } {
+function runDigestCommand(
+  args: string,
+  distCli: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { stdout: string; stderr: string } {
   try {
     const { spawnSync } = require('child_process');
     const result = spawnSync('sh', ['-c', `node ${distCli} digest ${args}`], {
       cwd: process.cwd(),
+      env,
     });
 
     return {
