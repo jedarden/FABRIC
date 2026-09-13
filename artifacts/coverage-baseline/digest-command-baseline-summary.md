@@ -1,74 +1,101 @@
-# Digest Command Coverage Baseline
+# Digest Command Coverage Baseline Summary
 
-**Generated:** 2026-07-29  
+**Baseline recorded:** 2026-07-29
+**Summary corrected:** 2026-09-13 (fixed branch-count typo, restored line metrics, added digest-scope totals)
 **Project:** FABRIC (Flow Analysis & Bead Reporting Interface Console)
+**Command scope:** `fabric digest` — session digest generation and its path-resolution logic
 
-## Baseline Coverage Metrics
+## Scope
 
-### Overall Coverage Summary
-- **Statements:** 9676/13983 (69.20%)
-- **Branches:** 5169/8348 (61.92%)
-- **Functions:** 1586/2393 (66.28%)
-- **Lines:** 0/0 (0.00%)
+This baseline records two distinct measurements. Do not compare a new run against
+the wrong one:
 
-### Key Metrics Breakdown
+1. **Digest-command scope** — per-file istanbul coverage
+   (`digest-command-baseline-coverage.json`) covering the six source files that
+   make up the `fabric digest` command path:
+   - `src/analytics.ts`
+   - `src/cli.ts`
+   - `src/errorGrouping.ts`
+   - `src/pathResolver.ts`
+   - `src/sessionDigest.ts`
+   - `src/tui/components/SessionDigest.ts`
+2. **Overall project** — full-suite totals as recorded in `metrics.json`
+   (9,676/13,983 statements across the whole repo, not just the files above).
 
-| Metric Type | Covered | Total | Percentage |
-|-------------|---------|-------|------------|
-| Statements | 9,676 | 13,983 | 69.20% |
-| Branches | 5,168 | 8,348 | 61.92% |
-| Functions | 1,586 | 2,393 | 66.28% |
-| Lines | 0 | 0 | 0.00% |
+## Key Baseline Metrics
 
-## Files and Coverage
+### Digest-command scope (6 files listed above)
 
-### Coverage Data Files
-- **Main Coverage Report:** `digest-command-baseline-coverage.json`
-- **Metrics JSON:** `metrics.json`
-- **Path Resolution Baseline:** `digest-command-path-resolution-baseline.md`
+| Metric   | Covered | Total | Percentage |
+|----------|---------|-------|------------|
+| Lines       | 937   | 2,387 | 39.25% |
+| Branches    | 233   |   687 | 33.92% |
+| Functions   |  85   |   205 | 41.46% |
+| Statements  | 419   | 1,335 | 31.39% |
+
+Totals aggregated from the per-file counts in
+`digest-command-baseline-coverage.json`. Line coverage is derived from the
+`statementMap` (a line counts as covered when any statement on it executed);
+the raw istanbul JSON does not carry a separate line counter.
+
+### Overall project (full test run)
+
+| Metric   | Covered | Total | Percentage |
+|----------|---------|-------|------------|
+| Lines       | 9,095 | 12,945 | 70.25% |
+| Branches    | 5,169 |  8,348 | 61.91% |
+| Functions   | 1,586 |  2,393 | 66.27% |
+| Statements  | 9,676 | 13,983 | 69.19% |
+
+Percentages are as recorded in `metrics.json`. Recomputing from the raw
+covered/total counts rounds these up by ~0.01pp (69.20 / 61.92 / 66.28 /
+70.26) — the stored values truncate. Either convention is fine; pick one
+before comparing runs.
+
+### Path-resolution logic (component level)
+
+From `metrics.json`, measured by `src/pathResolver.test.ts` (15/15 passing):
+
+| Function                                        | Code paths | Coverage |
+|-------------------------------------------------|-----------|----------|
+| `resolveSource` (`src/cli.ts:52-63`)            | 5/5       | 100%     |
+| `resolveFromOptions` (`src/cli.ts:95-99`)       | 4/4       | 100%     |
+
+All tilde-expansion, directory-vs-file detection, non-existent-path error
+handling, option-precedence, and default-source paths are covered. See
+`digest-command-path-resolution-baseline.md` for the path-by-path breakdown.
 
 ## Analysis Notes
 
-### Coverage Strengths
-- Statement coverage at 69.20% indicates good overall test coverage
-- Function coverage at 66.28% shows most functions are tested
-- Branch coverage at 61.92% is reasonable but could be improved
+- The digest-command scope sits far below overall project coverage because the
+  scoped run exercised only digest-related tests; `src/cli.ts` carries every
+  other CLI command, none of which those tests touch. This is expected, not a
+  regression signal.
+- Within the digest scope, function coverage (41.46%) leads branch coverage
+  (33.92%) — the gap is untested branch arms (error paths, option variants),
+  the usual place to look for improvement.
+- Path resolution itself is fully covered at the code-path level; regressions
+  there are a test failure, not a coverage drift.
 
-### Areas for Improvement
-- Line coverage shows 0/0 - this metric may not be properly tracked
-- Branch coverage could be improved to match statement coverage
-- Function coverage gap suggests some edge cases not tested
+## Source Reports
 
-## Test Suite Status
-- Tests run via Vitest
-- Integration tests included
-- Some file descriptor issues in tests (EMFILE errors) that don't affect coverage
+| File | Contents |
+|------|----------|
+| `digest-command-baseline-coverage.json` | Raw per-file istanbul coverage for the 6 digest-command files |
+| `metrics.json` | Overall project totals, path-resolution path analysis, test-suite status |
+| `digest-command-path-resolution-baseline.md` | Detailed path-by-path analysis of `resolveSource` / `resolveFromOptions` |
 
-## Usage for Future Comparison
+## Comparing Against This Baseline
 
-This baseline serves as the reference point for:
-1. Measuring coverage improvements over time
-2. Identifying coverage regressions
-3. Setting targets for test coverage goals
-4. Validating that new features include appropriate tests
-
-To compare against this baseline:
 ```bash
-# Generate new coverage
-npm test
+# Full-suite coverage (compare against "Overall project" above)
+npm test -- --coverage
 
-# Extract metrics and compare with baseline
-node /tmp/extract_coverage.js
+# Digest-scope regeneration: run only the digest/path-resolution tests and
+# aggregate the resulting per-file istanbul output the same way
+# (statements = s-map entries > 0; branches = individual arms in b-map > 0;
+# functions = f-map entries > 0; lines = distinct statementMap lines executed)
 ```
 
-## Repository Context
-- **Path:** /home/coding/FABRIC
-- **Stack:** TypeScript + Node.js, Express, WebSocket, React frontend (Vite), blessed TUI
-- **Test Framework:** Vitest
-- **Coverage Tool:** Vitest built-in coverage (c8)
-
-## Next Steps
-1. Set coverage improvement targets (e.g., 75% statements, 70% branches)
-2. Focus on increasing branch coverage through edge case testing
-3. Investigate line coverage metric collection
-4. Add tests for uncovered critical paths
+A comparison is only meaningful when scope, aggregation, and rounding convention
+all match this document.
