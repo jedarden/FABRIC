@@ -1,0 +1,2 @@
+{"bead":"fabric-f8ded344","event":"claim","strand":"pluck","ts":"2026-09-13T01:25:09.890683751+00:00","worker":"glm-roam-21"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a0985e-4607-73b3-9ba8-ef66bcb63a55","bead":"fabric-f8ded344","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-13T01:25:10.279675886+00:00","worker":"glm-roam-21"}
