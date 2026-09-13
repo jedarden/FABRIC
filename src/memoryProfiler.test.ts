@@ -5,17 +5,35 @@
  * retention policy, and file reading capabilities.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { getMemoryProfiler, type SnapshotTrigger } from './memoryProfiler.js';
 import { getHeapSnapshots, compareSnapshots } from './heapDiff.js';
-import { existsSync, unlinkSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, unlinkSync, readdirSync, readFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
-const SNAPSHOT_DIR = join(homedir(), '.needle', 'snapshots');
+// Isolate from the live service's snapshot directory. The running fabric web
+// process writes real heap snapshots into ~/.needle/snapshots, and the full
+// test suite's own memory pressure triggers it to capture mid-run — which
+// breaks the exact-count assertions below (and the old cleanup deleted the
+// service's real diagnostic snapshots). vi.hoisted runs before the module
+// imports are evaluated, so both modules resolve the override.
+const { SNAPSHOT_DIR } = vi.hoisted(() => {
+  const dir = `${process.env.TMPDIR ?? '/tmp'}/fabric-snapshot-test-${process.pid}-${Date.now()}`;
+  process.env.FABRIC_SNAPSHOT_DIR = dir;
+  return { SNAPSHOT_DIR: dir };
+});
 
 describe('Memory Profiler', () => {
   const profiler = getMemoryProfiler();
+
+  beforeAll(() => {
+    mkdirSync(SNAPSHOT_DIR, { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(SNAPSHOT_DIR, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
     // Clear any existing snapshots before tests
@@ -56,7 +74,12 @@ describe('Memory Profiler', () => {
       expect(snapshot.heapTotal).toBeGreaterThan(0);
     });
 
-    it('should write heap snapshot to disk with manual trigger', async () => {
+    // Every test below that writes heap snapshots carries an explicit timeout:
+    // each write serializes the full V8 heap stop-the-world (tens of MB) and
+    // the default 5s budget is not enough under CI's CPU quota. A timed-out
+    // test also leaves its pending writes running, which pollutes the counts
+    // of whichever test runs next — see the 60s precedent above.
+    it('should write heap snapshot to disk with manual trigger', { timeout: 60_000 }, async () => {
       const filepath = await profiler.writeHeapSnapshot('manual');
 
       expect(filepath).toBeDefined();
@@ -94,7 +117,7 @@ describe('Memory Profiler', () => {
       }
     });
 
-    it('should include timestamp and trigger reason in filename', async () => {
+    it('should include timestamp and trigger reason in filename', { timeout: 60_000 }, async () => {
       const filepath = await profiler.writeHeapSnapshot('test');
       const filename = filepath.split('/').pop()!;
 
@@ -112,7 +135,7 @@ describe('Memory Profiler', () => {
       }
     });
 
-    it('should create readable snapshot files', async () => {
+    it('should create readable snapshot files', { timeout: 60_000 }, async () => {
       const filepath = await profiler.writeHeapSnapshot('test');
 
       // Verify file exists and is readable
@@ -130,7 +153,7 @@ describe('Memory Profiler', () => {
       expect(initialCount).toBe(0);
     });
 
-    it('should apply retention policy after writing snapshot', async () => {
+    it('should apply retention policy after writing snapshot', { timeout: 60_000 }, async () => {
       // This test verifies the retention mechanism is called
       // Actual retention limits are high (50 files, 30 days) so we just
       // verify the mechanism works without hitting limits
@@ -142,7 +165,7 @@ describe('Memory Profiler', () => {
       expect(countAfter).toBe(countBefore + 1);
     });
 
-    it('should handle multiple snapshots efficiently', async () => {
+    it('should handle multiple snapshots efficiently', { timeout: 60_000 }, async () => {
       const writeCount = 5;
 
       for (let i = 0; i < writeCount; i++) {
@@ -157,7 +180,7 @@ describe('Memory Profiler', () => {
   });
 
   describe('Snapshot Reading and Comparison', () => {
-    it('should read snapshots from disk', async () => {
+    it('should read snapshots from disk', { timeout: 60_000 }, async () => {
       await profiler.writeHeapSnapshot('test');
 
       const snapshots = getHeapSnapshots();
@@ -167,7 +190,7 @@ describe('Memory Profiler', () => {
       expect(snapshots[0].trigger).toBe('test');
     });
 
-    it('should compare two snapshots successfully', async () => {
+    it('should compare two snapshots successfully', { timeout: 60_000 }, async () => {
       await profiler.writeHeapSnapshot('test');
       // Small delay to ensure different timestamps
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -185,7 +208,7 @@ describe('Memory Profiler', () => {
       expect(diff.sizeGrowthBytes).toBeDefined();
     });
 
-    it('should provide meaningful assessment from snapshot comparison', async () => {
+    it('should provide meaningful assessment from snapshot comparison', { timeout: 60_000 }, async () => {
       await profiler.writeHeapSnapshot('test');
       await new Promise(resolve => setTimeout(resolve, 100));
       await profiler.writeHeapSnapshot('test');
@@ -201,7 +224,7 @@ describe('Memory Profiler', () => {
   });
 
   describe('Integration with Memory Profiler', () => {
-    it('should maintain consistent snapshot state between modules', async () => {
+    it('should maintain consistent snapshot state between modules', { timeout: 60_000 }, async () => {
       // Write via profiler
       const filepath = await profiler.writeHeapSnapshot('test');
 
@@ -211,7 +234,7 @@ describe('Memory Profiler', () => {
       expect(snapshots[0].filepath).toBe(filepath);
     });
 
-    it('should handle concurrent snapshot operations', async () => {
+    it('should handle concurrent snapshot operations', { timeout: 60_000 }, async () => {
       const promises = [];
       for (let i = 0; i < 3; i++) {
         // Add delay between writes to ensure different timestamps

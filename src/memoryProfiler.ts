@@ -9,8 +9,13 @@ import { writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync, statSync
 import { join } from 'path';
 import { homedir } from 'os';
 
-/** Snapshot directory for heap snapshots */
-const SNAPSHOT_DIR = join(homedir(), '.needle', 'snapshots');
+/**
+ * Snapshot directory for heap snapshots. Overridable so tests can isolate
+ * from the live service: the running web process captures real snapshots
+ * here, and suite-induced memory pressure makes it write mid-test.
+ */
+const SNAPSHOT_DIR =
+  process.env.FABRIC_SNAPSHOT_DIR ?? join(homedir(), '.needle', 'snapshots');
 
 /** Maximum number of in-memory snapshots to keep */
 const MAX_IN_MEMORY_SNAPSHOTS = 100;

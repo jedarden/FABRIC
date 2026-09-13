@@ -9,8 +9,12 @@ import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSy
 import { join } from 'path';
 import { homedir } from 'os';
 
-/** Snapshot directory */
-const SNAPSHOT_DIR = join(homedir(), '.needle', 'snapshots');
+/**
+ * Snapshot directory. Overridable so tests can isolate from the live
+ * service, which captures real snapshots into the default location.
+ */
+const SNAPSHOT_DIR =
+  process.env.FABRIC_SNAPSHOT_DIR ?? join(homedir(), '.needle', 'snapshots');
 
 /** Maximum number of snapshots to consider for diff analysis */
 const MAX_SNAPSHOTS_FOR_DIFF = 10;
