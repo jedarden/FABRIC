@@ -17,6 +17,7 @@ FABRIC automatically captures and retains V8 heap snapshots for memory leak dete
 |--------|-------|-------------|
 | **Max Disk Snapshots** | 50 files | Maximum number of snapshot files retained on disk |
 | **Max Age** | 30 days | Snapshots older than 30 days are automatically deleted |
+| **Max Total Size** | 10 GiB | Oldest snapshots pruned when total on-disk size is exceeded (override with `FABRIC_SNAPSHOT_MAX_TOTAL_BYTES`; the just-written snapshot is never pruned by this pass) |
 | **In-Memory Snapshots** | 100 snapshots | Recent snapshots kept in memory for fast access |
 
 ## Trigger Reasons
@@ -24,7 +25,7 @@ FABRIC automatically captures and retains V8 heap snapshots for memory leak dete
 | Trigger | Description | When Used |
 |---------|-------------|-----------|
 | `manual` | User-initiated snapshot | Via API endpoint `POST /api/memory/heap-snapshot` |
-| `memory-pressure` | High heap usage threshold | When heap usage exceeds 80% of limit |
+| `memory-pressure` | High heap usage threshold | When heap usage exceeds 80% of limit (checked every 30s; at most one capture per 30-minute cooldown while pressure persists). Requires snapshots enabled (`--heap-snapshots` or `NODE_ENV=production`) |
 | `periodic` | Scheduled automatic capture | Every 30 minutes (configurable via `--snapshot-interval`) |
 | `oom-risk` | Out-of-memory risk detected | When OOM risk is high |
 | `test` | Test/verification capture | During automated testing |

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
-import { getMemoryProfiler, type SnapshotTrigger } from './memoryProfiler.js';
+import { getMemoryProfiler, shouldCapturePressureSnapshot, type SnapshotTrigger } from './memoryProfiler.js';
 import { getHeapSnapshots, compareSnapshots } from './heapDiff.js';
 import { existsSync, unlinkSync, readdirSync, readFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -176,6 +176,57 @@ describe('Memory Profiler', () => {
 
       const snapshots = getHeapSnapshots();
       expect(snapshots.length).toBe(writeCount);
+    });
+
+    it('should prune oldest snapshots when total size cap is exceeded', { timeout: 60_000 }, async () => {
+      // Cap is read from the environment at retention time (not module load),
+      // so a 1-byte cap forces the size-based pass on every write.
+      const previousCap = process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+      process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = '1';
+      try {
+        // First write: a single snapshot always exceeds a 1-byte cap but must
+        // survive — the just-written file is never pruned by the size pass.
+        await profiler.writeHeapSnapshot('test');
+        await new Promise(resolve => setTimeout(resolve, 50));
+        await profiler.writeHeapSnapshot('test');
+
+        const snapshots = getHeapSnapshots();
+        expect(snapshots.length).toBe(1); // older one pruned, newest kept
+        expect(snapshots[0].trigger).toBe('test');
+      } finally {
+        if (previousCap === undefined) {
+          delete process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+        } else {
+          process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = previousCap;
+        }
+      }
+    });
+  });
+
+  describe('Pressure Snapshot Policy', () => {
+    it('should not capture when snapshots are disabled', () => {
+      expect(shouldCapturePressureSnapshot(95, false, 0, Date.now())).toBe(false);
+    });
+
+    it('should not capture below the pressure threshold', () => {
+      expect(shouldCapturePressureSnapshot(79.9, true, 0, Date.now())).toBe(false);
+      expect(shouldCapturePressureSnapshot(80, true, 0, Date.now())).toBe(false);
+    });
+
+    it('should capture immediately on first pressure with no prior snapshot', () => {
+      const now = Date.now();
+      expect(shouldCapturePressureSnapshot(85.3, true, 0, now)).toBe(true);
+    });
+
+    it('should respect the cooldown between pressure snapshots', () => {
+      const now = Date.now();
+      const cooldown = 30 * 60 * 1000;
+      // 10 minutes after the last pressure snapshot: still cooling down
+      expect(shouldCapturePressureSnapshot(85.7, true, now - 10 * 60 * 1000, now, cooldown)).toBe(false);
+      // Exactly at the cooldown: fires again (sustained pressure re-triggers)
+      expect(shouldCapturePressureSnapshot(85.7, true, now - cooldown, now, cooldown)).toBe(true);
+      // Pressure ended between snapshots: cooldown still applies from the last write
+      expect(shouldCapturePressureSnapshot(81, true, now - cooldown - 1, now, cooldown)).toBe(true);
     });
   });
 

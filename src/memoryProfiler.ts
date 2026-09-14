@@ -29,6 +29,62 @@ const MAX_DISK_SNAPSHOTS = 50;
 /** Maximum age of heap snapshots in days */
 const MAX_SNAPSHOT_AGE_DAYS = 30;
 
+/**
+ * Default cap on total on-disk heap snapshot bytes (10 GiB). Each
+ * .heapsnapshot file is roughly the size of the heap it captures, so at the
+ * 85%-of-1GB pressure seen in production a full 50-file retention window
+ * would hold ~45GB — enough to fill this box's disk on its own.
+ */
+const DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES = 10 * 1024 * 1024 * 1024;
+
+/** Heap usage percent above which the memory monitor captures a pressure snapshot */
+export const MEMORY_PRESSURE_THRESHOLD_PERCENT = 80;
+
+/** Minimum time between memory-pressure snapshots (matches the periodic default) */
+export const PRESSURE_SNAPSHOT_COOLDOWN_MS = 30 * 60 * 1000;
+
+/**
+ * Resolve the total-size cap for on-disk snapshots from the environment.
+ * Read at call time (not module load) so operators and tests can change it.
+ */
+function getMaxTotalSnapshotBytes(): number {
+  const raw = process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+  if (!raw) return DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES;
+}
+
+/**
+ * Decide whether the memory monitor should capture a 'memory-pressure'
+ * heap snapshot. Pure so the pressure policy is unit-testable without
+ * inducing real heap pressure in a test process.
+ *
+ * @param heapUsagePercent current heap usage as % of heap_size_limit
+ * @param snapshotsEnabled whether snapshot writing is enabled (CLI --heap-snapshots / NODE_ENV=production)
+ * @param lastPressureSnapshotMs epoch ms of the last pressure snapshot (0 = never)
+ * @param nowMs current epoch ms
+ * @param cooldownMs minimum spacing between pressure snapshots
+ */
+export function shouldCapturePressureSnapshot(
+  heapUsagePercent: number,
+  snapshotsEnabled: boolean,
+  lastPressureSnapshotMs: number,
+  nowMs: number,
+  cooldownMs: number = PRESSURE_SNAPSHOT_COOLDOWN_MS
+): boolean {
+  if (!snapshotsEnabled) return false;
+  if (heapUsagePercent <= MEMORY_PRESSURE_THRESHOLD_PERCENT) return false;
+  return nowMs - lastPressureSnapshotMs >= cooldownMs;
+}
+
+/** Format bytes as a human-readable string. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)}GB`;
+}
+
 /** Trigger reasons for heap snapshots */
 export type SnapshotTrigger = 'manual' | 'memory-pressure' | 'periodic' | 'oom-risk' | 'test';
 
@@ -238,7 +294,7 @@ class MemoryProfiler {
       .map(f => {
         const filepath = join(SNAPSHOT_DIR, f);
         const stat = statSync(filepath);
-        return { filename: f, filepath, mtime: stat.mtime.getTime() };
+        return { filename: f, filepath, mtime: stat.mtime.getTime(), sizeBytes: stat.size };
       })
       .sort((a, b) => b.mtime - a.mtime); // Sort by modification time, newest first
 
@@ -262,6 +318,21 @@ class MemoryProfiler {
         } catch (err) {
           console.error(`Failed to delete aged snapshot ${file.filename}:`, err);
         }
+      }
+    }
+
+    // Enforce a total-size cap, pruning oldest first. files[0] (the snapshot
+    // just written) is never pruned by this pass so a single huge snapshot
+    // cannot delete itself and leave the incident unrecorded.
+    const maxTotalBytes = getMaxTotalSnapshotBytes();
+    let totalBytes = files.reduce((sum, f) => sum + f.sizeBytes, 0);
+    for (let i = files.length - 1; i > 0 && totalBytes > maxTotalBytes; i--) {
+      try {
+        unlinkSync(files[i].filepath);
+        totalBytes -= files[i].sizeBytes;
+        console.error(`Snapshot retention: deleted ${files[i].filename} (total ${formatBytes(totalBytes)} > cap)`);
+      } catch (err) {
+        console.error(`Failed to delete oversized snapshot ${files[i].filename}:`, err);
       }
     }
   }

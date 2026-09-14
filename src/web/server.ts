@@ -23,7 +23,7 @@ import { ServerMetrics } from '../serverMetrics.js';
 import { SessionDigestGenerator, formatDigestAsMarkdown } from '../sessionDigest.js';
 import { parseGitEvents } from '../gitParser.js';
 import { generatePRPreview } from '../tui/utils/prPreview.js';
-import { getMemoryProfiler } from '../memoryProfiler.js';
+import { getMemoryProfiler, shouldCapturePressureSnapshot } from '../memoryProfiler.js';
 import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport } from '../heapDiff.js';
 import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } from '../logPruner.js';
 import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
@@ -1947,6 +1947,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
     // Memory pressure monitoring: log warnings when approaching heap limit
     let lastMemoryLog = 0;
+    let lastPressureSnapshot = 0;
     const memoryCheckInterval = setInterval(async () => {
       const mem = process.memoryUsage();
       const v8 = await getV8();
@@ -1965,6 +1966,18 @@ export function createWebServer(options: WebServerOptions): WebServer {
       // Warn when approaching heap limit (>80%)
       if (heapUsagePercent > 80) {
         console.warn(`Memory pressure warning: heap usage at ${heapUsagePercent.toFixed(1)}% of limit`);
+
+        // Capture a heap snapshot while under pressure so the next incident
+        // is analyzable after the fact (the 2026-07-09 run sat at 85% for
+        // 45+ minutes with zero snapshots captured). Rate-limited by cooldown
+        // because each snapshot is roughly heap-sized and stops the world
+        // while serializing; only when snapshots are enabled.
+        if (shouldCapturePressureSnapshot(heapUsagePercent, profiler.writeSnapshots, lastPressureSnapshot, now)) {
+          lastPressureSnapshot = now;
+          profiler.writeHeapSnapshot('memory-pressure')
+            .then(filepath => console.error(`Heap snapshot written: ${filepath}`))
+            .catch(err => console.error(`Failed to write heap snapshot: ${err}`));
+        }
       }
     }, 30_000);
   }
