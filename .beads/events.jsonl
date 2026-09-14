@@ -25,3 +25,11 @@
 {"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09c88-98e6-7b23-8c7e-b76ce0a6537a","bead":"fabric-166beca4","event":"dispatch","model":"glm-5.3-flash","strand":"explore","ts":"2026-09-13T20:49:52.870653465+00:00","worker":"glm-roam-19"}
 {"bead":"fabric-931136a0","event":"claim","strand":"pluck","ts":"2026-09-13T22:49:50.214053859+00:00","worker":"glm-roam-21"}
 {"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09cf6-6da6-7673-9585-53d6f7a96a97","bead":"fabric-931136a0","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-13T22:49:50.758307589+00:00","worker":"glm-roam-21"}
+{"bead":"fabric-166beca4","event":"claim","strand":"explore","ts":"2026-09-13T23:23:46.188271073+00:00","worker":"glm-roam-18"}
+{"adapter":"claude-code-glm-5.3","attempt_id":"01a09d15-7e64-76a1-b204-99d3c19b1ca5","bead":"fabric-166beca4","event":"dispatch","model":"glm-5.3","strand":"explore","ts":"2026-09-13T23:23:46.660666398+00:00","worker":"glm-roam-18"}
+{"bead":"fabric-5e0aa96f","event":"claim","strand":"pluck","ts":"2026-09-13T23:31:20.167493644+00:00","worker":"glm-roam-21"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09d1c-6c30-7c21-987e-30b0cdae7549","bead":"fabric-5e0aa96f","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-13T23:31:20.753024639+00:00","worker":"glm-roam-21"}
+{"bead":"fabric-931136a0","event":"claim","strand":"pluck","ts":"2026-09-13T23:43:22.779787118+00:00","worker":"glm-roam-21"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09d27-726f-72c2-9bfc-0620b792f145","bead":"fabric-931136a0","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-13T23:43:23.247889002+00:00","worker":"glm-roam-21"}
+{"bead":"fabric-5e0aa96f","event":"claim","strand":"pluck","ts":"2026-09-13T23:50:03.414605909+00:00","worker":"glm-roam-21"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09d2d-8f9f-7932-b95e-8dbb11c6c64b","bead":"fabric-5e0aa96f","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-13T23:50:03.935187534+00:00","worker":"glm-roam-21"}
