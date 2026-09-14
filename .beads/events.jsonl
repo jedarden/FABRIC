@@ -37,3 +37,12 @@
 {"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09d6c-3aad-7783-bdcf-8d86eb353abf","bead":"fabric-931136a0","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-14T00:58:30.957692960+00:00","worker":"glm-roam-21"}
 {"bead":"fabric-5e0aa96f","event":"claim","strand":"pluck","ts":"2026-09-14T01:04:32.789384168+00:00","worker":"glm-roam-21"}
 {"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09d71-c1f4-7352-afc6-8388b5a958c5","bead":"fabric-5e0aa96f","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-14T01:04:33.268984738+00:00","worker":"glm-roam-21"}
+{"bead":"fabric-931136a0","event":"claim","strand":"pluck","ts":"2026-09-14T01:53:06.471257484+00:00","worker":"glm-roam-21"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09d9e-3725-7223-8465-c88a2bb526c7","bead":"fabric-931136a0","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-14T01:53:06.853319131+00:00","worker":"glm-roam-21"}
+{"bead":"fabric-5e0aa96f","event":"claim","strand":"pluck","ts":"2026-09-14T01:58:42.039146198+00:00","worker":"glm-roam-21"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09da3-56b0-7243-8ebc-05cb5e72ce80","bead":"fabric-5e0aa96f","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-14T01:58:42.608433148+00:00","worker":"glm-roam-21"}
+{"bead":"fabric-5e0aa96f","duration_ms":338282,"event":"fail","exit_code":0,"outcome":"failure","strand":"pluck","ts":"2026-09-14T02:04:21.032978566+00:00","worker":"glm-roam-21"}
+{"bead":"fabric-166beca4","event":"claim","strand":"pluck","ts":"2026-09-14T02:05:21.982844871+00:00","worker":"glm-roam-21"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09da9-714a-79c0-9c97-5ca845a67f63","bead":"fabric-166beca4","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-14T02:05:22.634607121+00:00","worker":"glm-roam-21"}
+{"bead":"fabric-5e0aa96f","event":"claim","strand":"pluck","ts":"2026-09-14T02:24:43.544623290+00:00","worker":"glm-roam-21"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a09dbb-2a81-76f2-a16d-75375c73dde2","bead":"fabric-5e0aa96f","event":"dispatch","model":"glm-5.3-flash","strand":"pluck","ts":"2026-09-14T02:24:44.161359623+00:00","worker":"glm-roam-21"}
