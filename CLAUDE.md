@@ -10,23 +10,33 @@ FABRIC is a live dashboard for NEEDLE worker activity — TUI and web modes.
 
 ## Running Service
 
+Host: **`codinghome`** (replaces `hetzner-ex44`, decommissioned 2026-08-30).
+
 ```bash
 systemctl --user status fabric-web.service   # check status
 systemctl --user restart fabric-web.service  # restart
 ```
 
-The service runs as `fabric web --port 3000 --source ~/.needle/logs --otlp-http :4318`.
-Auth token is loaded from `~/.config/fabric/secrets.env` (`FABRIC_AUTH_TOKEN`).
+The service runs as `node dist/cli.js web --port 3000 --source ~/.needle/logs --otlp-http :4318`
+(unit template: `scripts/fabric-web.service`; installed at `~/.config/systemd/user/fabric-web.service`).
+Auth token is loaded from `~/.config/fabric/secrets.env` (`FABRIC_AUTH_TOKEN`, mode 600).
 
 ## Remote Access
 
 | URL | Notes |
 |-----|-------|
 | `http://localhost:3000` | Local only |
-| `https://hetzner-ex44.tail1b1987.ts.net/` | Tailscale tailnet, TLS, **no public internet** |
+| `https://codinghome.tail1b1987.ts.net/` | Tailscale tailnet, TLS, **no public internet** |
 
-The Tailscale HTTPS proxy is configured via `tailscale serve --bg http://localhost:3000`.
+The Tailscale HTTPS proxy is configured via `tailscale serve --bg --https=443 http://localhost:3000`.
 To re-apply after a reset: `./scripts/setup-tailscale-serve.sh`.
+
+**Status note (2026-09-16):** the serve config change requires operator rights
+(`sudo tailscale set --operator=$USER`); the `coding` user on codinghome currently
+has no working sudo, so the 443 handler is **not yet active** — the only handler
+is `:8443`, which belongs to jedarden-preview-web (127.0.0.1:45129) and must not
+be repurposed. Local service is verified healthy; the remote URL works once an
+operator runs the serve command above.
 
 ## Auth Model
 
@@ -45,6 +55,8 @@ To wire NEEDLE workers to push OTLP telemetry to the running FABRIC instance:
 telemetry:
   otlp_sink:
     enabled: true   # pushes to http://localhost:4318 by default
+    headers:
+      - "Authorization: Bearer ${FABRIC_AUTH_TOKEN}"  # all POSTs incl. OTLP require auth
 
 fabric:
   enabled: true
@@ -56,6 +68,11 @@ fabric:
 - NEEDLE uses the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var (defaults to `http://localhost:4318`) — no explicit endpoint key needed in config
 - With OTLP enabled, `/api/summary` workers_active updates in near real-time vs log-file polling
 - The `fabric.endpoint` setting pushes to FABRIC's native API (POST `/api/events` or heartbeat endpoint)
+- Full topology, remote-host endpoints, and verification: `docs/otlp-config.md` (renamed from `docs/ex44-config.md`)
+- Reference config template: `configs/needle-otlp-config.yaml` (renamed from `configs/ex44-needle-config.yaml`)
+- Note: codinghome's live NEEDLE config points `otlp_sink` at the separate fleet
+  collector (`needle-otel-...apexalgo-iad...:4318`) — local FABRIC visibility comes
+  from JSONL tailing; do not repoint the fleet collector at FABRIC.
 
 ## Log Retention Policy
 
@@ -71,7 +88,10 @@ FABRIC automatically manages NEEDLE log file retention to prevent unbounded grow
 
 ### Automatic Execution
 
-A systemd timer runs pruning daily at 03:00 UTC:
+Optional: a systemd timer can run pruning daily at 03:00 UTC. **Not currently
+enabled on codinghome** — templates exist in `scripts/`; to enable, install
+`scripts/fabric-prune.{service,timer}` to `~/.config/systemd/user/` and run
+`systemctl --user enable --now fabric-prune.timer`:
 
 ```bash
 systemctl --user status fabric-prune.timer   # check timer status
@@ -124,6 +144,7 @@ npx tsc --noEmit        # type-check without emitting
 | `scripts/fabric-prune.service` | systemd unit file for log pruning |
 | `scripts/fabric-prune.timer` | systemd timer for daily log pruning |
 | `scripts/setup-tailscale-serve.sh` | One-time Tailscale Serve setup |
+| `docs/otlp-config.md` | NEEDLE → FABRIC OTLP configuration guide (fleet topology) |
 | `docs/plan.md` | Full architecture and phase roadmap |
 
 ## CI — Argo Workflows on iad-ci only. GitHub Actions are disabled.

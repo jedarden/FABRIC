@@ -14,7 +14,7 @@ GET /api/metrics
 
 ## Multi-Host Metrics
 
-FABRIC supports multi-host aggregation for fleet-wide monitoring. When multiple NEEDLE hosts (e.g., `ex44`, `lab`, production clusters) push events to a centralized FABRIC instance via OTLP, the following metrics include a `host` label to distinguish data from different physical machines:
+FABRIC supports multi-host aggregation for fleet-wide monitoring. When multiple NEEDLE hosts (e.g., `codinghome`, `lab`, production clusters) push events to a centralized FABRIC instance via OTLP, the following metrics include a `host` label to distinguish data from different physical machines:
 
 **Metrics with `host` label:**
 - `fabric_event_count{host="..."}`
@@ -133,25 +133,25 @@ fabric_logs_dir_bytes 52428800
 ```
 # HELP fabric_event_count Total events in store by host
 # TYPE fabric_event_count gauge
-fabric_event_count{host="ex44"} 15234
+fabric_event_count{host="codinghome"} 15234
 fabric_event_count{host="lab"} 8432
 fabric_event_count{host="prod-worker-1"} 45621
 
 # HELP fabric_ingest_rate_per_second Events ingested per second by host (60s window)
 # TYPE fabric_ingest_rate_per_second gauge
-fabric_ingest_rate_per_second{host="ex44"} 4.23
+fabric_ingest_rate_per_second{host="codinghome"} 4.23
 fabric_ingest_rate_per_second{host="lab"} 2.15
 fabric_ingest_rate_per_second{host="prod-worker-1"} 8.92
 
 # HELP fabric_active_workers Active workers by host
 # TYPE fabric_active_workers gauge
-fabric_active_workers{host="ex44"} 5
+fabric_active_workers{host="codinghome"} 5
 fabric_active_workers{host="lab"} 3
 fabric_active_workers{host="prod-worker-1"} 12
 
 # HELP fabric_tailer_files_watched Log files being watched by host
 # TYPE fabric_tailer_files_watched gauge
-fabric_tailer_files_watched{host="ex44"} 5
+fabric_tailer_files_watched{host="codinghome"} 5
 ```
 
 ## Prometheus Configuration

@@ -140,7 +140,8 @@ fabric web --max-events 1000000
 ### Access
 
 - Local: `http://localhost:3000`
-- Remote (via Tailscale): `https://hetzner-ex44.tail1b1987.ts.net/`
+- Remote (via Tailscale): `https://codinghome.tail1b1987.ts.net/` (requires the
+  `tailscale serve` handler — see `scripts/setup-tailscale-serve.sh`)
 
 ### Authentication
 

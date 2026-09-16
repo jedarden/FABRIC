@@ -20,7 +20,7 @@ shape:
   "session_id": "d7261357",
   "sequence": 1,
   "bead_id": "bd-abc123",
-  "host": "ex44",
+  "host": "codinghome",
   "data": {}
 }
 ```

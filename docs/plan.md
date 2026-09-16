@@ -1598,6 +1598,14 @@ FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detec
 
 ## ADR-1: 2026-07-20 — Centralize FABRIC as a Multi-Host OTLP Collector
 
+> **Status note (2026-09-16, host migration):** the decision stands, but the hosts
+> named here do not. `ex44` was decommissioned 2026-08-30 and replaced by
+> **`codinghome`**; the canonical FABRIC collector now runs on `codinghome`
+> (`fabric-web.service`, dashboard :3000, OTLP :4318) rather than `lab`.
+> The rest of this section is preserved as written for the historical record.
+> Current wiring and endpoints: `docs/otlp-config.md` (renamed from
+> `docs/ex44-config.md`).
+
 ### Context
 
 FABRIC's stated purpose (README, `docs/plan.md` Overview) is to be the observability

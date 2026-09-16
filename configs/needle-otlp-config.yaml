@@ -1,8 +1,17 @@
-# ex44 NEEDLE configuration for centralized FABRIC OTLP collection
-# This file should be placed at ~/.needle/config.yaml on ex44
+# NEEDLE configuration for centralized FABRIC OTLP collection
+# (renamed from configs/ex44-needle-config.yaml — ex44 was decommissioned
+# 2026-08-30; the FABRIC collector now runs on codinghome)
 #
-# Per ADR-1, ex44 sends OTLP telemetry to the lab-hosted FABRIC collector
-# instead of using localhost HTTP POST (which has no listener on ex44)
+# Place at ~/.needle/config.yaml on the host whose workers should push OTLP
+# to the FABRIC collector. See docs/otlp-config.md for the full guide.
+#
+# - On codinghome itself the endpoint below (localhost:4318) is correct as-is.
+# - From a remote host, use http://codinghome.tail1b1987.ts.net:4318
+#   (tailnet reachability of port 4318 not yet verified — see docs/otlp-config.md).
+#
+# NOTE: codinghome's live ~/.needle/config.yaml deliberately points otlp_sink
+# at the separate fleet collector (needle-otel-...apexalgo-iad...:4318) — do
+# not replace it with this file.
 
 agent:
   default: claude-code-glm-4.7
@@ -127,12 +136,13 @@ telemetry:
   hooks: []
   otlp_sink:
     enabled: true
-    endpoint: http://100.81.129.38:4318  # Lab FABRIC OTLP receiver
+    endpoint: http://localhost:4318  # FABRIC OTLP receiver on codinghome
     protocol: http/protobuf
     timeout_secs: 10
     compression: gzip
     tls: none
-    headers: []
+    headers:
+      - "Authorization: Bearer ${FABRIC_AUTH_TOKEN}"  # FABRIC requires auth on all POSTs incl. OTLP
     resource_attributes: []
     metrics_interval_secs: 10
     service_namespace: needle-fleet
@@ -188,7 +198,7 @@ self_modification:
 # DISABLED: Use OTLP instead of HTTP POST to localhost
 fabric:
   enabled: false
-  # endpoint: http://localhost:3000  # No listener on ex44
+  # endpoint: http://localhost:3000  # FABRIC listens here, but OTLP is the canonical path (ADR-1)
   # timeout: 2
   # batching: false
 

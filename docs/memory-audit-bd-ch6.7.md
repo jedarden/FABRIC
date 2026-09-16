@@ -3,6 +3,7 @@
 **Task:** bd-ch6.7 - Memory profiling / leak hunt for fabric-web under production load
 **Date:** 2026-04-28
 **Environment:** fabric-web systemd service on Hetzner EX44
+*(historical: EX44 was decommissioned 2026-08-30; the same service now runs on `codinghome`)*
 
 ## Executive Summary
 
