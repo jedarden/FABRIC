@@ -103,12 +103,13 @@ function sdNotify(state: string): void {
 }
 
 export interface WebServerOptions {
+  /** Port to listen on. Pass 0 to let the OS assign an ephemeral port (read it back with getPort()). */
   port: number;
   logPath: string;
   store: InMemoryEventStore;
   /** Optional auth token for POST endpoints. If provided, requires Bearer token in Authorization header */
   authToken?: string;
-  /** When set, creates a second HTTP listener on this port for OTLP/HTTP traffic. */
+  /** When set, creates a second HTTP listener on this port for OTLP/HTTP traffic. 0 lets the OS assign an ephemeral port (read it back with getOtlpPort()). */
   otlpHttpPort?: number;
   /** Max events allowed in the store before liveness check fails (memory-bomb guard). */
   maxEventCount?: number;
@@ -119,9 +120,13 @@ export interface WebServerOptions {
 }
 
 export interface WebServer extends EventEmitter {
-  start(): void;
+  /** Start listening. Resolves once all listeners are bound; rejects if the main listener errors (e.g. EADDRINUSE). */
+  start(): Promise<void>;
   stop(): void;
+  /** The actual bound port (differs from the configured port when the server was created with port 0). */
   getPort(): number;
+  /** The actual bound OTLP/HTTP listener port once listening; undefined when no OTLP listener was configured. */
+  getOtlpPort(): number | undefined;
   broadcast(event: LogEvent): void;
   broadcastCollisions(): void;
   recordEvent(host?: string, workerId?: string): void;
@@ -144,9 +149,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
   const clients: Set<WebSocket> = new Set();
   let memoryUpdateInterval: NodeJS.Timeout | null = null;
   let logsDirSizeInterval: NodeJS.Timeout | null = null;
+  let startPromise: Promise<void> | null = null;
 
-  function start() {
-    if (running) return;
+  function start(): Promise<void> {
+    if (startPromise) return startPromise;
+    if (running) return Promise.resolve();
 
     app = express();
     httpServer = createServer(app);
@@ -184,7 +191,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // ── OTLP/HTTP routes (mounted before json middleware so raw body is available) ──
-    if (otlpHttpPort) {
+    if (otlpHttpPort !== undefined) {
       const otlpRouter = createOtlpHttpRouter({
         onEvent: (event: LogEvent) => {
           store.add(event);
@@ -1878,55 +1885,73 @@ export function createWebServer(options: WebServerOptions): WebServer {
       });
     });
 
-    httpServer.listen(port, () => {
-      running = true;
-      console.log(`FABRIC Web Dashboard running at http://localhost:${port}`);
-      console.log(`API: http://localhost:${port}/api/`);
-      console.log(`Watching: ${logPath}`);
-      if (!authToken) {
-        console.warn(
-          'WARNING: FABRIC_AUTH_TOKEN is not set. ' +
-          'POST /api/events is unauthenticated and accepts events from any process. ' +
-          'Set FABRIC_AUTH_TOKEN (or --auth-token) before exposing FABRIC outside localhost.'
-        );
+    startPromise = new Promise<void>((resolve, reject) => {
+      let webBound = false;
+      let otlpSettled = otlpHttpPort === undefined;
+      const settled = () => {
+        if (webBound && otlpSettled) resolve();
+      };
+
+      httpServer.listen(port, () => {
+        webBound = true;
+        running = true;
+        console.log(`FABRIC Web Dashboard running at http://localhost:${getPort()}`);
+        console.log(`API: http://localhost:${getPort()}/api/`);
+        console.log(`Watching: ${logPath}`);
+        if (!authToken) {
+          console.warn(
+            'WARNING: FABRIC_AUTH_TOKEN is not set. ' +
+            'POST /api/events is unauthenticated and accepts events from any process. ' +
+            'Set FABRIC_AUTH_TOKEN (or --auth-token) before exposing FABRIC outside localhost.'
+          );
+        }
+        console.log('Press Ctrl+C to stop');
+
+        // Notify systemd that the service is ready (Type=notify)
+        sdNotify('READY=1\nSTATUS=FABRIC running\n');
+
+        // Watchdog keepalives: ping at half the configured interval
+        const watchdogUsec = parseInt(process.env.WATCHDOG_USEC ?? '0', 10);
+        if (watchdogUsec > 0) {
+          const intervalMs = Math.floor(watchdogUsec / 2 / 1000);
+          setInterval(() => sdNotify('WATCHDOG=1'), intervalMs);
+        }
+
+        emitter.emit('start');
+
+        // Start the background memory sampler
+        import('../systemCgroupMonitor.js').then(({ startMemorySampler }) => {
+          startMemorySampler(10000); // Sample every 10 seconds
+          console.log('Memory sampler started (10s interval)');
+        }).catch(err => {
+          console.error('Failed to start memory sampler:', err);
+        });
+
+        settled();
+      });
+
+      // Second HTTP listener for OTLP/HTTP traffic (port 4318 by convention)
+      if (otlpHttpPort !== undefined) {
+        otlpHttpServer = createServer(app);
+        otlpHttpServer.listen(otlpHttpPort, () => {
+          console.log(`OTLP/HTTP receiver listening on 0.0.0.0:${getOtlpPort()}`);
+          otlpSettled = true;
+          settled();
+        });
+        otlpHttpServer.on('error', (err) => {
+          console.error(`OTLP/HTTP listener error: ${(err as Error).message}`);
+          if (emitter.listenerCount('error') > 0) emitter.emit('error', err);
+          // The OTLP listener is auxiliary: degrade to web-only instead of
+          // failing startup, but never leave start() hanging on it.
+          otlpSettled = true;
+          settled();
+        });
       }
-      console.log('Press Ctrl+C to stop');
 
-      // Notify systemd that the service is ready (Type=notify)
-      sdNotify('READY=1\nSTATUS=FABRIC running\n');
-
-      // Watchdog keepalives: ping at half the configured interval
-      const watchdogUsec = parseInt(process.env.WATCHDOG_USEC ?? '0', 10);
-      if (watchdogUsec > 0) {
-        const intervalMs = Math.floor(watchdogUsec / 2 / 1000);
-        setInterval(() => sdNotify('WATCHDOG=1'), intervalMs);
-      }
-
-      emitter.emit('start');
-
-      // Start the background memory sampler
-      import('../systemCgroupMonitor.js').then(({ startMemorySampler }) => {
-        startMemorySampler(10000); // Sample every 10 seconds
-        console.log('Memory sampler started (10s interval)');
-      }).catch(err => {
-        console.error('Failed to start memory sampler:', err);
+      httpServer.on('error', (err) => {
+        if (emitter.listenerCount('error') > 0) emitter.emit('error', err);
+        reject(err as Error);
       });
-    });
-
-    // Second HTTP listener for OTLP/HTTP traffic (port 4318 by convention)
-    if (otlpHttpPort) {
-      otlpHttpServer = createServer(app);
-      otlpHttpServer.listen(otlpHttpPort, () => {
-        console.log(`OTLP/HTTP receiver listening on 0.0.0.0:${otlpHttpPort}`);
-      });
-      otlpHttpServer.on('error', (err) => {
-        console.error(`OTLP/HTTP listener error: ${(err as Error).message}`);
-        emitter.emit('error', err);
-      });
-    }
-
-    httpServer.on('error', (err) => {
-      emitter.emit('error', err);
     });
 
     // Liveness self-check: exit non-zero if overloaded for consecutive checks
@@ -1980,6 +2005,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
         }
       }
     }, 30_000);
+
+    return startPromise;
   }
 
   function stop() {
@@ -2018,6 +2045,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       httpServer.close(() => {
         closeOtlp().then(() => {
           running = false;
+          startPromise = null;
           emitter.emit('stop');
         });
       });
@@ -2025,7 +2053,13 @@ export function createWebServer(options: WebServerOptions): WebServer {
   }
 
   function getPort(): number {
-    return port;
+    const addr = running ? httpServer?.address() : null;
+    return typeof addr === 'object' && addr !== null ? addr.port : port;
+  }
+
+  function getOtlpPort(): number | undefined {
+    const addr = otlpHttpServer?.address();
+    return typeof addr === 'object' && addr !== null ? addr.port : undefined;
   }
 
   function broadcast(event: LogEvent): void {
@@ -2088,7 +2122,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     metrics.tailerFilesWatched = count;
   }
 
-  return Object.assign(emitter, { start, stop, getPort, broadcast, broadcastCollisions, recordEvent, setTailerFilesWatched });
+  return Object.assign(emitter, { start, stop, getPort, getOtlpPort, broadcast, broadcastCollisions, recordEvent, setTailerFilesWatched });
 }
 
 export default createWebServer;

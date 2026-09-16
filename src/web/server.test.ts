@@ -25,11 +25,10 @@ describe('Web Server API Endpoints', () => {
     store = new InMemoryEventStore();
     resetCrossReferenceManager();
 
-    // Find an available port
-    port = 30000 + Math.floor(Math.random() * 1000);
-
     server = createWebServer({
-      port,
+      // Port 0 = OS-assigned ephemeral port, read back after start. Picking a
+      // random fixed port races with parallel vitest workers (EADDRINUSE).
+      port: 0,
       logPath: '/tmp/test-logs',
       store,
     });
@@ -39,6 +38,7 @@ describe('Web Server API Endpoints', () => {
       server.on('start', () => resolve());
       server.start();
     });
+    port = server.getPort();
   });
 
   afterEach(async () => {
@@ -245,9 +245,8 @@ describe('Web Server API Endpoints', () => {
     let overloadPort: number;
 
     beforeEach(async () => {
-      overloadPort = 32000 + Math.floor(Math.random() * 1000);
       overloadServer = createWebServer({
-        port: overloadPort,
+        port: 0, // OS-assigned; see main beforeEach
         logPath: '/tmp/test-logs',
         store,
         maxEventCount: 2,
@@ -256,6 +255,7 @@ describe('Web Server API Endpoints', () => {
         overloadServer.on('start', () => resolve());
         overloadServer.start();
       });
+      overloadPort = overloadServer.getPort();
     });
 
     afterEach(async () => {
@@ -842,6 +842,32 @@ describe('Web Server API Endpoints', () => {
     it('should expose getPort method', () => {
       expect(server.getPort).toBeDefined();
       expect(server.getPort()).toBe(port);
+    });
+
+    it('should bind OTLP listener on ephemeral port 0 (not treat 0 as disabled)', async () => {
+      // Regression: the OTLP listener used to be gated on truthiness of
+      // otlpHttpPort, so the legitimate "OS assigns a port" value 0 silently
+      // disabled it and getOtlpPort() returned undefined.
+      const ephemeral = createWebServer({
+        port: 0,
+        logPath: '/tmp/test-logs',
+        store: new InMemoryEventStore(),
+        otlpHttpPort: 0,
+      });
+      await new Promise<void>((resolve) => {
+        ephemeral.on('start', () => resolve());
+        ephemeral.start();
+      });
+      try {
+        expect(ephemeral.getPort()).toBeGreaterThan(0);
+        expect(ephemeral.getOtlpPort()).toBeGreaterThan(0);
+        expect(ephemeral.getOtlpPort()).not.toBe(ephemeral.getPort());
+      } finally {
+        await new Promise<void>((resolve) => {
+          ephemeral.on('stop', () => resolve());
+          ephemeral.stop();
+        });
+      }
     });
 
     it('should accept WebSocket connections', async () => {
@@ -1523,10 +1549,9 @@ describe('Web Server Auth', () => {
   beforeEach(async () => {
     store = new InMemoryEventStore();
     resetCrossReferenceManager();
-    port = 31000 + Math.floor(Math.random() * 1000);
 
     server = createWebServer({
-      port,
+      port: 0, // OS-assigned; see main beforeEach
       logPath: '/tmp/test-logs',
       store,
       authToken: AUTH_TOKEN,
@@ -1536,6 +1561,7 @@ describe('Web Server Auth', () => {
       server.on('start', () => resolve());
       server.start();
     });
+    port = server.getPort();
   });
 
   afterEach(async () => {

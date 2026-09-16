@@ -11,7 +11,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createWebServer } from './web/server.js';
 import { InMemoryEventStore } from './store.js';
 import { EventDeduplicator } from './normalizer.js';
-import type { AddressInfo } from 'node:net';
 
 // API response types
 interface Worker {
@@ -36,32 +35,35 @@ describe('E2E OTLP Integration', () => {
   let otlpUrl: string;
 
   beforeAll(async () => {
-    // Find free ports for web and OTLP
-    webPort = await getFreePort();
-    otlpPort = await getFreePort();
-
     store = new InMemoryEventStore();
     deduplicator = new EventDeduplicator();
 
     server = createWebServer({
-      port: webPort,
+      // Port 0 lets the OS assign ephemeral ports at bind time — no race with
+      // other tests/sockets that grabbed a pre-probed port between probe and listen.
+      port: 0,
       logPath: '/tmp/fabric-test-logs',
       store,
-      otlpHttpPort: otlpPort,
+      otlpHttpPort: 0,
       deduplicator,
     });
 
-    server.start();
+    await server.start();
 
-    // Wait for server to start listening
-    await new Promise(resolve => setTimeout(resolve, 100));
-
+    webPort = server.getPort();
+    otlpPort = server.getOtlpPort()!;
+    // Fail loudly here rather than as cryptic ERR_INVALID_URL below if the
+    // OTLP listener never bound (e.g. otlpHttpPort: 0 misread as disabled).
+    expect(otlpPort).toBeGreaterThan(0);
     baseUrl = `http://127.0.0.1:${webPort}`;
     otlpUrl = `http://127.0.0.1:${otlpPort}`;
   });
 
-  afterAll(() => {
-    server.stop();
+  afterAll(async () => {
+    await new Promise<void>((resolve) => {
+      server.on('stop', () => resolve());
+      server.stop();
+    });
   });
 
   const testWorkerId = 'e2e-test-worker-opus-4.8-charlie';
@@ -470,20 +472,3 @@ describe('E2E OTLP Integration', () => {
     expect(activeWorkers.length).toBeGreaterThanOrEqual(1);
   });
 });
-
-/**
- * Get a free port from the OS.
- * Returns a promise that resolves to an available port number.
- */
-async function getFreePort(): Promise<number> {
-  const net = await import('net');
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, () => {
-      const port = (server.address() as AddressInfo).port;
-      server.close(() => resolve(port));
-    });
-  });
-}
