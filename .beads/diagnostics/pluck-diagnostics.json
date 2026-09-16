@@ -1,13 +1,13 @@
 {
-  "timestamp": "2026-09-16T00:39:27.232956092Z",
-  "total_open_beads": 19,
+  "timestamp": "2026-09-16T01:36:31.85327385Z",
+  "total_open_beads": 20,
   "exclusion_criteria": {
     "has_assignee": 0,
     "manually_blocked": 0,
     "has_dependencies": 19,
     "resource_conflicts": 0
   },
-  "final_candidate_count": 0,
+  "final_candidate_count": 1,
   "excluded_beads": [
     {
       "bead_id": "fabric-32fe329b",
