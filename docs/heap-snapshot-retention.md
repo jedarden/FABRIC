@@ -34,9 +34,10 @@ FABRIC automatically captures and retains V8 heap snapshots for memory leak dete
 
 The retention policy is applied automatically after each snapshot write:
 
-1. **Count-based cleanup:** Remove oldest snapshots beyond 50 file limit
+1. **Count-based cleanup:** Remove oldest snapshots beyond the 50-file limit
 2. **Age-based cleanup:** Remove snapshots older than 30 days
-3. **Execution:** `applyRetentionPolicy()` runs after `writeHeapSnapshot()`
+3. **Size-based cleanup:** When total on-disk snapshot size exceeds 10 GiB, prune oldest-first until under the cap (override the cap with `FABRIC_SNAPSHOT_MAX_TOTAL_BYTES`; the just-written snapshot is never pruned by this pass)
+4. **Execution:** `applyRetentionPolicy()` runs after `writeHeapSnapshot()`
 
 ## API Access
 
@@ -71,6 +72,7 @@ fabric web --heap-snapshots --snapshot-interval 30
 ### Environment Variables
 - `NODE_ENV=production`: Enables automatic heap snapshots
 - `FABRIC_AUTH_TOKEN`: Required for POST endpoints
+- `FABRIC_SNAPSHOT_MAX_TOTAL_BYTES`: Overrides the total on-disk snapshot size cap (default: 10 GiB)
 
 ## Analysis Tools
 
@@ -143,7 +145,7 @@ FABRIC's heap snapshot system integrates with NEEDLE worker telemetry:
 ### High Disk Usage
 - Verify retention policy: Check file count and ages
 - Manual cleanup: `rm ~/.needle/snapshots/heap-*.heapsnapshot`
-- Adjust limits: Modify `MAX_DISK_SNAPSHOTS` and `MAX_SNAPSHOT_AGE_DAYS` in code
+- Adjust limits: Modify `MAX_DISK_SNAPSHOTS` and `MAX_SNAPSHOT_AGE_DAYS` in code, or set `FABRIC_SNAPSHOT_MAX_TOTAL_BYTES` to change the size cap without a code change
 
 ### Analysis Not Working
 - Ensure minimum 2 snapshots exist for comparison

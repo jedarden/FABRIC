@@ -188,10 +188,13 @@ describe('Memory Profiler', () => {
         // survive — the just-written file is never pruned by the size pass.
         await profiler.writeHeapSnapshot('test');
         await new Promise(resolve => setTimeout(resolve, 50));
-        await profiler.writeHeapSnapshot('test');
+        const secondFilepath = await profiler.writeHeapSnapshot('test');
 
         const snapshots = getHeapSnapshots();
         expect(snapshots.length).toBe(1); // older one pruned, newest kept
+        // Identifying the survivor by path proves the pass pruned oldest-first:
+        // if it pruned the just-written file instead, the first write would remain.
+        expect(snapshots[0].filepath).toBe(secondFilepath);
         expect(snapshots[0].trigger).toBe('test');
       } finally {
         if (previousCap === undefined) {
