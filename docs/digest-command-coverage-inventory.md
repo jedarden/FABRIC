@@ -36,6 +36,20 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 **Lines:** ~500 lines  
 **Dependencies:** `types.ts`, `costTracking.ts`, `errorGrouping.ts`
 
+### 2a. AI Narrative Layer (optional, added 2026-09-16)
+**File:** `src/digestAi.ts`  
+**Role:** Optional AI-generated narrative appended to the deterministic digest when `fabric digest --ai` is used  
+**Key Functions:**
+- `resolveDigestAiConfig()` - Resolve provider config from `FABRIC_DIGEST_AI_*` / `ANTHROPIC_API_KEY` env vars; returns null when no key is set
+- `buildDigestAiPrompt()` - Render the digest's extracted data as a bounded prompt (caps: 20 workers / 20 beads / 15 files / 10 errors)
+- `generateAiDigestNarrative()` - Call the Anthropic Messages API via `@anthropic-ai/sdk`; never throws, returns `{ ok } | { ok: false, reason }`
+- `renderAiNarrativeSection()` - Format the narrative as a `## AI Narrative` markdown section
+
+**Fallback:** missing key, provider error, timeout, malformed response, or refusal each degrade to the deterministic digest (stderr warning, exit 0).  
+**Lines:** ~280 lines  
+**Dependencies:** `@anthropic-ai/sdk`, `types.ts`  
+**Tested in:** `src/digestAi.test.ts` (config resolution, prompt bounds, stub-client success/refusal/error/empty-response paths, section rendering)
+
 ### 3. Path Resolution Module
 **File:** `src/pathResolver.ts`  
 **Role:** Source path validation and resolution  

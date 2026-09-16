@@ -24,6 +24,14 @@ export interface WorkerState {
 // Re-export submodules
 export * from './types.js';
 export { SessionDigestGenerator, formatDigestAsMarkdown } from './sessionDigest.js';
+export {
+  resolveDigestAiConfig,
+  buildDigestAiPrompt,
+  generateAiDigestNarrative,
+  renderAiNarrativeSection,
+  DEFAULT_DIGEST_AI_MODEL,
+} from './digestAi.js';
+export type { DigestAiConfig, DigestAiResult, DigestAiClient } from './digestAi.js';
 export { WorkerAnalytics, getWorkerAnalytics, resetWorkerAnalytics } from './workerAnalytics.js';
 export { SemanticNarrativeGenerator, getSemanticNarrativeManager } from './semanticNarrative.js';
 export {

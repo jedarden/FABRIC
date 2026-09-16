@@ -893,6 +893,31 @@ On-demand or automatic session summaries:
 - JSON (for integrations)
 - Plain text (for email)
 
+**Implementation (2026-09-16, bead fabric-e91edf0c):** the digest ships in two
+layers. The base layer (`src/sessionDigest.ts`) is fully deterministic — event
+extraction + Markdown tables, no network — and backs the `fabric digest` CLI,
+the TUI `G` view, and web `GET /api/digest`. The AI layer (`src/digestAi.ts`)
+is opt-in via `fabric digest --ai` and adds the stakeholder narrative the
+README advertises:
+
+- **Provider:** Anthropic Messages API via the official `@anthropic-ai/sdk`
+  (default model `claude-opus-5`, overridable).
+- **Configuration:** `FABRIC_DIGEST_AI_API_KEY` (or `ANTHROPIC_API_KEY`),
+  `FABRIC_DIGEST_AI_MODEL`, `FABRIC_DIGEST_AI_MAX_TOKENS`,
+  `FABRIC_DIGEST_AI_TIMEOUT_MS`, `FABRIC_DIGEST_AI_MAX_RETRIES`.
+- **Input discipline:** the prompt contains only the deterministic digest's
+  extracted data (stats, per-worker summaries, beads, files, errors) with
+  per-list caps; no raw logs, and the API key never enters the prompt or logs.
+- **Fallback:** `generateAiDigestNarrative` never throws. Missing key, provider
+  error, timeout, malformed response, or refusal each degrade to the
+  deterministic digest with a stderr warning; the CLI still exits 0.
+- **Surface:** CLI only (`--ai`, `--ai-model`). The TUI and web digest views
+  stay deterministic by design — they are live views; the AI narrative is an
+  on-demand export.
+
+The command-palette trigger (`>digest`) and the periodic/session-end triggers
+remain deterministic-layer surfaces; wiring them to the AI layer is future work.
+
 **Why valuable:** Stakeholder communication in one click. Daily standup prep. Historical record of what was accomplished. No manual note-taking.
 
 ---

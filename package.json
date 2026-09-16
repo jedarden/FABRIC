@@ -62,6 +62,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
     "@grpc/grpc-js": "^1.14.4",
     "@types/blessed": "^0.1.27",
     "agentation": "^3.0.2",

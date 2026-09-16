@@ -744,6 +744,8 @@ program
   .option('--until <timestamp>', 'End time (Unix timestamp in ms)')
   .option('--max-files <number>', 'Maximum files to list', '50')
   .option('--max-errors <number>', 'Maximum errors to list', '20')
+  .option('--ai', 'Add an AI-generated narrative section (falls back to deterministic digest when unavailable)')
+  .option('--ai-model <model>', 'Claude model for --ai (default: claude-opus-5 or FABRIC_DIGEST_AI_MODEL)')
   .option('--no-cost', 'Exclude cost information')
   .option('--no-errors', 'Exclude error information')
   .action(async (options) => {
@@ -844,7 +846,33 @@ program
       }
 
       const digest = generator.generateDigest(digestOptions);
-      const markdown = formatDigestAsMarkdown(digest);
+      let markdown = formatDigestAsMarkdown(digest);
+
+      // AI narrative (optional). The deterministic digest above is always the
+      // backbone and the fallback: any AI failure downgrades to it with a
+      // stderr warning, and the command still exits 0.
+      if (options.aiModel && !options.ai) {
+        console.error('--ai-model has no effect without --ai; ignoring');
+      }
+      if (options.ai) {
+        const { resolveDigestAiConfig, generateAiDigestNarrative, renderAiNarrativeSection } =
+          await import('./digestAi.js');
+        const aiConfig = resolveDigestAiConfig(process.env, { model: options.aiModel });
+        if (!aiConfig) {
+          console.error(
+            'AI digest unavailable: no API key found (set FABRIC_DIGEST_AI_API_KEY or ANTHROPIC_API_KEY) — using deterministic digest',
+          );
+        } else {
+          console.error(`Requesting AI narrative (model: ${aiConfig.model})...`);
+          const aiResult = await generateAiDigestNarrative(digest, aiConfig);
+          if (aiResult.ok) {
+            markdown += renderAiNarrativeSection(aiResult);
+            console.error(`AI narrative added (model: ${aiResult.model})`);
+          } else {
+            console.error(`AI digest failed (${aiResult.reason}) — using deterministic digest`);
+          }
+        }
+      }
 
       // Output
       if (options.output) {

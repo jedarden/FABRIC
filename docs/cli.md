@@ -323,12 +323,15 @@ fabric digest [options]
 | Option | Alias | Default | Description |
 |--------|-------|---------|-------------|
 | `-f, --file <path>` | — | `~/.needle/logs/workers.log` | Log file to analyze |
+| `--source <path>` | — | `~/.needle/logs` | Log source (file or directory) |
 | `-o, --output <path>` | — | — | Output file (default: stdout) |
 | `-w, --worker <ids>` | — | — | Filter by worker IDs (comma-separated) |
 | `--since <timestamp>` | — | — | Start time (Unix timestamp in ms) |
 | `--until <timestamp>` | — | — | End time (Unix timestamp in ms) |
 | `--max-files <number>` | — | `50` | Maximum files to list |
 | `--max-errors <number>` | — | `20` | Maximum errors to list |
+| `--ai` | — | off | Add an AI-generated narrative section (see below) |
+| `--ai-model <model>` | — | `claude-opus-5` | Claude model for `--ai` |
 | `--no-cost` | — | — | Exclude cost information |
 | `--no-errors` | — | — | Exclude error information |
 
@@ -349,7 +352,44 @@ fabric digest --since 1709337600000 --until 1709424000000
 
 # Exclude cost and errors
 fabric digest --no-cost --no-errors
+
+# Add an AI narrative for stakeholders
+fabric digest --ai --output standup.md
 ```
+
+### AI narrative (`--ai`)
+
+By default `fabric digest` is fully deterministic: it extracts bead completions,
+file modifications, errors, per-worker summaries, and cost from the log events
+and renders them as Markdown tables. No network call is made.
+
+`--ai` adds an **AI Narrative** section on top: the deterministic digest's
+already-extracted data is sent to the Anthropic Messages API (via the official
+`@anthropic-ai/sdk`), which writes the stakeholder-facing overview, highlights,
+and observations. The model sees only the extracted summary data — never raw
+log files and never your API key.
+
+**Configuration** (environment variables):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FABRIC_DIGEST_AI_API_KEY` | — | API key (preferred). Falls back to `ANTHROPIC_API_KEY` |
+| `FABRIC_DIGEST_AI_MODEL` | `claude-opus-5` | Model id |
+| `FABRIC_DIGEST_AI_MAX_TOKENS` | `4096` | Response token cap |
+| `FABRIC_DIGEST_AI_TIMEOUT_MS` | `60000` | Request timeout |
+| `FABRIC_DIGEST_AI_MAX_RETRIES` | `1` | Transport retries |
+
+**Fallback behavior:** the deterministic digest is always produced and is the
+backbone of the output. If `--ai` is set but no API key is configured, or the
+provider call fails (auth error, rate limit, timeout, malformed response, or a
+model refusal), FABRIC prints the reason to **stderr** and emits the
+deterministic digest unchanged. The command still exits **0** — an AI outage
+never loses the digest. The API key is never logged or rendered into output.
+
+**Cost note:** `--ai` makes one API request per digest run, charged to the
+account owning the API key. Prompt lists are capped (20 workers / 20 beads /
+15 files / 10 errors) to bound cost; the aggregate stats in the prompt always
+reflect the full session.
 
 ---
 
