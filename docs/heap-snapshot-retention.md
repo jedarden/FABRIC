@@ -49,6 +49,10 @@ curl -X POST http://localhost:3000/api/memory/heap-snapshot \
   -d '{"trigger": "manual"}'
 ```
 
+Requires authentication (like every POST). Omitting `trigger` defaults to `manual`;
+a `trigger` outside the documented set is rejected with `400 Invalid trigger`
+(the value becomes part of the on-disk filename, so it is never passed through raw).
+
 ### List Snapshots
 ```bash
 curl http://localhost:3000/api/memory/snapshots?count=10

@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
-import { getMemoryProfiler, shouldCapturePressureSnapshot, type SnapshotTrigger } from './memoryProfiler.js';
+import { getMemoryProfiler, shouldCapturePressureSnapshot, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
 import { getHeapSnapshots, compareSnapshots } from './heapDiff.js';
-import { existsSync, unlinkSync, readdirSync, readFileSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, unlinkSync, readdirSync, readFileSync, mkdirSync, rmSync, writeFileSync, truncateSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -23,6 +23,20 @@ const { SNAPSHOT_DIR } = vi.hoisted(() => {
   process.env.FABRIC_SNAPSHOT_DIR = dir;
   return { SNAPSHOT_DIR: dir };
 });
+
+/**
+ * Create a placeholder .heapsnapshot file with a controlled size and age.
+ * Retention and reading only ever stat these files, so sparse placeholders
+ * exercise the policy without paying for real (heap-sized) writes.
+ */
+function writeFakeSnapshot(filename: string, sizeBytes: number, ageMs: number): string {
+  const filepath = join(SNAPSHOT_DIR, filename);
+  writeFileSync(filepath, '');
+  truncateSync(filepath, sizeBytes); // sparse: stat.size reports sizeBytes
+  const mtime = new Date(Date.now() - ageMs);
+  utimesSync(filepath, mtime, mtime);
+  return filepath;
+}
 
 describe('Memory Profiler', () => {
   const profiler = getMemoryProfiler();
@@ -88,11 +102,11 @@ describe('Memory Profiler', () => {
       expect(existsSync(filepath)).toBe(true);
     });
 
-    // Writes four full V8 heap snapshots back to back. Each one is tens of MB
+    // Writes five full V8 heap snapshots back to back. Each one is tens of MB
     // and stops the world while it serializes, which overruns the default 5s
     // budget on a single-CPU CI container.
     it('should write heap snapshot with different trigger reasons', { timeout: 60_000 }, async () => {
-      const triggers: SnapshotTrigger[] = ['manual', 'memory-pressure', 'periodic', 'test'];
+      const triggers: SnapshotTrigger[] = ['manual', 'memory-pressure', 'periodic', 'oom-risk', 'test'];
       const filepaths: string[] = [];
 
       for (const trigger of triggers) {
@@ -113,7 +127,7 @@ describe('Memory Profiler', () => {
       // Check that trigger reasons are extracted
       for (const snapshot of snapshots) {
         expect(snapshot.trigger).toBeDefined();
-        expect(['manual', 'memory-pressure', 'periodic', 'test']).toContain(snapshot.trigger);
+        expect(['manual', 'memory-pressure', 'periodic', 'oom-risk', 'test']).toContain(snapshot.trigger);
       }
     });
 
@@ -204,6 +218,118 @@ describe('Memory Profiler', () => {
         }
       }
     });
+
+    it('should enforce the 50-file on-disk limit, pruning the oldest first', { timeout: 60_000 }, async () => {
+      // 55 placeholder snapshots, each older than the last (ages 6..60 min),
+      // all under the default size cap and well within the age limit.
+      const fakes: string[] = [];
+      for (let i = 0; i < 55; i++) {
+        fakes.push(writeFakeSnapshot(`heap-${1_000_000 + i}-test.heapsnapshot`, 1024, (60 - i) * 60_000));
+      }
+
+      // The real write is the newest file, pushing the directory to 56 files.
+      const realFilepath = await profiler.writeHeapSnapshot('test');
+
+      // Count-based cleanup prunes down to 50, taking the 6 oldest fakes.
+      expect(profiler.getSnapshotCount()).toBe(50);
+      expect(existsSync(realFilepath)).toBe(true);
+      for (let i = 0; i < 6; i++) {
+        expect(existsSync(fakes[i])).toBe(false);
+      }
+      for (let i = 6; i < 55; i++) {
+        expect(existsSync(fakes[i])).toBe(true);
+      }
+    });
+
+    it('should delete snapshots older than 30 days while keeping newer ones', { timeout: 60_000 }, async () => {
+      const dayMs = 24 * 60 * 60 * 1000;
+      // 31 days old (plus a minute, so the boundary is not razor-thin): pruned.
+      const aged = [0, 1, 2].map(i =>
+        writeFakeSnapshot(`heap-${2_000_000 + i}-test.heapsnapshot`, 1024, 31 * dayMs + 60_000));
+      // 29 days old: retained.
+      const fresh = [0, 1].map(i =>
+        writeFakeSnapshot(`heap-${3_000_000 + i}-test.heapsnapshot`, 1024, 29 * dayMs));
+
+      await profiler.writeHeapSnapshot('test');
+
+      for (const filepath of aged) {
+        expect(existsSync(filepath)).toBe(false);
+      }
+      for (const filepath of fresh) {
+        expect(existsSync(filepath)).toBe(true);
+      }
+    });
+
+    it('should apply a valid FABRIC_SNAPSHOT_MAX_TOTAL_BYTES cap at retention time', { timeout: 60_000 }, async () => {
+      // A 5MB cap: far below the default 10 GiB, so with it set the fakes
+      // must go; with the default they would survive (proved by the invalid-
+      // override test below), which is what pins the env read at retention
+      // time rather than at module load.
+      const previousCap = process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+      process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = String(5 * 1024 * 1024);
+      try {
+        const fakes = [0, 1, 2].map(i =>
+          writeFakeSnapshot(`heap-${4_000_000 + i}-test.heapsnapshot`, 2 * 1024 * 1024, (10 - i) * 60_000));
+
+        const realFilepath = await profiler.writeHeapSnapshot('test');
+
+        // The real snapshot alone exceeds 5MB, so every older file is pruned
+        // oldest-first — but the just-written file itself is never pruned.
+        const snapshots = getHeapSnapshots();
+        expect(snapshots.length).toBe(1);
+        expect(snapshots[0].filepath).toBe(realFilepath);
+        for (const filepath of fakes) {
+          expect(existsSync(filepath)).toBe(false);
+        }
+      } finally {
+        if (previousCap === undefined) {
+          delete process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+        } else {
+          process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = previousCap;
+        }
+      }
+    });
+
+    it('should fall back to the 10 GiB default cap when FABRIC_SNAPSHOT_MAX_TOTAL_BYTES is invalid', { timeout: 60_000 }, async () => {
+      const previousCap = process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+      const fakes = [0, 1].map(i =>
+        writeFakeSnapshot(`heap-${5_000_000 + i}-test.heapsnapshot`, 2 * 1024 * 1024, (10 - i) * 60_000));
+
+      try {
+        // Unparseable, zero, and negative values all fall back to the default
+        // cap rather than disabling the limit or clamping to zero.
+        for (const invalid of ['not-a-number', '0', '-5']) {
+          process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = invalid;
+
+          await profiler.writeHeapSnapshot('test');
+
+          // Under the default cap nothing is size-pruned: both fakes survive.
+          expect(existsSync(fakes[0])).toBe(true);
+          expect(existsSync(fakes[1])).toBe(true);
+        }
+      } finally {
+        if (previousCap === undefined) {
+          delete process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+        } else {
+          process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = previousCap;
+        }
+      }
+    });
+  });
+
+  describe('In-Memory Snapshot Retention', () => {
+    it('should cap in-memory snapshots at 100, keeping the most recent', () => {
+      const captured: MemorySnapshot[] = [];
+      for (let i = 0; i < 105; i++) {
+        captured.push(profiler.capture());
+      }
+
+      // getRecent(count) can only see what retention kept: asking for more
+      // than the cap still returns exactly 100, and they are the newest 100.
+      const retained = profiler.getRecent(1000);
+      expect(retained.length).toBe(100);
+      expect(retained).toEqual(captured.slice(-100));
+    });
   });
 
   describe('Pressure Snapshot Policy', () => {
@@ -242,6 +368,25 @@ describe('Memory Profiler', () => {
       expect(snapshots[0].filename).toContain('test');
       expect(snapshots[0].sizeBytes).toBeGreaterThan(0);
       expect(snapshots[0].trigger).toBe('test');
+    });
+
+    it('should extract trigger metadata for every documented trigger, and undefined when absent', () => {
+      const triggers: SnapshotTrigger[] = ['manual', 'memory-pressure', 'periodic', 'oom-risk', 'test'];
+      triggers.forEach((trigger, i) => {
+        writeFakeSnapshot(`heap-${6_000_000 + i}-${trigger}.heapsnapshot`, 512, 60_000);
+      });
+      // A file that does not follow the naming convention carries no trigger.
+      writeFakeSnapshot('legacy-orphan.heapsnapshot', 512, 60_000);
+
+      const snapshots = getHeapSnapshots();
+      expect(snapshots.length).toBe(triggers.length + 1);
+
+      for (const trigger of triggers) {
+        const snapshot = snapshots.find(s => s.filename.endsWith(`-${trigger}.heapsnapshot`));
+        expect(snapshot?.trigger).toBe(trigger);
+      }
+      const orphan = snapshots.find(s => s.filename === 'legacy-orphan.heapsnapshot');
+      expect(orphan?.trigger).toBeUndefined();
     });
 
     it('should compare two snapshots successfully', { timeout: 60_000 }, async () => {

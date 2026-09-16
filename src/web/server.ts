@@ -23,7 +23,7 @@ import { ServerMetrics } from '../serverMetrics.js';
 import { SessionDigestGenerator, formatDigestAsMarkdown } from '../sessionDigest.js';
 import { parseGitEvents } from '../gitParser.js';
 import { generatePRPreview } from '../tui/utils/prPreview.js';
-import { getMemoryProfiler, shouldCapturePressureSnapshot } from '../memoryProfiler.js';
+import { getMemoryProfiler, shouldCapturePressureSnapshot, isSnapshotTrigger, SNAPSHOT_TRIGGERS, type SnapshotTrigger } from '../memoryProfiler.js';
 import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport } from '../heapDiff.js';
 import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } from '../logPruner.js';
 import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
@@ -524,8 +524,18 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // Write heap snapshot to disk (admin only - requires auth)
     app.post('/api/memory/heap-snapshot', (req: Request, res: Response) => {
       try {
+        // The trigger is embedded in the on-disk filename, so it must be one
+        // of the documented reasons — never raw client input in a path.
+        const rawTrigger = req.body?.trigger;
+        if (rawTrigger !== undefined && !isSnapshotTrigger(rawTrigger)) {
+          res.status(400).json({
+            error: 'Invalid trigger',
+            message: `trigger must be one of: ${SNAPSHOT_TRIGGERS.join(', ')}`,
+          });
+          return;
+        }
+        const trigger: SnapshotTrigger = isSnapshotTrigger(rawTrigger) ? rawTrigger : 'manual';
         const profiler = getMemoryProfiler();
-        const trigger = req.body.trigger as 'manual' | 'memory-pressure' | 'test' || 'manual';
         profiler.writeHeapSnapshot(trigger).then(filepath => {
           res.json({
             success: true,

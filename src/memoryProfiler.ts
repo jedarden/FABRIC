@@ -88,6 +88,24 @@ function formatBytes(bytes: number): string {
 /** Trigger reasons for heap snapshots */
 export type SnapshotTrigger = 'manual' | 'memory-pressure' | 'periodic' | 'oom-risk' | 'test';
 
+/** All documented trigger reasons (docs/heap-snapshot-retention.md). */
+export const SNAPSHOT_TRIGGERS: readonly SnapshotTrigger[] = [
+  'manual',
+  'memory-pressure',
+  'periodic',
+  'oom-risk',
+  'test',
+];
+
+/**
+ * Runtime guard for trigger values that arrive as untyped input (HTTP body).
+ * The trigger becomes part of the on-disk filename, so anything outside the
+ * documented set must be rejected rather than interpolated into a path.
+ */
+export function isSnapshotTrigger(value: unknown): value is SnapshotTrigger {
+  return typeof value === 'string' && (SNAPSHOT_TRIGGERS as readonly string[]).includes(value);
+}
+
 export interface MemorySnapshot {
   timestamp: number;
   rss: number;
