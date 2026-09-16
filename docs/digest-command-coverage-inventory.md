@@ -92,7 +92,7 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 **Usage:** Digest uses `CostTracker` to process token events and calculate costs
 
 **Lines:** ~800 lines  
-**Tested in:** Indirectly via digest tests (cost data processing)
+**Tested in:** `src/tui/utils/costTracking.test.ts` (token accounting, per-model cost calculation, 80%/95% budget-alert thresholds, burn rate, time series, formatting helpers)
 
 ### 8. Event Storage
 **File:** `src/store.ts`  
@@ -165,7 +165,7 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 | Path Resolution | `src/pathResolver.ts` | `src/pathResolver.test.ts` | ✅ 100% code path coverage |
 | Types | `src/types.ts` | N/A | N/A (type definitions) |
 | Error Grouping | `src/errorGrouping.ts` | `src/errorGrouping.test.ts` | ✅ Unit tests |
-| Cost Tracking | `src/tui/utils/costTracking.ts` | Indirect via digest tests | ⚠️ Indirect coverage |
+| Cost Tracking | `src/tui/utils/costTracking.ts` | `src/tui/utils/costTracking.test.ts` | ✅ Direct coverage |
 | Event Store | `src/store.ts` | `src/store.test.ts` | ✅ Unit tests |
 | Parser | `src/parser.ts` | `src/parser.real-logs.integration.test.ts` | ✅ Integration tests |
 | Directory Tailer | `src/directoryTailer.ts` | `src/directoryTailer.test.ts` | ✅ Unit tests |
