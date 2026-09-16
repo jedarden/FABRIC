@@ -84,3 +84,5 @@
 {"bead":"fabric-d5172dfc","duration_ms":900954,"event":"complete","exit_code":0,"outcome":"success","strand":"explore","ts":"2026-09-16T04:59:48.839002100+00:00","worker":"glm-spaxel"}
 {"bead":"fabric-7a8aa0c9","duration_ms":3127208,"event":"complete","exit_code":0,"outcome":"success","strand":"explore","ts":"2026-09-16T05:23:01.408111120+00:00","worker":"glm-pdftract"}
 {"bead":"fabric-b48bab10","duration_ms":3601263,"event":"timeout","exit_code":124,"outcome":"timeout","strand":"explore","ts":"2026-09-16T05:37:47.653182479+00:00","worker":"glm-mta"}
+{"bead":"fabric-b48bab10","event":"claim","strand":"explore","ts":"2026-09-16T07:38:33.507092935+00:00","worker":"glm-spaxel"}
+{"adapter":"claude-code-glm-5.3-flash","attempt_id":"01a0a927-4735-79b1-be20-7b0358aa0ddc","bead":"fabric-b48bab10","event":"dispatch","model":"glm-5.3-flash","strand":"explore","ts":"2026-09-16T07:38:38.773195320+00:00","worker":"glm-spaxel"}
