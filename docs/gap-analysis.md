@@ -95,9 +95,14 @@ The following features from plan.md are missing or incomplete:
 
 | Bead ID | Feature | Description |
 |---------|---------|-------------|
-| bd-2r0 | Focus Mode Presets | Save/load pin configurations |
 | bd-2ot | Theme Support | Dark/light theme switching |
 | bd-1dq | Export Session Replay | Export replay as shareable link or file |
+
+### Resolved Gaps
+
+| Bead ID | Feature | Where it landed |
+|---------|---------|-----------------|
+| bd-2r0 | Focus Mode Presets | Shared core `src/focusPresetCore.ts`; TUI save/cycle/apply via `[`/`]` + command palette (`src/tui/app.ts`); web dropdown in `src/web/frontend/src/App.tsx`; CLI management via `fabric config presets` (`src/config.ts`); storage in the fabric config dir (`~/.fabric/focus-presets.json`) for TUI/CLI and localStorage for web |
 
 ---
 
@@ -115,7 +120,7 @@ bd-muv (Gap Analysis - Original Task)
 ├── bd-hn5 (Budget Alerts & Projections)
 ├── bd-iyz (Anomaly Detection)
 ├── bd-257 (Web Auto-Reconnect)
-├── bd-2r0 (Focus Mode Presets)
+├── bd-2r0 (Focus Mode Presets) ✅
 ├── bd-1o0 (Command Palette Fuzzy Search)
 ├── bd-2ot (Theme Support)
 ├── bd-1dq (Export Session Replay)
@@ -165,6 +170,6 @@ FABRIC is approximately **90% complete** against the plan.md specification. The 
 1. **Persistence layer** - SQLite for historical analytics
 2. **Alerting system** - Budget alerts and anomaly detection
 3. **Web UX polish** - Timeline, auto-reconnect, file context panel
-4. **Convenience features** - Presets, themes, fuzzy search
+4. **Convenience features** - Themes, fuzzy search (presets resolved — see Resolved Gaps)
 
 All identified gaps have corresponding beads created and linked to this analysis via dependencies.

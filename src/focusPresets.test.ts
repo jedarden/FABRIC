@@ -2,8 +2,16 @@
  * Tests for FocusPresetManager
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { FocusPresetManager, MemoryPresetStorage } from './focusPresets.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import {
+  FocusPresetManager,
+  MemoryPresetStorage,
+  FilePresetStorage,
+  createTuiPresetManager,
+} from './focusPresets.js';
 
 describe('FocusPresetManager', () => {
   let manager: FocusPresetManager;
@@ -143,5 +151,81 @@ describe('FocusPresetManager', () => {
 
       expect(callCount).toBe(0);
     });
+  });
+});
+
+describe('FilePresetStorage (fabric config)', () => {
+  let configDir: string;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-presets-'));
+    // FilePresetStorage logs (and degrades) on I/O and parse errors — keep
+    // that out of the test output.
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    fs.rmSync(configDir, { recursive: true, force: true });
+  });
+
+  it('should persist presets across manager instances via focus-presets.json', () => {
+    const first = createTuiPresetManager(configDir);
+    first.savePreset('work', ['worker-alpha'], ['fabric-1234'], 'alpha only');
+
+    const second = createTuiPresetManager(configDir);
+    expect(second.hasPreset('work')).toBe(true);
+
+    const loaded = second.loadPreset('work');
+    expect(loaded).toEqual({
+      pinnedWorkers: ['worker-alpha'],
+      pinnedBeads: ['fabric-1234'],
+    });
+
+    const preset = second.getPreset('work');
+    expect(preset?.description).toBe('alpha only');
+  });
+
+  it('should store presets in the fabric config file the CLI reads', () => {
+    const manager = createTuiPresetManager(configDir);
+    manager.savePreset('cli-visible', [], []);
+
+    // src/config.ts (`fabric config presets`) reads this exact file
+    const presetsFile = path.join(configDir, 'focus-presets.json');
+    expect(fs.existsSync(presetsFile)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(presetsFile, 'utf-8'))).toHaveLength(1);
+  });
+
+  it('should start empty when no preset file exists', () => {
+    const manager = createTuiPresetManager(configDir);
+    expect(manager.getPresets()).toEqual([]);
+  });
+
+  it('should return empty presets when the file contains invalid JSON', () => {
+    fs.writeFileSync(path.join(configDir, 'focus-presets.json'), '{not json');
+    const manager = createTuiPresetManager(configDir);
+    expect(manager.getPresets()).toEqual([]);
+  });
+
+  it('should apply changes made by a later manager instance', () => {
+    const first = createTuiPresetManager(configDir);
+    first.savePreset('shared', ['w1'], []);
+
+    const second = createTuiPresetManager(configDir);
+    second.deletePreset('shared');
+
+    expect(createTuiPresetManager(configDir).hasPreset('shared')).toBe(false);
+  });
+
+  it('should round-trip through FilePresetStorage directly', () => {
+    const file = path.join(configDir, 'direct.json');
+    const storage = new FilePresetStorage(file);
+    const presets = [
+      { name: 'a', pinnedWorkers: ['w'], pinnedBeads: [], createdAt: 42 },
+    ];
+
+    storage.save(presets);
+    expect(new FilePresetStorage(file).load()).toEqual(presets);
   });
 });
