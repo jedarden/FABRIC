@@ -3,6 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { createWebServer, WebServer } from './server.js';
 import { InMemoryEventStore } from '../store.js';
 import { resetCrossReferenceManager } from '../crossReferenceManager.js';
@@ -1694,6 +1697,54 @@ describe('Web Server Auth', () => {
     });
   });
 
+  describe('POST /api/theme auth', () => {
+    let tmpHome: string;
+    let originalHome: string | undefined;
+
+    beforeEach(() => {
+      // Redirect the shared theme store away from the real home directory
+      tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-server-theme-auth-test-'));
+      originalHome = process.env.HOME;
+      process.env.HOME = tmpHome;
+    });
+
+    afterEach(() => {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    });
+
+    it('should reject theme change without auth with 401', async () => {
+      const response = await fetchApi('/api/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: 'light' }),
+      });
+
+      expect(response.status).toBe(401);
+      // Nothing was persisted
+      expect(fs.existsSync(path.join(tmpHome, '.fabric', 'theme.json'))).toBe(false);
+    });
+
+    it('should accept theme change with correct Bearer token', async () => {
+      const response = await fetchApi('/api/theme', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AUTH_TOKEN}`,
+        },
+        body: JSON.stringify({ theme: 'light' }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data).toEqual({ success: true, theme: 'light' });
+    });
+  });
+
   describe('GET endpoints not affected by auth', () => {
     it('should allow GET /api/health without auth', async () => {
       const response = await fetchApi('/api/health');
@@ -1724,5 +1775,159 @@ describe('Web Server Auth', () => {
       const response = await fetchApi('/api/cost/summary');
       expect(response.status).toBe(200);
     });
+  });
+
+});
+
+describe('Theme API (/api/theme)', () => {
+  let store: InMemoryEventStore;
+  let server: WebServer;
+  let port: number;
+
+  beforeEach(async () => {
+    store = new InMemoryEventStore();
+    resetCrossReferenceManager();
+
+    server = createWebServer({
+      port: 0,
+      logPath: '/tmp/test-logs',
+      store,
+    });
+
+    await new Promise<void>((resolve) => {
+      server.on('start', () => resolve());
+      server.start();
+    });
+    port = server.getPort();
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      server.on('stop', () => resolve());
+      server.stop();
+    });
+    store.clear();
+    resetCrossReferenceManager();
+  });
+
+  const fetchApi = async (path: string, options?: RequestInit) => {
+    return fetch(`http://localhost:${port}${path}`, options);
+  };
+
+  let tmpHome: string;
+  let originalHome: string | undefined;
+
+  const themeFile = () => path.join(tmpHome, '.fabric', 'theme.json');
+  const writeThemeFile = (theme: string) => {
+    fs.mkdirSync(path.join(tmpHome, '.fabric'), { recursive: true });
+    fs.writeFileSync(themeFile(), JSON.stringify({ theme }));
+  };
+
+  beforeEach(() => {
+    // Redirect the shared theme store (~/.fabric/theme.json) at a temp home
+    // so tests neither read the developer's theme nor clobber it.
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-server-theme-test-'));
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('GET returns the default theme when nothing is persisted', async () => {
+    const response = await fetchApi('/api/theme');
+    expect(response.status).toBe(200);
+
+    const data = await response.json() as any;
+    expect(data).toEqual({ theme: 'dark' });
+  });
+
+  it('GET reflects the theme persisted by fabric config theme', async () => {
+    writeThemeFile('light');
+
+    const response = await fetchApi('/api/theme');
+    const data = await response.json() as any;
+    expect(data).toEqual({ theme: 'light' });
+  });
+
+  it('POST persists the theme to the shared config file', async () => {
+    const response = await fetchApi('/api/theme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: 'light' }),
+    });
+    expect(response.status).toBe(200);
+
+    const data = await response.json() as any;
+    expect(data).toEqual({ success: true, theme: 'light' });
+
+    // Same file `fabric config theme` and the TUI read
+    expect(JSON.parse(fs.readFileSync(themeFile(), 'utf-8'))).toEqual({ theme: 'light' });
+
+    const getResponse = await fetchApi('/api/theme');
+    expect((await getResponse.json() as any).theme).toBe('light');
+  });
+
+  it('POST broadcasts the new theme to connected WebSocket clients', async () => {
+    const WebSocket = (await import('ws')).default;
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    await new Promise<void>((resolve) => ws.on('open', () => resolve()));
+
+    const themeMessage = new Promise<any>((resolve) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'theme') {
+          resolve(msg);
+        }
+      });
+    });
+
+    const response = await fetchApi('/api/theme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: 'light' }),
+    });
+    expect(response.status).toBe(200);
+
+    // The init message arrives first on connect; the theme broadcast follows
+    const msg = await Promise.race([
+      themeMessage,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('no theme broadcast within 2s')), 2000)),
+    ]);
+    expect(msg).toEqual({ type: 'theme', data: { theme: 'light' } });
+
+    ws.close();
+  });
+
+  it('POST rejects an invalid theme with 400', async () => {
+    for (const theme of ['solarized', '', 42, null]) {
+      const response = await fetchApi('/api/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme }),
+      });
+      expect(response.status).toBe(400);
+
+      const data = await response.json() as any;
+      expect(data.success).toBe(false);
+    }
+
+    // Nothing was persisted
+    expect(fs.existsSync(themeFile())).toBe(false);
+  });
+
+  it('POST rejects an empty body with 400', async () => {
+    const response = await fetchApi('/api/theme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(400);
   });
 });

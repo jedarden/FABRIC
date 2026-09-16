@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { Command } from 'commander';
 import { createTuiPresetManager } from './focusPresets.js';
+import { loadConfiguredTheme, saveConfiguredTheme, isThemeName } from './themeStore.js';
 
 const HOME = process.env.HOME || '';
 const CONFIG_DIR = path.join(HOME, '.fabric');
@@ -199,26 +200,18 @@ function showConfig(): void {
 }
 
 /**
- * Load current theme from config
+ * Load current theme from the shared config store
+ * (~/.fabric/theme.json — also read by the TUI and the web API)
  */
 function loadTheme(): string {
-  try {
-    if (fs.existsSync(CONFIG_FILES.theme)) {
-      const content = fs.readFileSync(CONFIG_FILES.theme, 'utf-8');
-      const config = JSON.parse(content);
-      return config.theme || 'dark';
-    }
-  } catch {
-    // Ignore errors
-  }
-  return 'dark';
+  return loadConfiguredTheme();
 }
 
 /**
- * Set theme in config
+ * Set theme in the shared config store
  */
 function setTheme(theme: string): void {
-  if (theme !== 'dark' && theme !== 'light') {
+  if (!isThemeName(theme)) {
     console.error(`Invalid theme: ${theme}. Must be 'dark' or 'light'.`);
     process.exit(1);
   }
@@ -229,8 +222,7 @@ function setTheme(theme: string): void {
       fs.mkdirSync(CONFIG_DIR, { recursive: true });
     }
 
-    const config = { theme };
-    fs.writeFileSync(CONFIG_FILES.theme, JSON.stringify(config, null, 2), 'utf-8');
+    saveConfiguredTheme(theme);
     console.log(`Theme set to: ${theme}`);
   } catch (err) {
     console.error(`Failed to set theme: ${(err as Error).message}`);

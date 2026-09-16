@@ -95,7 +95,6 @@ The following features from plan.md are missing or incomplete:
 
 | Bead ID | Feature | Description |
 |---------|---------|-------------|
-| bd-2ot | Theme Support | Dark/light theme switching |
 | bd-1dq | Export Session Replay | Export replay as shareable link or file |
 
 ### Resolved Gaps
@@ -103,6 +102,7 @@ The following features from plan.md are missing or incomplete:
 | Bead ID | Feature | Where it landed |
 |---------|---------|-----------------|
 | bd-2r0 | Focus Mode Presets | Shared core `src/focusPresetCore.ts`; TUI save/cycle/apply via `[`/`]` + command palette (`src/tui/app.ts`); web dropdown in `src/web/frontend/src/App.tsx`; CLI management via `fabric config presets` (`src/config.ts`); storage in the fabric config dir (`~/.fabric/focus-presets.json`) for TUI/CLI and localStorage for web |
+| bd-2ot | Theme Support | Shared store `src/themeStore.ts` persisting to `~/.fabric/theme.json`; TUI Ctrl+T + command palette (`src/tui/app.ts`, `src/tui/utils/theme.ts`); web toggle in `src/web/frontend/src/App.tsx` (`ThemeContext.tsx`) against `GET/POST /api/theme` (`src/web/server.ts`) with WebSocket push to open dashboards; CLI via `fabric config theme` (`src/config.ts`) |
 
 ---
 
@@ -122,7 +122,7 @@ bd-muv (Gap Analysis - Original Task)
 ├── bd-257 (Web Auto-Reconnect)
 ├── bd-2r0 (Focus Mode Presets) ✅
 ├── bd-1o0 (Command Palette Fuzzy Search)
-├── bd-2ot (Theme Support)
+├── bd-2ot (Theme Support) ✅
 ├── bd-1dq (Export Session Replay)
 ├── bd-3o4 (Git PR Preview)
 ├── bd-art (SQLite Historical Analytics)
@@ -170,6 +170,6 @@ FABRIC is approximately **90% complete** against the plan.md specification. The 
 1. **Persistence layer** - SQLite for historical analytics
 2. **Alerting system** - Budget alerts and anomaly detection
 3. **Web UX polish** - Timeline, auto-reconnect, file context panel
-4. **Convenience features** - Themes, fuzzy search (presets resolved — see Resolved Gaps)
+4. **Convenience features** - Fuzzy search (presets and themes resolved — see Resolved Gaps)
 
 All identified gaps have corresponding beads created and linked to this analysis via dependencies.

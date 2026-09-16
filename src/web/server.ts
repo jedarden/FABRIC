@@ -28,6 +28,7 @@ import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport
 import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } from '../logPruner.js';
 import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
 import { getMemorySampler, type WorkerMemorySample } from '../memorySampler.js';
+import { loadConfiguredTheme, saveConfiguredTheme, isThemeName } from '../themeStore.js';
 
 /** Cache for the v8 module */
 let v8Module: typeof import('v8') | null = null;
@@ -437,6 +438,42 @@ export function createWebServer(options: WebServerOptions): WebServer {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    });
+
+    // ============================================
+    // Theme API Endpoints
+    // ============================================
+
+    // Get the persisted theme (open — read-only, no secret data).
+    // Reads the same ~/.fabric/theme.json written by `fabric config theme`
+    // and shared with the TUI, so all three surfaces agree on one setting.
+    app.get('/api/theme', (_req: Request, res: Response) => {
+      res.json({ theme: loadConfiguredTheme() });
+    });
+
+    // Set the theme (requires auth, like every other POST endpoint).
+    // Persists to the shared config file and pushes the change to
+    // connected WebSocket clients so open dashboards stay in sync.
+    app.post('/api/theme', (req: Request, res: Response) => {
+      const { theme } = req.body ?? {};
+      if (!isThemeName(theme)) {
+        res.status(400).json({
+          success: false,
+          error: "Invalid theme. Must be 'dark' or 'light'.",
+        });
+        return;
+      }
+
+      saveConfiguredTheme(theme);
+
+      const message = JSON.stringify({ type: 'theme', data: { theme } });
+      for (const client of clients) {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(message);
+        }
+      }
+
+      res.json({ success: true, theme });
     });
 
     // ============================================

@@ -5,11 +5,11 @@
  * Themes are persisted to a config file for session persistence.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { ThemeName, loadConfiguredTheme, saveConfiguredTheme } from '../../themeStore.js';
 
-export type ThemeName = 'dark' | 'light';
+// Re-exported so existing `import { ThemeName } from './utils/theme.js'` callers
+// keep working; the type itself lives in the shared theme store.
+export type { ThemeName } from '../../themeStore.js';
 
 export interface ThemeColors {
   // Status colors
@@ -177,63 +177,25 @@ export const lightTheme: ThemeColors = {
  */
 export class ThemeManager {
   private currentTheme: ThemeName;
-  private configPath: string;
   private listeners: Set<(theme: ThemeName) => void> = new Set();
 
   constructor() {
-    this.configPath = this.getConfigPath();
     this.currentTheme = this.loadTheme();
   }
 
   /**
-   * Get the config file path for theme persistence
-   */
-  private getConfigPath(): string {
-    try {
-      const home = os.homedir();
-      if (!home) {
-        return '';
-      }
-      const configDir = path.join(home, '.fabric');
-      if (!fs.existsSync(configDir)) {
-        fs.mkdirSync(configDir, { recursive: true });
-      }
-      return path.join(configDir, 'theme.json');
-    } catch {
-      // In CI or environments without a home directory, skip config persistence
-      return '';
-    }
-  }
-
-  /**
-   * Load theme from config file
+   * Load theme from the shared config file (~/.fabric/theme.json, the same
+   * file `fabric config theme` and the web API read/write)
    */
   private loadTheme(): ThemeName {
-    try {
-      if (this.configPath && fs.existsSync(this.configPath)) {
-        const content = fs.readFileSync(this.configPath, 'utf-8');
-        const config = JSON.parse(content);
-        if (config.theme === 'dark' || config.theme === 'light') {
-          return config.theme;
-        }
-      }
-    } catch (error) {
-      // Ignore errors, fall back to default
-    }
-    return 'dark'; // Default to dark theme
+    return loadConfiguredTheme();
   }
 
   /**
-   * Save theme to config file
+   * Save theme to the shared config file
    */
   private saveTheme(): void {
-    if (!this.configPath) return;
-    try {
-      const config = { theme: this.currentTheme };
-      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
-    } catch (error) {
-      // Ignore save errors
-    }
+    saveConfiguredTheme(this.currentTheme);
   }
 
   /**

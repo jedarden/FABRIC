@@ -245,7 +245,7 @@ const ThemeToggle: React.FC = () => {
 };
 
 const App: React.FC = () => {
-  const { toggleTheme, setTheme } = useTheme();
+  const { toggleTheme, setTheme, applyRemoteTheme } = useTheme();
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [selectedWorker, setSelectedWorker] = useState<string | null>(null);
@@ -430,8 +430,15 @@ const App: React.FC = () => {
         }
         return [...prev, alert];
       });
+    } else if (message.type === 'theme') {
+      // Theme changed on another surface (web toggle, TUI, or CLI config) —
+      // adopt it without persisting back to the server.
+      const data = message.data as { theme?: 'dark' | 'light' };
+      if (data.theme === 'dark' || data.theme === 'light') {
+        applyRemoteTheme(data.theme);
+      }
     }
-  }, []);
+  }, [applyRemoteTheme]);
 
   // Use the auto-reconnect hook
   const { reconnectState, resetAndReconnect } = useWebSocketReconnect(handleWebSocketMessage);

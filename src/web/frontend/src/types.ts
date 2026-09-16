@@ -81,12 +81,13 @@ export interface FileCollision {
 }
 
 export interface WebSocketMessage {
-  type: 'init' | 'event' | 'collision' | 'collision-alert';
+  type: 'init' | 'event' | 'collision' | 'collision-alert' | 'theme';
   data: {
     workers?: WorkerInfo[];
     recentEvents?: LogEvent[];
     collisions?: FileCollision[];
     alerts?: CollisionAlert[];
+    theme?: 'dark' | 'light';
   } | LogEvent | FileCollision | CollisionAlert;
 }
 
