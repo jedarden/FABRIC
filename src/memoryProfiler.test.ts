@@ -265,6 +265,41 @@ describe('Memory Profiler', () => {
       }
     });
 
+    it('should count and prune only .heapsnapshot files, leaving other directory entries alone', { timeout: 60_000 }, async () => {
+      // The live snapshot directory co-hosts non-snapshot data (heapDiff.ts
+      // writes trend reports into a reports/ subdirectory there). Both the
+      // count-based and age-based passes must consider only *.heapsnapshot
+      // entries: co-located data neither counts toward the 50-file cap nor
+      // is ever a deletion candidate.
+      const fakes: string[] = [];
+      for (let i = 0; i < MAX_DISK_SNAPSHOTS; i++) {
+        fakes.push(writeFakeSnapshot(`heap-${8_000_000 + i}-test.heapsnapshot`, 1024, (50 - i) * 60_000));
+      }
+      const strayFile = join(SNAPSHOT_DIR, 'trend-report-latest.md');
+      const strayDir = join(SNAPSHOT_DIR, 'reports');
+      try {
+        writeFileSync(strayFile, '# trend report');
+        mkdirSync(strayDir, { recursive: true });
+
+        const realFilepath = await profiler.writeHeapSnapshot('test');
+
+        // Seeded at exactly the cap with two extra directory entries: had
+        // they counted, the write would have pruned three snapshots (and
+        // tried to unlink the directory) instead of just the oldest one.
+        expect(profiler.getSnapshotCount()).toBe(MAX_DISK_SNAPSHOTS);
+        expect(existsSync(realFilepath)).toBe(true);
+        expect(existsSync(fakes[0])).toBe(false); // oldest seed pruned by the write
+        for (let i = 1; i < fakes.length; i++) {
+          expect(existsSync(fakes[i])).toBe(true);
+        }
+        expect(existsSync(strayFile)).toBe(true);
+        expect(existsSync(strayDir)).toBe(true);
+      } finally {
+        rmSync(strayFile, { force: true });
+        rmSync(strayDir, { recursive: true, force: true });
+      }
+    });
+
     it('should delete snapshots older than 30 days while keeping newer ones', { timeout: 60_000 }, async () => {
       const dayMs = 24 * 60 * 60 * 1000;
       // Just past the documented 30-day boundary (a minute of margin, so the
@@ -283,6 +318,36 @@ describe('Memory Profiler', () => {
       for (const filepath of fresh) {
         expect(existsSync(filepath)).toBe(true);
       }
+    });
+
+    it('should apply the count and age passes together in one retention run', { timeout: 60_000 }, async () => {
+      // 55 ancient seeds trip both limits at once once the write lands: the
+      // count pass removes everything beyond the 50-file cap, then the age
+      // pass removes the rest — re-attempting entries the count pass already
+      // unlinked, so this also pins that a per-file unlink failure (that
+      // ENOENT) is swallowed instead of rejecting the write.
+      const dayMs = 24 * 60 * 60 * 1000;
+      const ancient = [0, 1, 2, 3, 4].map(i =>
+        writeFakeSnapshot(`heap-${9_000_000 + i}-test.heapsnapshot`, 1024, 40 * dayMs));
+      const filler: string[] = [];
+      for (let i = 0; i < 50; i++) {
+        filler.push(writeFakeSnapshot(`heap-${9_050_000 + i}-test.heapsnapshot`, 1024, 40 * dayMs));
+      }
+      const fresh = [0, 1].map(i =>
+        writeFakeSnapshot(`heap-${9_100_000 + i}-test.heapsnapshot`, 1024, dayMs));
+
+      const realFilepath = await profiler.writeHeapSnapshot('test');
+
+      // Only the write and the fresh seeds survive; every ancient seed is
+      // gone regardless of which pass took it.
+      expect(existsSync(realFilepath)).toBe(true);
+      for (const filepath of fresh) {
+        expect(existsSync(filepath)).toBe(true);
+      }
+      for (const filepath of [...ancient, ...filler]) {
+        expect(existsSync(filepath)).toBe(false);
+      }
+      expect(profiler.getSnapshotCount()).toBe(fresh.length + 1);
     });
 
     it('should apply a valid FABRIC_SNAPSHOT_MAX_TOTAL_BYTES cap at retention time', { timeout: 60_000 }, async () => {
