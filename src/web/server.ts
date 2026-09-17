@@ -160,7 +160,16 @@ export function createWebServer(options: WebServerOptions): WebServer {
     httpServer = createServer(app);
     wsServer = new WebSocketServer({ server: httpServer });
 
-    // ── Auth middleware for all POST routes ──
+    // ── Auth policy (docs/api-auth.md): every POST route requires a valid
+    // Bearer token when authToken is configured; GET routes are open
+    // (read-only, no secret data). This single global middleware IS the
+    // enforcement point — it is registered before every route, including the
+    // OTLP/HTTP receiver, and both HTTP listeners wrap this same app, so no
+    // route can opt out and none needs its own auth check. Missing header →
+    // 401; wrong token → 403. Rejection happens before body parsing and
+    // before any handler runs, so an unauthorized request has no side
+    // effects. New POST routes are protected automatically; the sweep test
+    // in server.test.ts ("Auth policy consistency") pins this invariant.
     const authMiddleware = (req: Request, res: Response, next: () => void) => {
       if (!authToken) {
         next();
@@ -377,16 +386,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
       });
     });
 
-    // Trigger manual log pruning (requires auth)
+    // Trigger manual log pruning. Auth is enforced by the global POST
+    // middleware — this route deliberately carries no inline check (an
+    // earlier duplicate here returned 401 for a wrong token, diverging from
+    // the policy's 403).
     app.post('/api/retention/prune', (req: Request, res: Response) => {
-      if (authToken) {
-        const authHeader = req.headers.authorization;
-        if (!authHeader?.startsWith('Bearer ') || authHeader.slice(7) !== authToken) {
-          res.status(401).json({ error: 'Unauthorized' });
-          return;
-        }
-      }
-
       // Parse optional overrides from request body
       const options: Partial<PruneOptions> = { logDir: logPath };
       if (req.body) {
@@ -487,7 +491,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       res.json(stats);
     });
 
-    // Capture a memory snapshot
+    // Capture a memory snapshot (mutates profiler state; auth via the global
+    // POST middleware, like every POST route).
     app.post('/api/memory/capture', (_req: Request, res: Response) => {
       const profiler = getMemoryProfiler();
       const snapshot = profiler.capture();
@@ -511,7 +516,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       res.json(diff);
     });
 
-    // Set baseline for future comparisons
+    // Set baseline for future comparisons (mutates profiler state; auth via
+    // the global POST middleware, like every POST route).
     app.post('/api/memory/baseline', (_req: Request, res: Response) => {
       const profiler = getMemoryProfiler();
       const baseline = profiler.setBaseline();
@@ -521,7 +527,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       });
     });
 
-    // Write heap snapshot to disk (admin only - requires auth)
+    // Write heap snapshot to disk (mutates disk: ~/.needle/snapshots; auth
+    // via the global POST middleware, like every POST route)
     app.post('/api/memory/heap-snapshot', (req: Request, res: Response) => {
       try {
         // The trigger is embedded in the on-disk filename, so it must be one
@@ -603,7 +610,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
       res.type('text/markdown').send(formatTrendAsMarkdown(trend));
     });
 
-    // Generate and save a trend report
+    // Generate and save a trend report (mutates disk:
+    // ~/.needle/snapshots/reports; auth via the global POST middleware, like
+    // every POST route — see docs/api-auth.md)
     app.post('/api/memory/trend/save', (req: Request, res: Response) => {
       const filepath = saveTrendReport();
       if (!filepath) {

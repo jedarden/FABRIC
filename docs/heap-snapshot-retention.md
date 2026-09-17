@@ -41,6 +41,11 @@ The retention policy is applied automatically after each snapshot write:
 
 ## API Access
 
+**Authentication:** every memory-mutating `POST` below — `heap-snapshot`,
+`capture`, `baseline`, and `trend/save` — requires
+`Authorization: Bearer $FABRIC_AUTH_TOKEN` (same as every POST endpoint in
+FABRIC; see `docs/api-auth.md`). All `GET`s here are open and read-only.
+
 ### Manual Capture
 ```bash
 curl -X POST http://localhost:3000/api/memory/heap-snapshot \

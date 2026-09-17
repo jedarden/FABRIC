@@ -1745,6 +1745,100 @@ describe('Web Server Auth', () => {
     });
   });
 
+  // docs/api-auth.md: the policy is uniform — EVERY POST route requires the
+  // Bearer token when one is configured, and a single global middleware is
+  // the only enforcement point. This sweep pins that invariant across the
+  // full route inventory (event ingestion, retention, theme, all four memory
+  // mutation routes, cost alerts, and the OTLP/HTTP receiver), so a route
+  // added without auth protection — or a middleware-ordering regression —
+  // fails here. Rejections happen before handlers run, so the sweep has no
+  // side effects; the per-route describes above and in server.heap.test.ts
+  // cover the valid-token happy paths.
+  describe('Auth policy consistency: every POST endpoint is gated', () => {
+    let store: InMemoryEventStore;
+    let server: WebServer;
+    let port: number;
+    const AUTH_TOKEN = 'test-sweep-token-24680';
+
+    // Every POST route in src/web/server.ts. Keep in sync when adding one.
+    const postRoutes: Array<[string, string | undefined]> = [
+      ['/api/events', JSON.stringify(validEvent)],
+      ['/api/events/batch', JSON.stringify([validEvent])],
+      ['/api/retention/prune', JSON.stringify({ dryRun: true })],
+      ['/api/theme', JSON.stringify({ theme: 'light' })],
+      ['/api/memory/capture', undefined],
+      ['/api/memory/baseline', undefined],
+      ['/api/memory/heap-snapshot', JSON.stringify({ trigger: 'manual' })],
+      ['/api/memory/trend/save', undefined],
+      ['/api/cost/alerts/test-alert/acknowledge', undefined],
+      // OTLP/HTTP receiver shares the app and its auth middleware.
+      ['/v1/logs', undefined],
+    ];
+
+    beforeEach(async () => {
+      store = new InMemoryEventStore();
+      resetCrossReferenceManager();
+
+      server = createWebServer({
+        port: 0,
+        logPath: '/tmp/test-logs',
+        store,
+        authToken: AUTH_TOKEN,
+        otlpHttpPort: 0, // mounts the OTLP router so /v1/* is sweepable
+      });
+
+      await new Promise<void>((resolve) => {
+        server.on('start', () => resolve());
+        server.start();
+      });
+      port = server.getPort();
+    });
+
+    afterEach(async () => {
+      await new Promise<void>((resolve) => {
+        server.on('stop', () => resolve());
+        server.stop();
+      });
+      store.clear();
+      resetCrossReferenceManager();
+    });
+
+    const post = (route: string, body: string | undefined, token?: string): Promise<Response> =>
+      fetch(`http://localhost:${port}${route}`, {
+        method: 'POST',
+        headers: {
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(token !== undefined ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body,
+      });
+
+    it('should reject every POST route without an Authorization header with 401', async () => {
+      for (const [route, body] of postRoutes) {
+        const response = await post(route, body);
+        expect(response.status, `${route} must reject unauthenticated POSTs`).toBe(401);
+        const data = await response.json() as any;
+        expect(data.error, route).toBe('Missing authorization');
+      }
+    });
+
+    it('should reject every POST route with a wrong token with 403', async () => {
+      for (const [route, body] of postRoutes) {
+        const response = await post(route, body, 'wrong-token');
+        expect(response.status, `${route} must reject invalid tokens`).toBe(403);
+      }
+    });
+
+    it('should pass a valid token through to a handler (retention/prune dry run)', async () => {
+      const response = await post('/api/retention/prune', JSON.stringify({ dryRun: true }), AUTH_TOKEN);
+
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.summary).toContain('[DRY RUN]');
+    });
+  });
+
   describe('GET endpoints not affected by auth', () => {
     it('should allow GET /api/health without auth', async () => {
       const response = await fetchApi('/api/health');
