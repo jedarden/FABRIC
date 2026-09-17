@@ -1773,6 +1773,8 @@ describe('Web Server Auth', () => {
       ['/api/cost/alerts/test-alert/acknowledge', undefined],
       // OTLP/HTTP receiver shares the app and its auth middleware.
       ['/v1/logs', undefined],
+      ['/v1/traces', undefined],
+      ['/v1/metrics', undefined],
     ];
 
     beforeEach(async () => {
@@ -1836,6 +1838,25 @@ describe('Web Server Auth', () => {
       const data = await response.json() as any;
       expect(data.success).toBe(true);
       expect(data.summary).toContain('[DRY RUN]');
+    });
+
+    // The memory mutations with disk side effects (heap-snapshot, trend/save)
+    // prove their valid-token path in server.heap.test.ts, where
+    // FABRIC_SNAPSHOT_DIR is pointed at a temp directory. Here we pin the two
+    // purely in-memory ones: a valid token must reach the handler (200 with a
+    // handler-produced body), not just fail to be rejected.
+    it('should pass a valid token through to memory-mutation handlers (capture, baseline)', async () => {
+      const capture = await post('/api/memory/capture', undefined, AUTH_TOKEN);
+      expect(capture.status).toBe(200);
+      const captureData = await capture.json() as any;
+      expect(captureData.timestamp).toBeGreaterThan(0);
+      expect(captureData.rss).toBeGreaterThan(0);
+
+      const baseline = await post('/api/memory/baseline', undefined, AUTH_TOKEN);
+      expect(baseline.status).toBe(200);
+      const baselineData = await baseline.json() as any;
+      expect(baselineData.timestamp).toBeGreaterThan(0);
+      expect(baselineData.formatted).toBeDefined();
     });
   });
 

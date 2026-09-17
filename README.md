@@ -153,7 +153,7 @@ needle run ...                                    # workers POST to /api/events 
 
 #### Authentication
 
-All POST endpoints (`/api/events`, `/api/events/batch`) require a `Bearer` token when the server is started with an auth token:
+**Every POST endpoint** requires a `Bearer` token when the server is started with an auth token — not just event ingestion: retention pruning, theme, the memory-mutation routes (`/api/memory/capture`, `/api/memory/baseline`, `/api/memory/heap-snapshot`, `/api/memory/trend/save`), cost-alert acknowledgement, and the OTLP/HTTP receiver. GET endpoints are open (read-only, no secret data). A missing `Authorization` header answers `401`; a wrong token answers `403`. Full policy, status codes, and route inventory: `docs/api-auth.md`.
 
 ```bash
 # Start with auth token (env var or flag)
@@ -284,7 +284,7 @@ https://<your-machine>.tail<your-tailnet>.ts.net/
 - Available only to devices joined to your tailnet (laptop, phone, etc.)
 - TLS provided by Tailscale's managed certificates — no self-signed cert warnings
 - GET requests (dashboard, workers list, event feed) are unauthenticated
-- POST requests (`/api/events`, `/api/events/batch`) require `Authorization: Bearer <FABRIC_AUTH_TOKEN>`
+- POST requests — *all* of them, including the memory-mutation routes and the OTLP receiver — require `Authorization: Bearer <FABRIC_AUTH_TOKEN>` (`docs/api-auth.md`)
 - Not exposed via Tailscale Funnel — no public internet access
 
 **Setup (one-time):**

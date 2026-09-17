@@ -290,7 +290,7 @@ fabric web --max-events 1000000
 
 ### Authentication
 
-POST endpoints (`/api/events`, `/api/events/batch`) require `Authorization: Bearer <token>` when an auth token is configured.
+Every `POST` endpoint requires `Authorization: Bearer <token>` when an auth token is configured — event ingestion, retention pruning, theme, the memory-mutation routes (`/api/memory/capture`, `/api/memory/baseline`, `/api/memory/heap-snapshot`, `/api/memory/trend/save`), cost-alert acknowledgement, and the OTLP/HTTP receiver. A missing header answers `401`; a wrong token answers `403`. GET endpoints are open. Full policy: `docs/api-auth.md`.
 
 ---
 
