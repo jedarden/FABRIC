@@ -11,6 +11,21 @@ import type { RetentionState } from './logPruner.js';
 
 export type { RetentionState };
 
+/**
+ * Escape a label value per the Prometheus text exposition format: backslash,
+ * double quote, and line feed must be escaped, or the sample line becomes
+ * unparseable and the whole scrape is rejected. Host labels carry values
+ * straight from remote OTLP attributes, so this is load-bearing — a malformed
+ * needle.host must degrade to an odd-looking series name, never a broken
+ * exposition.
+ */
+function escapeLabelValue(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n');
+}
+
 export interface ServerMetricsSnapshot {
   status: string;
   uptime_sec: number;
@@ -175,18 +190,21 @@ export class ServerMetrics {
     // parser rejects a second HELP line for the same metric name, so per-host
     // metrics must not re-declare the family for each host.
     const families = new Map<string, { type: string; help: string; samples: string[] }>();
-    const metric = (name: string, type: string, help: string, value: number | string, labels?: string) => {
+    const metric = (name: string, type: string, help: string, value: number | string, labels?: Record<string, string>) => {
       let family = families.get(name);
       if (!family) {
         family = { type, help, samples: [] };
         families.set(name, family);
       }
-      family.samples.push(labels ? `fabric_${name}{${labels}} ${value}` : `fabric_${name} ${value}`);
+      const rendered = labels
+        ? `{${Object.entries(labels).map(([k, v]) => `${k}="${escapeLabelValue(v)}"`).join(',')}}`
+        : '';
+      family.samples.push(`fabric_${name}${rendered} ${value}`);
     };
 
     metric('status', 'gauge', 'Server status (1=ok)', snap.status === 'ok' ? 1 : 0);
     metric('uptime_seconds', 'gauge', 'Server uptime in seconds', snap.uptime_sec);
-    metric('info', 'gauge', 'Build info', 1, `version="${snap.version}"`);
+    metric('info', 'gauge', 'Build info', 1, { version: snap.version });
     metric('websocket_clients', 'gauge', 'Connected WebSocket clients', snap.ws_clients);
     metric('dedup_dropped_total', 'counter', 'Total duplicate events dropped', snap.dedup_dropped);
     metric('process_resident_memory_bytes', 'gauge', 'Process RSS in bytes', snap.process_resident_memory_bytes);
@@ -196,7 +214,7 @@ export class ServerMetrics {
     const hostsToEmit = this.eventsPerHost.size > 0 ? Array.from(this.eventsPerHost.keys()) : [localHost];
 
     for (const host of hostsToEmit) {
-      const hostLabel = host ? `host="${host}"` : 'host="unknown"';
+      const hostLabel = { host: host || 'unknown' };
       const count = this.eventsPerHost.get(host) || 0;
       // Rounded to 2 decimals like the global rate in snapshot(), matching
       // the documented presentation in docs/metrics.md (e.g. 4.23).
@@ -214,7 +232,7 @@ export class ServerMetrics {
     // the DirectoryTailer exists even when the local host has ingested no
     // events, and the metric must not vanish from a fleet collector whose
     // traffic all carries remote host labels.
-    metric('tailer_files_watched', 'gauge', 'Log files being watched by host', snap.tailer_files_watched, `host="${localHost}"`);
+    metric('tailer_files_watched', 'gauge', 'Log files being watched by host', snap.tailer_files_watched, { host: localHost });
 
     // Log retention metrics
     if (snap.prune_last_run_timestamp_seconds !== undefined) {

@@ -1,0 +1,652 @@
+/**
+ * Multi-host Prometheus metrics contract tests.
+ *
+ * docs/metrics.md ("Multi-Host Metrics" + "Host Label Resolution") promises:
+ *   1. The host label is resolved from OTLP resource attributes in priority
+ *      order needle.host → service.instance.id → local hostname.
+ *   2. Legacy JSONL sources (no host attributes at all) are attributed to the
+ *      local hostname.
+ *   3. Per-host metrics (event_count, ingest_rate_per_second, active_workers)
+ *      keep hosts separate — events from different machines never merge.
+ *
+ * normalizerHostExtraction.test.ts pins the pure extraction functions and
+ * server.metrics.test.ts pins the exposition shape; this file pins the
+ * contract end-to-end over the real ingest surfaces (OTLP/HTTP receiver,
+ * POST /api/events, DirectoryTailer → recordEvent wiring) into GET /api/metrics,
+ * including label escaping for hostile host strings.
+ */
+
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { createWebServer, WebServer } from './web/server.js';
+import { InMemoryEventStore } from './store.js';
+import { ServerMetrics } from './serverMetrics.js';
+import { DirectoryTailer } from './directoryTailer.js';
+import { resetCrossReferenceManager } from './crossReferenceManager.js';
+import { getLocalHostname } from './hostname.js';
+import type { LogEvent } from './types.js';
+
+// ─── Prometheus text format parsing (escape-aware) ──────────────────────────
+
+interface ParsedSample {
+  labels: Record<string, string>;
+  value: number;
+}
+
+interface ParseResult {
+  metrics: Map<string, ParsedMetric>;
+  /** Sample lines that did not parse — must be empty for a valid exposition. */
+  unparsed: string[];
+  raw: string;
+}
+
+interface ParsedMetric {
+  samples: ParsedSample[];
+}
+
+/** Reverse of the Prometheus label-value escaping rules (\\ \" \n). */
+function unescapeLabelValue(v: string): string {
+  return v.replace(/\\(.)/g, (_, c: string) => (c === 'n' ? '\n' : c));
+}
+
+function parsePrometheus(text: string): ParseResult {
+  const metrics = new Map<string, ParsedMetric>();
+  const unparsed: string[] = [];
+  let current: ParsedMetric | undefined;
+
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+
+    if (line.startsWith('#')) {
+      const help = line.match(/^# HELP (\S+)/);
+      if (help) {
+        current = { samples: [] };
+        metrics.set(help[1], current);
+        continue;
+      }
+      continue;
+    }
+
+    const sample = line.match(
+      /^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)$/
+    );
+    if (!sample || !current) {
+      unparsed.push(line);
+      continue;
+    }
+    const labels: Record<string, string> = {};
+    if (sample[2]) {
+      // (?:[^"\\]|\\.)* — escaped quotes stay inside the value
+      for (const m of sample[2].matchAll(/([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"/g)) {
+        labels[m[1]] = unescapeLabelValue(m[2]);
+      }
+    }
+    current.samples.push({ labels, value: parseFloat(sample[3]) });
+  }
+
+  return { metrics, unparsed, raw: text };
+}
+
+/** Value of the sample of a metric carrying a given host label (throws if absent). */
+function sampleValue(metrics: Map<string, ParsedMetric>, name: string, host: string): number {
+  const sample = metrics.get(name)?.samples.find(s => s.labels.host === host);
+  expect(sample, `${name}{host="${host}"} must be emitted`).toBeDefined();
+  return sample!.value;
+}
+
+/** Sample value or undefined — for polling and absence checks. */
+function findHostSample(metrics: Map<string, ParsedMetric>, name: string, host: string): ParsedSample | undefined {
+  return metrics.get(name)?.samples.find(s => s.labels.host === host);
+}
+
+// ─── Server harness ─────────────────────────────────────────────────────────
+
+const NONEXISTENT_LOG_DIR = path.join(os.tmpdir(), 'fabric-multihost-metrics-nonexistent');
+
+interface ServerHandle {
+  store: InMemoryEventStore;
+  otlpUrl: string;
+  fetchText: (p: string) => Promise<string>;
+  fetchJson: (p: string, init?: RequestInit) => Promise<{ status: number; body: any }>;
+  metrics: () => Promise<ParseResult>;
+  /** Ingest stamp, matching src/cli.ts's tailer wiring. */
+  recordEvent: (host?: string, workerId?: string) => void;
+  stop: () => Promise<void>;
+}
+
+async function startServer(): Promise<ServerHandle> {
+  const store = new InMemoryEventStore();
+  resetCrossReferenceManager();
+
+  const server = createWebServer({
+    port: 0,
+    logPath: NONEXISTENT_LOG_DIR,
+    store,
+    otlpHttpPort: 0,
+  });
+
+  await server.start();
+  const port = server.getPort();
+  const otlpPort = server.getOtlpPort();
+  expect(otlpPort).toBeGreaterThan(0);
+
+  const base = `http://127.0.0.1:${port}`;
+  return {
+    store,
+    otlpUrl: `http://127.0.0.1:${otlpPort}`,
+    fetchText: async (p) => await (await fetch(`${base}${p}`)).text(),
+    fetchJson: async (p, init) => {
+      const res = await fetch(`${base}${p}`, init);
+      return { status: res.status, body: await res.json() };
+    },
+    metrics: async () => parsePrometheus(await (await fetch(`${base}/api/metrics`)).text()),
+    recordEvent: (host?: string, workerId?: string) => server.recordEvent(host, workerId),
+    stop: async () => {
+      await new Promise<void>((resolve) => {
+        server.on('stop', () => resolve());
+        server.stop();
+      });
+      store.clear();
+      resetCrossReferenceManager();
+    },
+  };
+}
+
+// ─── OTLP payload builders ──────────────────────────────────────────────────
+
+type Attrs = Record<string, string>;
+
+const kvAttrs = (attrs: Attrs) =>
+  Object.entries(attrs).map(([key, v]) => ({ key, value: { stringValue: v } }));
+
+function otlpLogsPayload(
+  resourceAttrs: Attrs,
+  records: { attrs: Attrs; workerId: string }[],
+  event = 'worker.started',
+) {
+  return {
+    resourceLogs: [{
+      resource: { attributes: kvAttrs(resourceAttrs) },
+      scopeLogs: [{
+        logRecords: records.map((r, i) => ({
+          timeUnixNano: String((Date.now() - 1000 + i) * 1_000_000),
+          attributes: kvAttrs({
+            event_type: event,
+            'needle.worker.id': r.workerId,
+            'needle.session.id': `sess-${r.workerId}`,
+            'needle.sequence': String(i + 1),
+            ...r.attrs,
+          }),
+        })),
+      }],
+    }],
+  };
+}
+
+function otlpSpanPayload(resourceAttrs: Attrs, workerId: string, extraAttrs: Attrs = {}) {
+  const nowNs = String(Date.now() * 1_000_000);
+  return {
+    resourceSpans: [{
+      resource: { attributes: kvAttrs(resourceAttrs) },
+      scopeSpans: [{
+        spans: [{
+          traceId: `trace-${workerId}`,
+          spanId: `span-${workerId}`,
+          name: 'bead_execution',
+          startTimeUnixNano: String(Date.now() * 1_000_000 - 500_000_000),
+          endTimeUnixNano: nowNs,
+          status: { code: 'OK' },
+          attributes: kvAttrs({
+            'needle.worker.id': workerId,
+            'needle.session.id': `sess-${workerId}`,
+            'needle.sequence': '1',
+            ...extraAttrs,
+          }),
+        }],
+      }],
+    }],
+  };
+}
+
+function otlpMetricPayload(resourceAttrs: Attrs, workerId: string, extraAttrs: Attrs = {}) {
+  return {
+    resourceMetrics: [{
+      resource: { attributes: kvAttrs(resourceAttrs) },
+      scopeMetrics: [{
+        metrics: [{
+          name: 'tokens.used',
+          gauge: {
+            dataPoints: [{
+              timeUnixNano: String(Date.now() * 1_000_000),
+              asDouble: 42.0,
+              attributes: kvAttrs({
+                'needle.worker.id': workerId,
+                'needle.session.id': `sess-${workerId}`,
+                ...extraAttrs,
+              }),
+            }],
+          },
+        }],
+      }],
+    }],
+  };
+}
+
+async function postOtlp(handle: ServerHandle, route: string, payload: unknown): Promise<number> {
+  const res = await fetch(`${handle.otlpUrl}${route}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  expect(res.status, `POST ${route}`).toBe(200);
+  // give the receiver's onEvent a beat to land in the store/metrics
+  await new Promise(resolve => setTimeout(resolve, 50));
+  return res.status;
+}
+
+/** Poll until `probe` returns true (fs.watch and receiver pipelines are async). */
+async function waitFor(probe: () => Promise<boolean>, what: string): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    if (await probe()) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+const NO_HOST: Attrs = {};
+
+// ─── OTLP ingest → per-host metrics ─────────────────────────────────────────
+
+describe('multi-host metrics — OTLP ingest (end-to-end)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('attributes log and span events to the needle.host they carry', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'otlp-host-a' },
+        [{ attrs: NO_HOST, workerId: 'w-a1' }, { attrs: NO_HOST, workerId: 'w-a2' }],
+      ));
+      // A span normalizes to a started + a finished event, both carrying host.
+      await postOtlp(server, '/v1/traces', otlpSpanPayload({ 'needle.host': 'otlp-host-a' }, 'w-a3'));
+
+      const { metrics } = await server.metrics();
+
+      // 2 log records + 2 span events → 4 events on otlp-host-a.
+      expect(sampleValue(metrics, 'fabric_event_count', 'otlp-host-a')).toBe(4);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'otlp-host-a')).toBe(3);
+      // A rate series exists for the remote host (value is window-dependent).
+      expect(findHostSample(metrics, 'fabric_ingest_rate_per_second', 'otlp-host-a')).toBeDefined();
+
+      // Nothing leaked to the local host: no local series was created.
+      expect(findHostSample(metrics, 'fabric_event_count', getLocalHostname())).toBeUndefined();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('carries host from OTLP metric data points into the metrics', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/metrics', otlpMetricPayload({ 'needle.host': 'otlp-host-m' }, 'w-m1'));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'otlp-host-m')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'otlp-host-m')).toBe(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('resolves resource-level host attributes placed on the OTLP resource, not the record', async () => {
+    // docs/metrics.md says "populated from OTLP resource attributes" — the
+    // canonical placement is the resource block, which enrichRecord promotes
+    // onto every record.
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'resource-host' },
+        [{ attrs: NO_HOST, workerId: 'w-r1' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'resource-host')).toBe(1);
+      expect(findHostSample(metrics, 'fabric_event_count', getLocalHostname())).toBeUndefined();
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+// ─── Host-label precedence (end-to-end) ─────────────────────────────────────
+
+describe('multi-host metrics — host-label precedence (end-to-end)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('needle.host wins over service.instance.id; the loser never becomes a series', async () => {
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'needled-host', 'service.instance.id': 'instance-host' },
+        [{ attrs: NO_HOST, workerId: 'w-p1' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'needled-host')).toBe(1);
+      expect(findHostSample(metrics, 'fabric_event_count', 'instance-host')).toBeUndefined();
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('service.instance.id is used when needle.host is absent', async () => {
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'service.instance.id': 'instance-only-host' },
+        [{ attrs: NO_HOST, workerId: 'w-p2' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'instance-only-host')).toBe(1);
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('a record-level needle.host overrides a resource-level service.instance.id', async () => {
+    // Realistic mixed placement: the SDK stamps service.instance.id on the
+    // resource while NEEDLE tags each record with needle.host.
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'service.instance.id': 'resource-instance' },
+        [{ attrs: { 'needle.host': 'record-host' }, workerId: 'w-p3' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'record-host')).toBe(1);
+      expect(findHostSample(metrics, 'fabric_event_count', 'resource-instance')).toBeUndefined();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('events from different precedence tiers land in separate series', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'tier-needle' },
+        [{ attrs: NO_HOST, workerId: 'w-t1' }],
+      ));
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'service.instance.id': 'tier-instance' },
+        [{ attrs: NO_HOST, workerId: 'w-t2' }],
+      ));
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        NO_HOST,
+        [{ attrs: NO_HOST, workerId: 'w-t3' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'tier-needle')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_event_count', 'tier-instance')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_event_count', 'ingest-local')).toBe(1);
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(3);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+// ─── Missing host attributes → local hostname fallback ──────────────────────
+
+describe('multi-host metrics — missing attributes and legacy JSONL sources', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('OTLP events without any host attribute are attributed to the local hostname', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(NO_HOST, [{ attrs: NO_HOST, workerId: 'w-f1' }]));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'ingest-local')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'ingest-local')).toBe(1);
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('legacy NEEDLE JSONL events over POST /api/events carry the local hostname', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      // Modern NEEDLE per-worker JSONL shape (ts: ISO string, event, worker, data)
+      const legacyRes = await server.fetchJson('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ts: new Date().toISOString(),
+          event: 'bead.claimed',
+          worker: 'w-jsonl-1',
+          session: 'sess-jsonl-1',
+          data: { bead_id: 'bd-legacy' },
+        }),
+      });
+      expect(legacyRes.status).toBe(201);
+      expect(legacyRes.body.event.host).toBe('ingest-local');
+
+      // Older flat shape (ts: epoch millis, worker, level, msg)
+      const flatRes = await server.fetchJson('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ts: Date.now(),
+          event: 'Task step',
+          worker: 'w-jsonl-2',
+          level: 'info',
+          msg: 'Task step',
+        }),
+      });
+      expect(flatRes.status).toBe(201);
+      expect(flatRes.body.event.host).toBe('ingest-local');
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'ingest-local')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'ingest-local')).toBe(2);
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('JSONL files tailed from disk are attributed to the local hostname', async () => {
+    // The production wiring: DirectoryTailer → store.add + recordEvent()
+    // (src/cli.ts). Legacy file sources carry no host, so their series must
+    // be the local hostname.
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-multihost-tailer-'));
+    const rawServer = await startServer();
+    let tailer: DirectoryTailer | undefined;
+    try {
+      // Exactly the wiring cli.ts uses for tailer events.
+      tailer = new DirectoryTailer({ directory: logDir });
+      tailer.on('event', (event: LogEvent) => {
+        rawServer.store.add(event);
+        rawServer.recordEvent(event.host, event.worker);
+      });
+      tailer.start();
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      fs.writeFileSync(
+        path.join(logDir, 'w-tailed-local.jsonl'),
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          event: 'worker.started',
+          worker: 'w-tailed',
+          session: 'sess-tailed',
+          data: {},
+        }) + '\n',
+      );
+
+      await waitFor(async () => {
+        const { metrics } = await rawServer.metrics();
+        // The fresh server already emits a zero-valued local series, so the
+        // probe must check the count arrived, not merely that the series exists.
+        return (findHostSample(metrics, 'fabric_event_count', 'ingest-local')?.value ?? 0) >= 1;
+      }, 'tailed JSONL event to be attributed to the local hostname');
+
+      const { metrics } = await rawServer.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'ingest-local')).toBeGreaterThanOrEqual(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'ingest-local')).toBe(1);
+    } finally {
+      tailer?.stop();
+      await rawServer.stop();
+      fs.rmSync(logDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── Label escaping ─────────────────────────────────────────────────────────
+
+describe('multi-host metrics — label escaping', () => {
+  const HOSTILE_HOSTS = ['quote"host', 'back\\slash', 'new\nline-host'];
+
+  it('renders hostile host strings as valid, round-trippable label values', () => {
+    const metrics = new ServerMetrics();
+    for (const host of HOSTILE_HOSTS) metrics.recordEvent(host, 'w-escape');
+
+    const { unparsed, raw } = parsePrometheus(metrics.toPrometheus(metrics.snapshot()));
+
+    // The exposition must stay parseable — an escaped quote or newline in a
+    // label must not terminate the sample line early.
+    expect(unparsed).toEqual([]);
+
+    const eventCountLines = raw.split('\n').filter(l => l.startsWith('fabric_event_count{'));
+    expect(eventCountLines.map(l => l.replace(/ \d+$/, '')).sort()).toEqual([
+      'fabric_event_count{host="back\\\\slash"}',
+      'fabric_event_count{host="new\\nline-host"}',
+      'fabric_event_count{host="quote\\"host"}',
+    ]);
+
+    // And the parsed label values round-trip to the original host strings.
+    const parsed = parsePrometheus(metrics.toPrometheus(metrics.snapshot())).metrics;
+    for (const host of HOSTILE_HOSTS) {
+      expect(sampleValue(parsed, 'fabric_event_count', host)).toBe(1);
+      expect(sampleValue(parsed, 'fabric_active_workers', host)).toBe(1);
+    }
+  });
+
+  it('survives the full OTLP → /api/metrics round trip', async () => {
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'quote"host' },
+        [{ attrs: NO_HOST, workerId: 'w-q1' }],
+      ));
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'back\\slash' },
+        [{ attrs: NO_HOST, workerId: 'w-q2' }],
+      ));
+
+      const { unparsed, metrics } = await server.metrics();
+      expect(unparsed).toEqual([]);
+      expect(sampleValue(metrics, 'fabric_event_count', 'quote"host')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_event_count', 'back\\slash')).toBe(1);
+      // Each hostile host kept its own series — no merging, no line-breakage.
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(2);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+// ─── Per-host separation ────────────────────────────────────────────────────
+
+describe('multi-host metrics — per-host separation (end-to-end)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps identical worker ids and aggregates separate across three ingest sources', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      // host-a via OTLP: 2 events, 1 worker
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'sep-host-a' },
+        [{ attrs: NO_HOST, workerId: 'w-shared' }, { attrs: NO_HOST, workerId: 'w-shared' }],
+      ));
+      // host-b via OTLP: 1 event, the SAME worker id — must not merge with host-a
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'sep-host-b' },
+        [{ attrs: NO_HOST, workerId: 'w-shared' }],
+      ));
+      // local via legacy JSONL: 2 events, 2 workers
+      for (const worker of ['w-l1', 'w-l2']) {
+        const res = await server.fetchJson('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ts: new Date().toISOString(),
+            event: 'worker.started',
+            worker,
+            session: `sess-${worker}`,
+            data: {},
+          }),
+        });
+        expect(res.status).toBe(201);
+      }
+
+      const { metrics } = await server.metrics();
+
+      // Three series each, with exact per-host values.
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(3);
+      expect(sampleValue(metrics, 'fabric_event_count', 'sep-host-a')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_event_count', 'sep-host-b')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_event_count', 'ingest-local')).toBe(2);
+
+      // Identical worker id on two hosts → one worker per host, not 2 on one.
+      expect(sampleValue(metrics, 'fabric_active_workers', 'sep-host-a')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'sep-host-b')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'ingest-local')).toBe(2);
+
+      // Rate series exist for every host, and nowhere else.
+      for (const host of ['sep-host-a', 'sep-host-b', 'ingest-local']) {
+        expect(findHostSample(metrics, 'fabric_ingest_rate_per_second', host)).toBeDefined();
+      }
+
+      // Hostless metrics stay unlabeled and single-sample.
+      for (const name of ['fabric_status', 'fabric_uptime_seconds', 'fabric_websocket_clients',
+        'fabric_dedup_dropped_total', 'fabric_process_resident_memory_bytes']) {
+        const samples = metrics.get(name)!.samples;
+        expect(samples, name).toHaveLength(1);
+        expect(samples[0].labels, name).toEqual({});
+      }
+
+      // The local tailer gauge is labeled with the local host only.
+      const tailer = metrics.get('fabric_tailer_files_watched')!;
+      expect(tailer.samples).toHaveLength(1);
+      expect(tailer.samples[0].labels).toEqual({ host: 'ingest-local' });
+    } finally {
+      await server.stop();
+    }
+  });
+});

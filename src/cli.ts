@@ -407,7 +407,9 @@ program
         if (filter.level && event.level !== filter.level) return;
 
         store.add(event);
-        server.recordEvent();
+        // Pass host/worker like every other ingest path (POST /api/events,
+        // OTLP HTTP) so per-host series and active_workers stay correct.
+        server.recordEvent(event.host, event.worker);
         server.broadcast(event);
         // Keep tailer_files_watched in sync for directory tailers
         if (tailer instanceof DirectoryTailer) {
@@ -430,7 +432,9 @@ program
           if (filter.level && event.level !== filter.level) return;
 
           store.add(event);
-          server.recordEvent();
+          // Same as the OTLP/HTTP path: carry host/worker so remote-host
+          // events land in their own series and workers are counted.
+          server.recordEvent(event.host, event.worker);
           server.broadcast(event);
         });
         const boundAddr = await otlpReceiver.start();
