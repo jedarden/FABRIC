@@ -2,10 +2,12 @@
  * Tests for the heap snapshot / memory analysis API endpoints.
  *
  * Covers the endpoints documented in docs/heap-snapshot-retention.md —
- * POST /api/memory/heap-snapshot, GET /api/memory/snapshots,
+ * POST /api/memory/heap-snapshot, POST /api/memory/capture,
+ * POST /api/memory/baseline, GET /api/memory/snapshots,
  * GET /api/memory/diff-analysis, GET /api/memory/trend,
  * GET /api/memory/trend.md, POST /api/memory/trend/save — including
- * their authentication and invalid-input behavior.
+ * their authentication (see docs/api-auth.md: every POST requires the
+ * Bearer token) and invalid-input behavior.
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
@@ -179,6 +181,81 @@ describe('Memory & Heap Snapshot API', () => {
       });
 
       expect(response.status).toBe(400);
+    });
+  });
+
+  describe('POST /api/memory/capture', () => {
+    const inMemorySnapshotCount = async (): Promise<number> => {
+      const data = await (await fetchApi('/api/memory/snapshots?count=1000')).json() as any;
+      return data.count as number;
+    };
+
+    it('should reject without Authorization header with 401', async () => {
+      const before = await inMemorySnapshotCount();
+      const response = await fetchApi('/api/memory/capture', { method: 'POST' });
+
+      expect(response.status).toBe(401);
+      const data = await response.json() as any;
+      expect(data.error).toBe('Missing authorization');
+      // Rejected before the handler: nothing was captured.
+      expect(await inMemorySnapshotCount()).toBe(before);
+    });
+
+    it('should reject a wrong token with 403', async () => {
+      const before = await inMemorySnapshotCount();
+      const response = await fetchApi('/api/memory/capture', authJson(undefined, 'wrong-token'));
+
+      expect(response.status).toBe(403);
+      expect(await inMemorySnapshotCount()).toBe(before);
+    });
+
+    it('should capture a snapshot with a valid token', async () => {
+      const before = await inMemorySnapshotCount();
+      const response = await fetchApi('/api/memory/capture', authJson());
+
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data.timestamp).toBeGreaterThan(0);
+      expect(data.rss).toBeGreaterThan(0);
+      expect(data.heapUsed).toBeGreaterThan(0);
+      expect(data.formatted).toBeDefined();
+      // Exactly one snapshot was recorded.
+      expect(await inMemorySnapshotCount()).toBe(before + 1);
+    });
+  });
+
+  describe('POST /api/memory/baseline', () => {
+    const diffStatus = async (): Promise<number> =>
+      (await fetchApi('/api/memory/diff')).status;
+
+    it('should reject without Authorization header with 401', async () => {
+      const response = await fetchApi('/api/memory/baseline', { method: 'POST' });
+
+      expect(response.status).toBe(401);
+      const data = await response.json() as any;
+      expect(data.error).toBe('Missing authorization');
+      // Rejected before the handler: no baseline was set.
+      expect(await diffStatus()).toBe(404);
+    });
+
+    it('should reject a wrong token with 403', async () => {
+      const response = await fetchApi('/api/memory/baseline', authJson(undefined, 'wrong-token'));
+
+      expect(response.status).toBe(403);
+      expect(await diffStatus()).toBe(404);
+    });
+
+    it('should set the baseline with a valid token', async () => {
+      expect(await diffStatus()).toBe(404); // no baseline yet
+
+      const response = await fetchApi('/api/memory/baseline', authJson());
+
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data.timestamp).toBeGreaterThan(0);
+      expect(data.formatted).toBeDefined();
+      // The baseline is now live: the diff endpoint answers instead of 404.
+      expect(await diffStatus()).toBe(200);
     });
   });
 
@@ -362,6 +439,11 @@ describe('Memory & Heap Snapshot API', () => {
         const response = await fetchApi(endpoint);
         expect(response.status).toBe(200);
       }
+    });
+
+    it('should allow the stats GET without a token', async () => {
+      const response = await fetchApi('/api/memory/stats');
+      expect(response.status).toBe(200);
     });
   });
 });
