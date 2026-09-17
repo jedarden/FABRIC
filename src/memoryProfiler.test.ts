@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
-import { getMemoryProfiler, shouldCapturePressureSnapshot, MEMORY_PRESSURE_THRESHOLD_PERCENT, PRESSURE_SNAPSHOT_COOLDOWN_MS, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
+import { getMemoryProfiler, shouldCapturePressureSnapshot, MEMORY_PRESSURE_THRESHOLD_PERCENT, PRESSURE_SNAPSHOT_COOLDOWN_MS, MAX_DISK_SNAPSHOTS, MAX_SNAPSHOT_AGE_DAYS, DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES, MAX_IN_MEMORY_SNAPSHOTS, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
 import { getHeapSnapshots, compareSnapshots } from './heapDiff.js';
 import { existsSync, unlinkSync, readdirSync, readFileSync, mkdirSync, rmSync, writeFileSync, truncateSync, utimesSync } from 'fs';
 import { join } from 'path';
@@ -162,21 +162,45 @@ describe('Memory Profiler', () => {
   });
 
   describe('Retention Policy', () => {
+    it('should pin the documented retention limits: 50 files, 30 days, 10 GiB, 100 in memory', () => {
+      // docs/heap-snapshot-retention.md, Retention Limits table. The
+      // behavioral tests below would catch most drift of these constants,
+      // but not every direction (e.g. the invalid-override fallback test
+      // stays green if the default cap drifts upward to any value above the
+      // seed data). Pinning the numbers literally makes any change to a
+      // documented limit a deliberate, reviewable act — same pattern as the
+      // 80%-threshold/30-minute-cooldown pin in the pressure tests.
+      expect(MAX_DISK_SNAPSHOTS).toBe(50);
+      expect(MAX_SNAPSHOT_AGE_DAYS).toBe(30);
+      expect(DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES).toBe(10 * 1024 ** 3);
+      expect(MAX_IN_MEMORY_SNAPSHOTS).toBe(100);
+    });
+
     it('should track snapshot count', () => {
       const initialCount = profiler.getSnapshotCount();
       expect(initialCount).toBe(0);
     });
 
     it('should apply retention policy after writing snapshot', { timeout: 60_000 }, async () => {
-      // This test verifies the retention mechanism is called
-      // Actual retention limits are high (50 files, 30 days) so we just
-      // verify the mechanism works without hitting limits
+      // docs/heap-snapshot-retention.md, Automatic Cleanup step 4:
+      // applyRetentionPolicy() runs after writeHeapSnapshot(). Seed the
+      // directory exactly at the documented 50-file cap, then a single write
+      // must trigger the count-based pass inside that write: the directory is
+      // back to 50 files and the oldest seed is the one that went.
+      const fakes: string[] = [];
+      for (let i = 0; i < MAX_DISK_SNAPSHOTS; i++) {
+        fakes.push(writeFakeSnapshot(`heap-${7_000_000 + i}-test.heapsnapshot`, 1024, (50 - i) * 60_000));
+      }
+      expect(profiler.getSnapshotCount()).toBe(MAX_DISK_SNAPSHOTS);
 
-      const countBefore = profiler.getSnapshotCount();
-      await profiler.writeHeapSnapshot('test');
-      const countAfter = profiler.getSnapshotCount();
+      const realFilepath = await profiler.writeHeapSnapshot('test');
 
-      expect(countAfter).toBe(countBefore + 1);
+      expect(profiler.getSnapshotCount()).toBe(MAX_DISK_SNAPSHOTS);
+      expect(existsSync(realFilepath)).toBe(true);
+      expect(existsSync(fakes[0])).toBe(false); // oldest seed pruned by the write
+      for (let i = 1; i < fakes.length; i++) {
+        expect(existsSync(fakes[i])).toBe(true);
+      }
     });
 
     it('should handle multiple snapshots efficiently', { timeout: 60_000 }, async () => {
@@ -243,12 +267,13 @@ describe('Memory Profiler', () => {
 
     it('should delete snapshots older than 30 days while keeping newer ones', { timeout: 60_000 }, async () => {
       const dayMs = 24 * 60 * 60 * 1000;
-      // 31 days old (plus a minute, so the boundary is not razor-thin): pruned.
+      // Just past the documented 30-day boundary (a minute of margin, so the
+      // verdict cannot flip on test-run latency): pruned.
       const aged = [0, 1, 2].map(i =>
-        writeFakeSnapshot(`heap-${2_000_000 + i}-test.heapsnapshot`, 1024, 31 * dayMs + 60_000));
-      // 29 days old: retained.
+        writeFakeSnapshot(`heap-${2_000_000 + i}-test.heapsnapshot`, 1024, 30 * dayMs + 60_000));
+      // Just inside it: retained.
       const fresh = [0, 1].map(i =>
-        writeFakeSnapshot(`heap-${3_000_000 + i}-test.heapsnapshot`, 1024, 29 * dayMs));
+        writeFakeSnapshot(`heap-${3_000_000 + i}-test.heapsnapshot`, 1024, 30 * dayMs - 60_000));
 
       await profiler.writeHeapSnapshot('test');
 

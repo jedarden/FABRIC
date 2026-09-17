@@ -17,17 +17,17 @@ import { homedir } from 'os';
 const SNAPSHOT_DIR =
   process.env.FABRIC_SNAPSHOT_DIR ?? join(homedir(), '.needle', 'snapshots');
 
-/** Maximum number of in-memory snapshots to keep */
-const MAX_IN_MEMORY_SNAPSHOTS = 100;
+/** Maximum number of in-memory snapshots to keep (docs/heap-snapshot-retention.md) */
+export const MAX_IN_MEMORY_SNAPSHOTS = 100;
 
 /** Snapshot interval in milliseconds */
 const SNAPSHOT_INTERVAL_MS = 30 * 1000; // 30 seconds
 
-/** Maximum number of heap snapshots to retain on disk */
-const MAX_DISK_SNAPSHOTS = 50;
+/** Maximum number of heap snapshots to retain on disk (docs/heap-snapshot-retention.md) */
+export const MAX_DISK_SNAPSHOTS = 50;
 
-/** Maximum age of heap snapshots in days */
-const MAX_SNAPSHOT_AGE_DAYS = 30;
+/** Maximum age of heap snapshots in days (docs/heap-snapshot-retention.md) */
+export const MAX_SNAPSHOT_AGE_DAYS = 30;
 
 /**
  * Default cap on total on-disk heap snapshot bytes (10 GiB). Each
@@ -35,7 +35,7 @@ const MAX_SNAPSHOT_AGE_DAYS = 30;
  * 85%-of-1GB pressure seen in production a full 50-file retention window
  * would hold ~45GB — enough to fill this box's disk on its own.
  */
-const DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES = 10 * 1024 * 1024 * 1024;
+export const DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES = 10 * 1024 * 1024 * 1024;
 
 /** Heap usage percent above which the memory monitor captures a pressure snapshot */
 export const MEMORY_PRESSURE_THRESHOLD_PERCENT = 80;
