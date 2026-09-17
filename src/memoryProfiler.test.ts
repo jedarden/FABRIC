@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
-import { getMemoryProfiler, shouldCapturePressureSnapshot, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
+import { getMemoryProfiler, shouldCapturePressureSnapshot, MEMORY_PRESSURE_THRESHOLD_PERCENT, PRESSURE_SNAPSHOT_COOLDOWN_MS, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
 import { getHeapSnapshots, compareSnapshots } from './heapDiff.js';
 import { existsSync, unlinkSync, readdirSync, readFileSync, mkdirSync, rmSync, writeFileSync, truncateSync, utimesSync } from 'fs';
 import { join } from 'path';
@@ -356,6 +356,23 @@ describe('Memory Profiler', () => {
       expect(shouldCapturePressureSnapshot(85.7, true, now - cooldown, now, cooldown)).toBe(true);
       // Pressure ended between snapshots: cooldown still applies from the last write
       expect(shouldCapturePressureSnapshot(81, true, now - cooldown - 1, now, cooldown)).toBe(true);
+    });
+
+    it('should pin the documented 80% threshold and 30-minute default cooldown', () => {
+      // docs/heap-snapshot-retention.md: "When heap usage exceeds 80% of limit
+      // (checked every 30s; at most one capture per 30-minute cooldown while
+      // pressure persists)". The server's memory monitor calls this policy
+      // without a cooldown argument, so the default constant itself must
+      // carry the documented value — the boundary tests above pass it
+      // explicitly and would not notice a drifted default.
+      expect(MEMORY_PRESSURE_THRESHOLD_PERCENT).toBe(80);
+      expect(PRESSURE_SNAPSHOT_COOLDOWN_MS).toBe(30 * 60 * 1000);
+
+      // With the cooldown argument omitted, that default applies: one
+      // millisecond short of 30 minutes still blocks; exactly 30 fires.
+      const now = Date.now();
+      expect(shouldCapturePressureSnapshot(85, true, now - (PRESSURE_SNAPSHOT_COOLDOWN_MS - 1), now)).toBe(false);
+      expect(shouldCapturePressureSnapshot(85, true, now - PRESSURE_SNAPSHOT_COOLDOWN_MS, now)).toBe(true);
     });
   });
 
