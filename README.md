@@ -49,6 +49,32 @@ npm run build
 npm run build:web
 ```
 
+### Verifying the installation (smoke test)
+
+`npm run smoke:clean-install` (or `scripts/smoke-clean-install.sh`) validates both
+documented installation paths end-to-end in a clean room — a fresh `git archive`
+of `HEAD`, an empty install directory, and a sandboxed `$HOME` with no
+`~/.needle/`:
+
+1. **Source build** — the README clone-and-build commands (`npm install`,
+   `npm run build`, `npm run build:web`) and checks the generated artifacts
+   (`dist/cli.js` with its shebang, `dist/web/public/` hashed bundles).
+2. **npm install** — `npm pack` (the package ships `dist/` via the `files`
+   whitelist and rebuilds it via `prepack`), then installs the tarball into an
+   empty project, approximating `npm install -g @needle/fabric` without
+   touching the global prefix. Checks the `fabric` bin link plus the
+   `--version` / `--help` contract.
+3. **Runtime smoke** — `fabric logs` (single-file parse, directory hot-add,
+   graceful SIGINT), `fabric web` (`/api/health`, SPA assets served from the
+   installed package, graceful SIGINT), and `fabric tui` (startup on a pty via
+   `script`, graceful SIGINT).
+
+The sandboxed `$HOME` also keeps the runtime smoke away from real NEEDLE
+workers on a fleet host. Requires `git`, `curl`, `tar`, and `script`
+(util-linux); takes a few minutes (two full `npm install`s by design). The
+source tree is packaged from `HEAD`, so commit before relying on it. Set
+`SMOKE_KEEP_WORKDIR=1` to keep the temp workdir for inspection.
+
 ## Quick Start
 
 ```bash

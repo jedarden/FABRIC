@@ -7,6 +7,9 @@
   "bin": {
     "fabric": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "build:web": "vite build",
@@ -17,6 +20,8 @@
     "web": "node dist/cli.js web",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "deploy": "npm run build && npm run build:web",
+    "prepack": "npm run deploy",
+    "smoke:clean-install": "bash scripts/smoke-clean-install.sh",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run build",
     "test": "vitest run",
