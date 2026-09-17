@@ -5,6 +5,7 @@
  */
 
 import { VERSION } from './index.js';
+import { getLocalHostname } from './hostname.js';
 
 import type { RetentionState } from './logPruner.js';
 
@@ -45,7 +46,7 @@ export class ServerMetrics {
 
     // Track per-host metrics
     // If no host provided, try to get local hostname
-    const hostKey = host || this.getLocalHostname();
+    const hostKey = host || getLocalHostname();
     const currentCount = this.eventsPerHost.get(hostKey) || 0;
     this.eventsPerHost.set(hostKey, currentCount + 1);
 
@@ -61,17 +62,6 @@ export class ServerMetrics {
       }
       this.workersPerHost.get(hostKey)!.add(workerId);
     }
-  }
-
-  private getLocalHostname(): string {
-    // Try to get hostname from environment or use 'localhost'
-    if (typeof process !== 'undefined' && process.env.HOSTNAME) {
-      return process.env.HOSTNAME;
-    }
-    if (typeof process !== 'undefined' && process.env.HOST) {
-      return process.env.HOST;
-    }
-    return 'localhost';
   }
 
   set wsClients(count: number) {
@@ -180,15 +170,18 @@ export class ServerMetrics {
 
   /** Format snapshot as Prometheus text exposition format. */
   toPrometheus(snap: ServerMetricsSnapshot): string {
-    const lines: string[] = [];
+    // Samples are grouped per metric family: exactly one HELP/TYPE block per
+    // metric, followed by all of its (labeled) series. The Prometheus text
+    // parser rejects a second HELP line for the same metric name, so per-host
+    // metrics must not re-declare the family for each host.
+    const families = new Map<string, { type: string; help: string; samples: string[] }>();
     const metric = (name: string, type: string, help: string, value: number | string, labels?: string) => {
-      lines.push(`# HELP fabric_${name} ${help}`);
-      lines.push(`# TYPE fabric_${name} ${type}`);
-      if (labels) {
-        lines.push(`fabric_${name}{${labels}} ${value}`);
-      } else {
-        lines.push(`fabric_${name} ${value}`);
+      let family = families.get(name);
+      if (!family) {
+        family = { type, help, samples: [] };
+        families.set(name, family);
       }
+      family.samples.push(labels ? `fabric_${name}{${labels}} ${value}` : `fabric_${name} ${value}`);
     };
 
     metric('status', 'gauge', 'Server status (1=ok)', snap.status === 'ok' ? 1 : 0);
@@ -199,13 +192,15 @@ export class ServerMetrics {
     metric('process_resident_memory_bytes', 'gauge', 'Process RSS in bytes', snap.process_resident_memory_bytes);
 
     // Per-host metrics for multi-host aggregation
-    const localHost = this.getLocalHostname();
+    const localHost = getLocalHostname();
     const hostsToEmit = this.eventsPerHost.size > 0 ? Array.from(this.eventsPerHost.keys()) : [localHost];
 
     for (const host of hostsToEmit) {
       const hostLabel = host ? `host="${host}"` : 'host="unknown"';
       const count = this.eventsPerHost.get(host) || 0;
-      const ingestRate = this.ingestRateForHost(host);
+      // Rounded to 2 decimals like the global rate in snapshot(), matching
+      // the documented presentation in docs/metrics.md (e.g. 4.23).
+      const ingestRate = Math.round(this.ingestRateForHost(host) * 100) / 100;
       metric('event_count', 'gauge', 'Total events in store by host', count, hostLabel);
       metric('ingest_rate_per_second', 'gauge', 'Events ingested per second by host (60s window)', ingestRate, hostLabel);
 
@@ -213,12 +208,13 @@ export class ServerMetrics {
       const workers = this.workersPerHost.get(host);
       const workerCount = workers ? workers.size : 0;
       metric('active_workers', 'gauge', 'Active workers by host', workerCount, hostLabel);
-
-      // Tailer files watched (only for local host)
-      if (host === localHost) {
-        metric('tailer_files_watched', 'gauge', 'Log files being watched by host', snap.tailer_files_watched, hostLabel);
-      }
     }
+
+    // Tailer files watched (only for local host) — emitted unconditionally:
+    // the DirectoryTailer exists even when the local host has ingested no
+    // events, and the metric must not vanish from a fleet collector whose
+    // traffic all carries remote host labels.
+    metric('tailer_files_watched', 'gauge', 'Log files being watched by host', snap.tailer_files_watched, `host="${localHost}"`);
 
     // Log retention metrics
     if (snap.prune_last_run_timestamp_seconds !== undefined) {
@@ -229,6 +225,13 @@ export class ServerMetrics {
     }
     if (snap.logs_dir_bytes !== undefined) {
       metric('logs_dir_bytes', 'gauge', 'Size of watched logs directory in bytes', snap.logs_dir_bytes);
+    }
+
+    const lines: string[] = [];
+    for (const [name, family] of families) {
+      lines.push(`# HELP fabric_${name} ${family.help}`);
+      lines.push(`# TYPE fabric_${name} ${family.type}`);
+      lines.push(...family.samples);
     }
 
     return lines.join('\n') + '\n';
