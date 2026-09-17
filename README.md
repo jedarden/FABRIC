@@ -112,7 +112,7 @@ Beyond simple log display, FABRIC provides:
 | **File Heatmap** | See where all the action is at a glance |
 | **Conversation Transcript** | See the full Claude conversation, not just tool calls |
 | **Semantic Narrative** | Natural language summary of what workers are doing |
-| **AI Session Digest** | Auto-generated session summaries for stakeholders |
+| **AI Session Digest** | Auto-generated session summaries for stakeholders (`fabric digest --ai`) |
 | **File Context Panel** | See file contents alongside activity stream |
 | **Git Integration** | Live git status, diff preview, conflict detection |
 | **Worker Analytics** | Compare worker performance over time |

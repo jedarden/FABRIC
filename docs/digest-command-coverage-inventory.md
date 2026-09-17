@@ -48,7 +48,7 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 **Fallback:** missing key, provider error, timeout, malformed response, or refusal each degrade to the deterministic digest (stderr warning, exit 0).  
 **Lines:** ~280 lines  
 **Dependencies:** `@anthropic-ai/sdk`, `types.ts`  
-**Tested in:** `src/digestAi.test.ts` (config resolution, prompt bounds, stub-client success/refusal/error/empty-response paths, section rendering)
+**Tested in:** `src/digestAi.test.ts` (config resolution, prompt bounds, stub-client success/refusal/error/empty-response paths, section rendering) and `src/digest.integration.test.ts` (CLI-level `--ai` behavior: missing-key fallback, unreachable-provider fallback — both exit 0 with the deterministic digest intact — and `--ai-model` without `--ai` ignored with a warning)
 
 ### 3. Path Resolution Module
 **File:** `src/pathResolver.ts`  
@@ -154,6 +154,7 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 - Backward compatibility - Legacy `-f/--file` option
 - Default behavior - No args defaults to `~/.needle/logs/`
 - Output to file - `-o/--output` option
+- AI narrative layer (`--ai`) - Missing-key fallback (exit 0, stderr warning, deterministic digest unchanged), unreachable-provider fallback (sentinel key + closed local `ANTHROPIC_BASE_URL` port → exit 0, no `## AI Narrative` section), `--ai-model` without `--ai` ignored with warning
 
 **Test Count:** 20+ tests  
 **Coverage Target:** End-to-end CLI behavior with real filesystem operations
@@ -176,6 +177,7 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 |-----------|-------------|-----------|-----------------|
 | CLI Command | `src/cli.ts` | `src/digest.integration.test.ts` | ✅ Integration tests |
 | Digest Generation | `src/sessionDigest.ts` | `src/sessionDigest.test.ts` | ✅ Unit tests |
+| AI Narrative Layer | `src/digestAi.ts` | `src/digestAi.test.ts` + `src/digest.integration.test.ts` (`--ai` flag) | ✅ Unit + CLI integration tests |
 | Path Resolution | `src/pathResolver.ts` | `src/pathResolver.test.ts` | ✅ 100% code path coverage |
 | Types | `src/types.ts` | N/A | N/A (type definitions) |
 | Error Grouping | `src/errorGrouping.ts` | `src/errorGrouping.test.ts` | ✅ Unit tests |
@@ -186,19 +188,19 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 
 ## File Inventory Statistics
 
-**Total Source Files:** 10  
-**Total Test Files:** 3  
-**Estimated Total Lines:** ~4,500 lines (implementation + tests)
+**Total Source Files:** 11  
+**Total Test Files:** 4  
+**Estimated Total Lines:** ~5,100 lines (implementation + tests)
 
 ### Source File Breakdown
-- Core digest implementation: ~680 lines (cli.ts, sessionDigest.ts, pathResolver.ts)
+- Core digest implementation: ~960 lines (cli.ts, sessionDigest.ts, pathResolver.ts, digestAi.ts)
 - Supporting modules: ~3,200 lines (store.ts, parser.ts, directoryTailer.ts, errorGrouping.ts, costTracking.ts)
 - Type definitions: ~150 lines
-- Public API: ~2 lines
+- Public API: ~10 lines
 
 ### Test File Breakdown
-- Unit tests: ~570 lines (sessionDigest.test.ts, pathResolver.test.ts)
-- Integration tests: ~490 lines (digest.integration.test.ts)
+- Unit tests: ~880 lines (sessionDigest.test.ts, pathResolver.test.ts, digestAi.test.ts)
+- Integration tests: ~570 lines (digest.integration.test.ts)
 
 ## Coverage Verification
 
@@ -226,6 +228,9 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 - ✅ Output to file vs stdout
 - ✅ Error handling for invalid paths
 - ✅ Backward compatibility with legacy options
+- ✅ `--ai` missing-key fallback (exit 0, stderr warning, deterministic digest unchanged)
+- ✅ `--ai` provider-failure fallback (exit 0, no AI Narrative section)
+- ✅ `--ai-model` without `--ai` ignored with a warning
 
 ## Gaps and Recommendations
 

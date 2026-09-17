@@ -15,7 +15,7 @@ import { describe, test, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execSync, ExecSyncOptionsWithStringEncoding } from 'node:child_process';
+import { execSync, spawnSync, ExecSyncOptionsWithStringEncoding } from 'node:child_process';
 import { createTempLogFile } from './testHelpers.js';
 
 /** Helper to run command and capture both stdout and stderr */
@@ -505,5 +505,74 @@ describe('digest command (integration)', () => {
       expect(content).toContain('alpha-d6288428');
       expect(content).toContain('bravo-44c92b93');
     }, 10000);
+  });
+
+  describe('--ai flag (AI narrative layer)', () => {
+    /**
+     * Run `fabric digest --source <fixtures> [extra args]` with a controlled
+     * environment and capture exit status plus both output streams.
+     */
+    function runDigestWithEnv(extraArgs: string, env: NodeJS.ProcessEnv): {
+      status: number | null;
+      stdout: string;
+      stderr: string;
+    } {
+      const result = spawnSync(
+        'sh',
+        ['-c', `node ${DIST_CLI} digest --source ${FIXTURES_DIR} ${extraArgs}`],
+        { cwd: process.cwd(), encoding: 'utf-8' as const, env, timeout: 30000 },
+      );
+      return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+    }
+
+    /** Copy the parent env minus every AI API key, so tests never depend on a configured key. */
+    function envWithoutAiKeys(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      delete env.ANTHROPIC_API_KEY;
+      delete env.FABRIC_DIGEST_AI_API_KEY;
+      return { ...env, ...extra };
+    }
+
+    test('--ai without an API key falls back to the deterministic digest and exits 0', () => {
+      const { status, stdout, stderr } = runDigestWithEnv('--ai', envWithoutAiKeys());
+
+      expect(status).toBe(0);
+      expect(stderr).toContain('no API key found');
+      expect(stderr).toContain('using deterministic digest');
+
+      // Deterministic digest is intact; no AI section was appended.
+      expect(stdout).toContain('# Session Digest');
+      expect(stdout).toContain('## Summary');
+      expect(stdout).not.toContain('## AI Narrative');
+    }, 30000);
+
+    test('--ai with an unreachable provider degrades to the deterministic digest and exits 0', () => {
+      // Sentinel key (not a credential) plus a closed local port as the API
+      // base URL: the SDK fails fast with a connection error, deterministically
+      // and without touching the real API.
+      const { status, stdout, stderr } = runDigestWithEnv('--ai', envWithoutAiKeys({
+        FABRIC_DIGEST_AI_API_KEY: 'sk-ant-integration-test-sentinel',
+        FABRIC_DIGEST_AI_MAX_RETRIES: '0',
+        FABRIC_DIGEST_AI_TIMEOUT_MS: '5000',
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:9',
+      }));
+
+      expect(status).toBe(0);
+      expect(stderr).toMatch(/AI digest failed/);
+      expect(stderr).toContain('using deterministic digest');
+
+      expect(stdout).toContain('# Session Digest');
+      expect(stdout).toContain('## Summary');
+      expect(stdout).not.toContain('## AI Narrative');
+    }, 30000);
+
+    test('--ai-model without --ai is ignored with a warning', () => {
+      const { status, stdout, stderr } = runDigestWithEnv('--ai-model claude-opus-5', envWithoutAiKeys());
+
+      expect(status).toBe(0);
+      expect(stderr).toContain('--ai-model has no effect without --ai');
+      expect(stdout).toContain('# Session Digest');
+      expect(stdout).not.toContain('## AI Narrative');
+    }, 30000);
   });
 });
