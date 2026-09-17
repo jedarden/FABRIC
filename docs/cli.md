@@ -146,6 +146,13 @@ Per-view keys act on the focused view element; the view takes focus on entry.
 All default-view focus keys (`F`, `p`, `P`, `[`, `]`, `Ctrl+F`, `{`, `}`) are
 no-ops outside the default view.
 
+**File-context split** (opened with `Ctrl+F`) binds its own keys while the
+panel has focus: `o` / `O` open the current file in `$EDITOR`, `↑`/`↓`/`j`/`k`
+scroll the file, `PageUp`/`PageDown` page it, and `[` / `]` walk the
+recent-files list — those two fire *in addition to* the preset save / cycle
+above, because blessed dispatches a key to every matching handler. `{` / `}`
+resize the pane.
+
 **Filtering** in the default view runs through the command palette (`Ctrl+K`):
 `filter:worker:<id>`, `filter:level:<debug|info|warn|error>`,
 `filter:last:<duration>` (e.g. `5m`, `1h`), and `clear` to reset. Filters set
@@ -162,7 +169,7 @@ jump to first/last.
 · `s` statistics · `f` cycle filters · `R` force refresh · `↑`/`↓`/`j`/`k`
 navigate · `g`/`G` jump to first/last.
 
-**Session replay** (`R`): `Space` play/pause · `←`/`→` (or `b`/`n`) step
+**Session replay** (`R`): `Space` / `p` play/pause · `←`/`→` (or `b`/`n`) step
 backward/forward · `↑`/`↓` speed down/up · `1`–`5` set 0.5x / 1x / 2x / 5x /
 10x · `Home`/`End` jump to start/end · `e`/`E`/`m` export (file / base64 /
 Markdown) · `i` import. The footer shows the live transport state
@@ -170,25 +177,25 @@ Markdown) · `i` import. The footer shows the live transport state
 while staying in the view — `r` resets but also toggles the view closed
 (*Binding conflicts*).
 
-**Error groups** (`E`): `↑`/`↓`/`j`/`k` navigate groups · `Enter` expand /
-collapse detail.
+**Error groups** (`E`): `↑`/`↓`/`j`/`k` navigate groups · `Enter` / `Space`
+expand / collapse detail.
 
 **Session digest** (`G`): `1`–`5` switch tabs (Summary / Beads / Files /
 Errors / Workers) · `e` export JSON · `m` export Markdown · `t` export text ·
 `j`/`k` scroll.
 
-**Collision alerts** (`C`): `↑`/`↓`/`j`/`k` navigate alerts · `Enter`
-acknowledge the selected alert · `a` acknowledge all.
+**Collision alerts** (`C`): `↑`/`↓`/`j`/`k` navigate alerts · `Enter` /
+`Space` acknowledge the selected alert · `a` acknowledge all.
 
 **Git integration** (`I`): `s` status · `d` diff · `p` PR preview · `r`
 refresh · `c` clear history.
 
-**Semantic narrative** (`N`): `↑`/`↓`/`j`/`k` navigate segments · `Enter`
-toggle detail · `f` full narrative · `r` refresh.
+**Semantic narrative** (`N`): `↑`/`↓`/`j`/`k` navigate segments · `Enter` /
+`Space` toggle detail · `f` full narrative · `r` refresh.
 
 **Worker analytics** (`A`): `↑`/`↓`/`j`/`k` navigate workers · `←`/`→`
-(`h`/`l`) pick comparison workers · `Enter` toggle detail · `a` aggregated
-view · `c` comparison mode · `s` cycle sort mode · `r` refresh.
+(`h`/`l`) pick comparison workers · `Enter` / `Space` toggle detail · `a`
+aggregated view · `c` comparison mode · `s` cycle sort mode · `r` refresh.
 
 **Conversation transcript** (`T`): `/` search · `n`/`N` next/previous match ·
 `t` toggle nearest tool call · `c` collapse all tool calls · `e` expand all ·
