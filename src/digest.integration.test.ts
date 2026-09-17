@@ -273,7 +273,10 @@ describe('digest command (integration)', () => {
           }
         }
       }
-    }, 15000);
+      // Four sequential CLI spawns; 15s tripped under full-suite parallel
+      // load (observed 2026-09-17), so give it the same headroom as the
+      // memory-profiling tests.
+    }, 60000);
 
     test('handles directory path with trailing slash', () => {
       // Test that directory paths with trailing slashes work correctly
