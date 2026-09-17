@@ -77,11 +77,18 @@ interface ParseResult {
   metrics: Map<string, ParsedMetric>;
   /** Sample lines that did not parse — must be empty for a valid exposition. */
   unparsed: string[];
+  /**
+   * Metric families that declared HELP more than once — the Prometheus text
+   * parser rejects a second HELP/TYPE block for the same name, so this must
+   * stay empty for a scrapeable exposition.
+   */
+  duplicateFamilies: string[];
 }
 
 function parsePrometheus(text: string): ParseResult {
   const metrics = new Map<string, ParsedMetric>();
   const unparsed: string[] = [];
+  const duplicateFamilies: string[] = [];
   let current: ParsedMetric | undefined;
 
   for (const line of text.split('\n')) {
@@ -90,6 +97,7 @@ function parsePrometheus(text: string): ParseResult {
     if (line.startsWith('#')) {
       const help = line.match(/^# HELP (\S+) (.+)$/);
       if (help) {
+        if (metrics.has(help[1])) duplicateFamilies.push(help[1]);
         current = { help: help[2], type: '', samples: [] };
         metrics.set(help[1], current);
         continue;
@@ -119,7 +127,7 @@ function parsePrometheus(text: string): ParseResult {
     current.samples.push({ labels, value: parseFloat(sample[3]) });
   }
 
-  return { metrics, unparsed };
+  return { metrics, unparsed, duplicateFamilies };
 }
 
 /** Value of the (single) sample of a metric, optionally matching a host label. */
@@ -299,8 +307,11 @@ describe('GET /api/metrics — documented metric contract', () => {
       const text = await server.fetchText('/api/metrics');
       expect(text.endsWith('\n')).toBe(true);
 
-      const { metrics, unparsed } = parsePrometheus(text);
+      const { metrics, unparsed, duplicateFamilies } = parsePrometheus(text);
       expect(unparsed).toEqual([]);
+      // Exactly one HELP/TYPE block per metric family — per-host series must
+      // share one block, since a repeated HELP line makes the scrape invalid.
+      expect(duplicateFamilies).toEqual([]);
       expect(metrics.size).toBeGreaterThan(0);
 
       for (const [name, metric] of metrics) {
