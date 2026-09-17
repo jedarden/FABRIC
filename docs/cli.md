@@ -82,18 +82,23 @@ fabric tui --source ~/.needle/logs/ --otlp-grpc 0.0.0.0:4317
 
 The TUI is a view state machine: exactly one view is active at a time — the
 `default` view plus the twelve overlay views listed below. View-entry keys
-work from any view, `Escape` always steps back, and the in-app help overlay
-(`?`) mirrors this reference.
+work from any view and `Escape` always steps back. The `?` help overlay is
+*not* a view: it floats above whichever view is active without changing it,
+and `?` is the only key that opens *or* closes it — `Escape` does not
+dismiss the overlay. The overlay is a quick summary, not an exact mirror of
+this reference: it omits the conversation-transcript and cross-reference
+views, and it still lists `/` (search) and `f` (filter), which are bound
+only inside specific views (transcript search), not globally.
 
 #### Global keys (active in every view)
 
 | Key | Action |
 |-----|--------|
 | `q` / `Ctrl+C` | Quit FABRIC |
-| `?` | Toggle the help overlay |
+| `?` | Toggle the help overlay — works in every view, does not change the active view, and `?` again is the only way to close it |
 | `Tab` / `Shift+Tab` | Move panel focus to the next / previous panel |
 | `Enter` | Open the detail overlay for the worker selected in the worker grid (`Escape` closes it first) |
-| `Escape` | Close the worker detail overlay if it is open; otherwise return to the default view (no-op if already there) |
+| `Escape` | In order: close the worker detail overlay if it is open; otherwise return to the default view (no-op if already there). It never dismisses the help overlay, and when it closes the command palette the global step-back fires as well (see the palette section) |
 | `Ctrl+K` | Command palette (see below) |
 | `Ctrl+T` | Toggle dark / light theme |
 | `r` | Re-render the screen — note this key also toggles session replay (see *Binding conflicts*) |
@@ -125,6 +130,10 @@ Semantics:
   is open switches directly to that view.
 - **Exit** = press the view's key again (every view key is a toggle), press
   `Escape`, or press a different view's key.
+- **Returning to the default view** shows the worker grid and the activity
+  stream again (the stream back at full width). The file-context split is
+  *not* restored automatically — entry closed it — so reopen it with
+  `Ctrl+F` if needed.
 
 #### Per-view keys
 
@@ -219,7 +228,10 @@ focus presets (`preset:save`, `preset:list`, `preset:load:<name>`,
 `preset:delete:<name>`), exports (`export` / `export:file`, `export:link`,
 `export:import`),
 jumps (`worker:<id>`, `bead:<id>`, `file:<pattern>`, `goto:<timestamp>`), and
-`help`, `pause`, `refresh`, `quit`. `Escape` closes the palette.
+`help`, `pause`, `refresh`, `quit`. `Escape` closes the palette — and since
+blessed dispatches a key to every matching handler, the global `Escape`
+action also fires, so the active view steps back to the default view at the
+same time.
 
 #### Binding conflicts (known quirks)
 
