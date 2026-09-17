@@ -136,9 +136,13 @@ pass "dist/cli.js (with shebang) and web assets (js+css) generated"
 
 phase "3/5 package (npm pack, prepack rebuilds)"
 
-TARBALL_NAME="$(cd "$SRC" && npm pack --quiet)"
-TARBALL="$SRC/$TARBALL_NAME"
-if [ ! -f "$TARBALL" ]; then fail "npm pack produced no tarball"; fi
+if ! (cd "$SRC" && npm pack --quiet) >"$OUT_DIR/npm-pack.log" 2>&1; then
+  tail -30 "$OUT_DIR/npm-pack.log" >&2 || true
+  fail "npm pack failed (log: $OUT_DIR/npm-pack.log)"
+fi
+# --quiet suppresses npm's filename notice, so locate the tarball on disk.
+TARBALL="$(ls "$SRC"/*.tgz 2>/dev/null | head -1)"
+if [ -z "$TARBALL" ] || [ ! -f "$TARBALL" ]; then fail "npm pack produced no tarball in $SRC"; fi
 
 tar -tzf "$TARBALL" | sort > "$OUT_DIR/tarball-listing.txt"
 
@@ -156,7 +160,7 @@ fi
 if grep -q '^package/tmp/' "$OUT_DIR/tarball-listing.txt"; then
   fail "tarball ships tmp/ scratch files"
 fi
-pass "$TARBALL_NAME ships the CLI, web assets, and no source/scratch files"
+pass "$(basename "$TARBALL") ships the CLI, web assets, and no source/scratch files"
 
 # --- Phase 4: npm install of the tarball (README npm workflow) -----------------
 
