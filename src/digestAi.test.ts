@@ -7,6 +7,7 @@
  */
 
 import { describe, test, expect } from 'vitest';
+import Anthropic from '@anthropic-ai/sdk';
 import {
   resolveDigestAiConfig,
   buildDigestAiPrompt,
@@ -154,7 +155,7 @@ describe('buildDigestAiPrompt', () => {
     expect(prompt).not.toContain(CONFIG.apiKey);
   });
 
-  test('caps long lists at the documented prompt bounds', () => {
+  test('caps long lists at the documented prompt bounds (20w/20b/15f/10e)', () => {
     const now = 1_700_000_000_000;
     const digest = makeDigest({
       workers: Array.from({ length: 30 }, (_, i) => ({
@@ -173,6 +174,18 @@ describe('buildDigestAiPrompt', () => {
         completedAt: now,
         durationMs: 0,
       })),
+      filesModified: Array.from({ length: 20 }, (_, i) => ({
+        path: `src/capped/f${i}.ts`,
+        modifications: 20 - i,
+        workers: ['w-0'],
+        tools: ['Edit'],
+      })),
+      errors: Array.from({ length: 15 }, (_, i) => ({
+        message: `capped-error-${i}`,
+        category: 'network' as const,
+        workerId: 'w-0',
+        timestamp: now + i,
+      })),
     });
 
     const prompt = buildDigestAiPrompt(digest);
@@ -180,6 +193,10 @@ describe('buildDigestAiPrompt', () => {
     expect(prompt).toContain('… and 10 more workers');
     expect(prompt).toContain('… and 20 more beads');
     expect(prompt).not.toContain('bd-39');
+    expect(prompt).toContain('top 15 of 20');
+    expect(prompt).not.toContain('src/capped/f15.ts');
+    expect(prompt).toContain('Recent errors (15 total)');
+    expect(prompt).not.toContain('capped-error-10');
   });
 
   test('handles an empty session without padding', () => {
@@ -277,6 +294,60 @@ describe('generateAiDigestNarrative', () => {
     const result = await generateAiDigestNarrative(makeDigest(), CONFIG, failing);
     expect(result).toMatchObject({ ok: false });
     expect((result as { ok: false; reason: string }).reason).toContain('401');
+  });
+
+  test('returns {ok:false} when no config resolved (missing key)', async () => {
+    // A client that must never be reached when the config is missing.
+    const unreachable: DigestAiClient = {
+      messages: {
+        create: async () => {
+          throw new Error('provider must not be called without a config');
+        },
+      },
+    };
+    const result = await generateAiDigestNarrative(makeDigest(), null, unreachable);
+    expect(result).toMatchObject({ ok: false });
+    const reason = (result as { ok: false; reason: string }).reason;
+    expect(reason).toContain('no API key configured');
+    expect(reason).toContain('FABRIC_DIGEST_AI_API_KEY');
+  });
+
+  test('falls back on a provider timeout (never throws)', async () => {
+    const timingOut: DigestAiClient = {
+      messages: {
+        create: async () => {
+          throw new Anthropic.APIConnectionTimeoutError({ message: 'Request timed out.' });
+        },
+      },
+    };
+    const result = await generateAiDigestNarrative(makeDigest(), CONFIG, timingOut);
+    expect(result).toMatchObject({ ok: false });
+    expect((result as { ok: false; reason: string }).reason).toContain('timed out');
+  });
+
+  test('falls back on a typed API error after retries are exhausted', async () => {
+    const rateLimited: DigestAiClient = {
+      messages: {
+        create: async () => {
+          throw new Anthropic.APIError(429, { message: 'rate limited' }, 'rate limited', undefined);
+        },
+      },
+    };
+    const result = await generateAiDigestNarrative(makeDigest(), CONFIG, rateLimited);
+    expect(result).toMatchObject({ ok: false });
+    expect((result as { ok: false; reason: string }).reason).toContain('rate limited');
+  });
+
+  test('never throws on a non-Error rejection', async () => {
+    const hostile: DigestAiClient = {
+      messages: {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+        create: () => Promise.reject('boom'),
+      },
+    };
+    const result = await generateAiDigestNarrative(makeDigest(), CONFIG, hostile);
+    expect(result).toMatchObject({ ok: false });
+    expect((result as { ok: false; reason: string }).reason).toContain('boom');
   });
 
   test('joins multiple text blocks', async () => {

@@ -200,13 +200,21 @@ export function buildDigestAiPrompt(digest: SessionDigest): string {
 /**
  * Request the AI narrative. Never throws — every failure path returns
  * `{ ok: false, reason }` so the caller can fall back to the deterministic
- * digest.
+ * digest. A null config (no API key resolved) is itself a failure result,
+ * so callers cannot fall out of the contract by skipping their own check.
  */
 export async function generateAiDigestNarrative(
   digest: SessionDigest,
-  config: DigestAiConfig,
+  config: DigestAiConfig | null,
   client?: DigestAiClient,
 ): Promise<DigestAiResult> {
+  if (!config) {
+    return {
+      ok: false,
+      reason: 'no API key configured (set FABRIC_DIGEST_AI_API_KEY or ANTHROPIC_API_KEY)',
+    };
+  }
+
   const effectiveClient: DigestAiClient =
     client ??
     new Anthropic({
