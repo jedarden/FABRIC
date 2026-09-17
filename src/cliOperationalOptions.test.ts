@@ -209,13 +209,25 @@ describe('fabric web --help (option parsing surface)', () => {
     const res = spawnSync('node', [DIST_CLI, 'web', '--help'], { encoding: 'utf-8' });
 
     expect(res.status).toBe(0);
-    const help = `${res.stdout}${res.stderr}`;
+    // Commander wraps option descriptions at ~80 columns; collapse all
+    // whitespace so an assertion can never be split across a wrap boundary.
+    const help = `${res.stdout}${res.stderr}`.replace(/\s+/g, ' ');
+
+    // --max-events: presence, value shape, and the documented "no cap" default
     expect(help).toContain('--max-events <number>');
-    expect(help).toContain('liveness guard');
+    expect(help).toContain('Max events in store before liveness guard exits');
+    expect(help).toContain('memory-bomb guard');
+    expect(help).toContain('default: unset, no cap');
+
+    // --heap-snapshots: presence (boolean flag — no value shape) and the
+    // documented production-only default
     expect(help).toContain('--heap-snapshots');
     expect(help).toContain('default: true in production');
+
+    // --snapshot-interval: presence, value shape, and the documented
+    // 30-minute default
     expect(help).toContain('--snapshot-interval <minutes>');
-    expect(help).toContain('(default: 30)');
+    expect(help).toContain('Interval between heap snapshots (default: 30)');
   });
 });
 

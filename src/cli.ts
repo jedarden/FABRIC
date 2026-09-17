@@ -320,7 +320,7 @@ program
   .option('-a, --auth-token <token>', 'Auth token for POST endpoints (or use FABRIC_AUTH_TOKEN env var)')
   .option('--otlp-grpc <addr>', 'Enable OTLP/gRPC receiver (e.g. :4317 or 0.0.0.0:4317)')
   .option('--otlp-http <addr>', 'Enable OTLP/HTTP receiver (e.g. :4318 or 0.0.0.0:4318)')
-  .option('--max-events <number>', 'Max events in store before liveness guard exits (memory-bomb guard)')
+  .option('--max-events <number>', 'Max events in store before liveness guard exits (memory-bomb guard; default: unset, no cap)')
   .option('--heap-snapshots', 'Enable automatic heap snapshot capture for leak detection (default: true in production)')
   .option('--snapshot-interval <minutes>', 'Interval between heap snapshots (default: 30)', '30')
   .action(async (options) => {

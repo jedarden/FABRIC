@@ -2,11 +2,18 @@
  * Multi-host Prometheus metrics contract tests.
  *
  * docs/metrics.md ("Multi-Host Metrics" + "Host Label Resolution") promises:
- *   1. The host label is resolved from OTLP resource attributes in priority
- *      order needle.host → service.instance.id → local hostname.
- *   2. Legacy JSONL sources (no host attributes at all) are attributed to the
+ *   1. The host label is resolved in priority order
+ *      needle.host → service.instance.id → local hostname, with needle.host
+ *      honored at every OTLP placement — the resource block, log records,
+ *      spans (/v1/traces), and metric data points (/v1/metrics) — and
+ *      resource-level attributes promoted onto every record (without
+ *      clobbering a record-level value of the same key).
+ *   2. needle.host beats service.instance.id in every placement combination
+ *      (resource × record level); the losing attribute never becomes a
+ *      series in any host-labeled metric family.
+ *   3. Legacy JSONL sources (no host attributes at all) are attributed to the
  *      local hostname.
- *   3. Per-host metrics (event_count, ingest_rate_per_second, active_workers)
+ *   4. Per-host metrics (event_count, ingest_rate_per_second, active_workers)
  *      keep hosts separate — events from different machines never merge.
  *
  * normalizerHostExtraction.test.ts pins the pure extraction functions and
@@ -99,6 +106,19 @@ function sampleValue(metrics: Map<string, ParsedMetric>, name: string, host: str
 /** Sample value or undefined — for polling and absence checks. */
 function findHostSample(metrics: Map<string, ParsedMetric>, name: string, host: string): ParsedSample | undefined {
   return metrics.get(name)?.samples.find(s => s.labels.host === host);
+}
+
+/**
+ * The losing attribute of a precedence contest must never become a series:
+ * absent from every host-labeled metric family in the exposition
+ * (fabric_tailer_files_watched is excluded — docs/metrics.md scopes it to
+ * the local host unconditionally).
+ */
+function expectHostAbsentEverywhere(metrics: Map<string, ParsedMetric>, host: string): void {
+  for (const name of ['fabric_event_count', 'fabric_ingest_rate_per_second', 'fabric_active_workers']) {
+    expect(findHostSample(metrics, name, host),
+      `${name}{host="${host}"} must not exist — the losing attribute never becomes a series`).toBeUndefined();
+  }
 }
 
 // ─── Server harness ─────────────────────────────────────────────────────────
@@ -326,6 +346,60 @@ describe('multi-host metrics — OTLP ingest (end-to-end)', () => {
   });
 });
 
+// ─── Record-level host extraction on spans and metric data points ───────────
+
+describe('multi-host metrics — record-level host extraction on spans and metric data points (end-to-end)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('carries a span-level needle.host through /v1/traces into the host label', async () => {
+    // docs/metrics.md: "needle.host on OTLP log records, spans, and metric
+    // data points becomes the host label" — the span (record) placement, not
+    // just the resource block.
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/traces', otlpSpanPayload(
+        NO_HOST,
+        'w-span-rec',
+        { 'needle.host': 'span-record-host' },
+      ));
+
+      const { metrics } = await server.metrics();
+      // A span normalizes to a started + a finished event, both on the host.
+      expect(sampleValue(metrics, 'fabric_event_count', 'span-record-host')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'span-record-host')).toBe(1);
+      expect(findHostSample(metrics, 'fabric_ingest_rate_per_second', 'span-record-host')).toBeDefined();
+      // The empty resource must not have routed anything to the local host.
+      expect(findHostSample(metrics, 'fabric_event_count', 'ingest-local')).toBeUndefined();
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('carries a data-point-level needle.host through /v1/metrics into the host label', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/metrics', otlpMetricPayload(
+        NO_HOST,
+        'w-dp-rec',
+        { 'needle.host': 'datapoint-record-host' },
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'datapoint-record-host')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'datapoint-record-host')).toBe(1);
+      expect(findHostSample(metrics, 'fabric_event_count', 'ingest-local')).toBeUndefined();
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
 // ─── Host-label precedence (end-to-end) ─────────────────────────────────────
 
 describe('multi-host metrics — host-label precedence (end-to-end)', () => {
@@ -406,6 +480,124 @@ describe('multi-host metrics — host-label precedence (end-to-end)', () => {
       expect(sampleValue(metrics, 'fabric_event_count', 'tier-instance')).toBe(1);
       expect(sampleValue(metrics, 'fabric_event_count', 'ingest-local')).toBe(1);
       expect(metrics.get('fabric_event_count')!.samples).toHaveLength(3);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+// ─── Label-precedence matrix: every resource × record placement ─────────────
+
+describe('multi-host metrics — label-precedence matrix, every resource × record placement (end-to-end)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('record-level needle.host beats a record-level service.instance.id (logs)', async () => {
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        NO_HOST,
+        [{ attrs: { 'needle.host': 'rec-needle', 'service.instance.id': 'rec-instance' }, workerId: 'w-x1' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'rec-needle')).toBe(1);
+      expectHostAbsentEverywhere(metrics, 'rec-instance');
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('resource-level needle.host beats a record-level service.instance.id (logs)', async () => {
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'res-needle' },
+        [{ attrs: { 'service.instance.id': 'rec-instance' }, workerId: 'w-x2' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'res-needle')).toBe(1);
+      expectHostAbsentEverywhere(metrics, 'rec-instance');
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('record-level service.instance.id is the host when needle.host is absent at record level (logs)', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        NO_HOST,
+        [{ attrs: { 'service.instance.id': 'rec-instance-only' }, workerId: 'w-x3' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'rec-instance-only')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'rec-instance-only')).toBe(1);
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('a record-level needle.host survives resource-level promotion carrying the same key (logs)', async () => {
+    // enrichRecord prepends resource attributes onto every record; promotion
+    // must not clobber the more specific record-level needle.host.
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'dup-resource-host' },
+        [{ attrs: { 'needle.host': 'dup-record-host' }, workerId: 'w-x4' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'dup-record-host')).toBe(1);
+      expectHostAbsentEverywhere(metrics, 'dup-resource-host');
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('a record-level needle.host beats the service.instance.id promoted from the span resource (traces)', async () => {
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/traces', otlpSpanPayload(
+        { 'service.instance.id': 'span-resource-instance' },
+        'w-x5',
+        { 'needle.host': 'span-record-needle' },
+      ));
+
+      const { metrics } = await server.metrics();
+      // Started + finished events, both attributed to the span-level host.
+      expect(sampleValue(metrics, 'fabric_event_count', 'span-record-needle')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'span-record-needle')).toBe(1);
+      expectHostAbsentEverywhere(metrics, 'span-resource-instance');
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('a record-level needle.host beats the service.instance.id promoted from the metric resource (metrics)', async () => {
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/metrics', otlpMetricPayload(
+        { 'service.instance.id': 'dp-resource-instance' },
+        'w-x6',
+        { 'needle.host': 'dp-record-needle' },
+      ));
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'dp-record-needle')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'dp-record-needle')).toBe(1);
+      expectHostAbsentEverywhere(metrics, 'dp-resource-instance');
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
     } finally {
       await server.stop();
     }
