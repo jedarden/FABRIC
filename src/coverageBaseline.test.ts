@@ -52,12 +52,16 @@ const DIGEST_SCOPE_FILES = [
   'src/tui/components/SessionDigest.ts',
 ];
 
-/** Frozen baseline values (recorded 2026-07-29, corrected 2026-09-13). */
+/**
+ * Frozen baseline values (recorded 2026-07-29, corrected 2026-09-13,
+ * refreshed 2026-09-17: covered counts unchanged, totals grew with the
+ * codebase — see "Refresh history" in the baseline summary).
+ */
 const BASELINE_DIGEST_SCOPE = {
-  lines: { covered: 937, total: 2387, pct: 39.25 },
-  branches: { covered: 233, total: 687, pct: 33.92 },
+  lines: { covered: 937, total: 2419, pct: 38.74 },
+  branches: { covered: 233, total: 697, pct: 33.43 },
   functions: { covered: 85, total: 205, pct: 41.46 },
-  statements: { covered: 419, total: 1335, pct: 31.39 },
+  statements: { covered: 419, total: 1348, pct: 31.08 },
 };
 
 const BASELINE_OVERALL_PROJECT = {
