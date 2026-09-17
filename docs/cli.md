@@ -164,8 +164,8 @@ navigate · `g`/`G` jump to first/last.
 
 **Session replay** (`R`): `Space` play/pause · `←`/`→` (or `b`/`n`) step
 backward/forward · `↑`/`↓` speed down/up · `1`–`5` set 0.5x / 1x / 2x / 5x /
-10x · `Home`/`End` jump to start/end · `e`/`m` export (file / Markdown) ·
-`i` import. The footer shows the live transport state
+10x · `Home`/`End` jump to start/end · `e`/`E`/`m` export (file / base64 /
+Markdown) · `i` import. The footer shows the live transport state
 (`READY`/`PLAYING`/`PAUSED`/`ENDED`) and current speed. Use `Home` to rewind
 while staying in the view — `r` resets but also toggles the view closed
 (*Binding conflicts*).
@@ -205,9 +205,12 @@ selected reference · `s` toggle stats · `l` toggle links · `r` refresh.
 Fuzzy-searchable commands: view entry (`heatmap`, `dag`, `replay`, `errors`,
 `digest`, `collisions`, `git`, `narrative`, `analytics`, `budget`,
 `transcript`, `xref`), filters (`filter:worker:…`, `filter:level:…`,
-`filter:last:…`, `clear`), theme (`theme`, `theme:dark`, `theme:light`),
+`filter:last:…`, `clear` — the palette also suggests `filter:bead:…`, but no
+handler is wired for it yet, so selecting it is a no-op), theme
+(`theme` / `theme:toggle`, `theme:dark`, `theme:light`),
 focus presets (`preset:save`, `preset:list`, `preset:load:<name>`,
-`preset:delete:<name>`), exports (`export`, `export:link`, `export:import`),
+`preset:delete:<name>`), exports (`export` / `export:file`, `export:link`,
+`export:import`),
 jumps (`worker:<id>`, `bead:<id>`, `file:<pattern>`, `goto:<timestamp>`), and
 `help`, `pause`, `refresh`, `quit`. `Escape` closes the palette.
 
@@ -219,11 +222,11 @@ both fire — the local action runs and the global toggle switches views:
 
 | Key | Global effect | Local effect (focused view) |
 |-----|---------------|------------------------------|
-| `r` | Toggles session replay (plus a legacy re-render) | Refresh/reset in replay, DAG, git, narrative, analytics, xref, budget — the refresh runs, then the view switches to replay |
+| `r` | Toggles session replay (plus a legacy re-render) | Reset in replay, ready-tasks sub-view in DAG, refresh in git, narrative, analytics, xref, budget — the local action runs, then the view switches to replay |
 | `g` / `G` | Toggles session digest | Jump to top/bottom in worker grid, heatmap, DAG |
 | `h` | Enters the heatmap | Move comparison selection in worker analytics |
 | `d` | Enters the DAG | Diff sub-view in git integration |
-| `e` | Enters error groups | Export in digest/replay, expand-all in transcript |
+| `e` / `E` | Enters error groups | Export in digest (`e`) and replay (`e` file, `E` base64), expand-all in transcript |
 | `c` | Enters collision alerts | Collisions-only filter in heatmap, comparison mode in analytics, collapse-all in transcript, clear history in git |
 | `p` | Pin selected worker (default view only) | Pause activity stream, play/pause replay, PR preview in git |
 | `N` | Enters semantic narrative | Previous search match in transcript |
