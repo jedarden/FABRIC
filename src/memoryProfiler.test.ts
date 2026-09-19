@@ -243,6 +243,31 @@ describe('Memory Profiler', () => {
       }
     });
 
+    it('should never prune the just-written snapshot even when it alone exceeds the size cap', { timeout: 60_000 }, async () => {
+      // docs/heap-snapshot-retention.md, Retention Limits row 3 / Automatic
+      // Cleanup step 3: "the just-written snapshot is never pruned by this
+      // pass". The two-write test above cannot pin this in isolation: if the
+      // size pass could prune files[0], its first write would delete itself,
+      // the second write would then be the only survivor, and every assertion
+      // there would still pass. Here the just-written file is the only file
+      // and exceeds a 1-byte cap on its own — a pass bound that included the
+      // just-written snapshot would delete the only record of the incident.
+      const previousCap = process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+      process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = '1';
+      try {
+        const filepath = await profiler.writeHeapSnapshot('test');
+
+        expect(existsSync(filepath)).toBe(true);
+        expect(profiler.getSnapshotCount()).toBe(1);
+      } finally {
+        if (previousCap === undefined) {
+          delete process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+        } else {
+          process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = previousCap;
+        }
+      }
+    });
+
     it('should enforce the 50-file on-disk limit, pruning the oldest first', { timeout: 60_000 }, async () => {
       // 55 placeholder snapshots, each older than the last (ages 6..60 min),
       // all under the default size cap and well within the age limit.
@@ -371,6 +396,41 @@ describe('Memory Profiler', () => {
         for (const filepath of fakes) {
           expect(existsSync(filepath)).toBe(false);
         }
+      } finally {
+        if (previousCap === undefined) {
+          delete process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+        } else {
+          process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = previousCap;
+        }
+      }
+    });
+
+    it('should enforce the default 10 GiB cap with no override, pruning only until under it', { timeout: 60_000 }, async () => {
+      // docs/heap-snapshot-retention.md row 3 names the default cap itself
+      // (10 GiB) as policy, not just the override. Every test above drives
+      // the size pass through an explicit FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+      // this one leaves it unset so the DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES
+      // value pinned in the constants test is what actually governs. The
+      // placeholders are sparse (truncate() writes no data blocks), so the
+      // 6 GiB logical sizes cost no real disk.
+      const previousCap = process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+      delete process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+      try {
+        const fakeSize = 6 * 1024 ** 3; // two of these = 12 GiB > 10 GiB default
+        expect(2 * fakeSize).toBeGreaterThan(DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES);
+        const oldest = writeFakeSnapshot(`heap-${10_000_000}-test.heapsnapshot`, fakeSize, 10 * 60_000);
+        const middle = writeFakeSnapshot(`heap-${10_000_001}-test.heapsnapshot`, fakeSize, 5 * 60_000);
+
+        const realFilepath = await profiler.writeHeapSnapshot('test');
+
+        // Oldest-first: the 10-minute-old 6 GiB file goes, which drops the
+        // directory to ~6 GiB + the real snapshot — under the cap — so the
+        // prune stops there and the 5-minute-old 6 GiB file survives with
+        // the just-written snapshot.
+        expect(existsSync(oldest)).toBe(false);
+        expect(existsSync(middle)).toBe(true);
+        expect(existsSync(realFilepath)).toBe(true);
+        expect(profiler.getSnapshotCount()).toBe(2);
       } finally {
         if (previousCap === undefined) {
           delete process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
