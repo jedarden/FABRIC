@@ -220,4 +220,4 @@ Smaller/faster variant: `--events-per-file 5` (600 events) still blocks the
 main thread for ~57 s before the first timer tick fires. The script never
 writes under `~/.needle/logs`.
 
-Verified 2026-09-18 at HEAD `d68362b` (fabric-ac34599b): default (120×400) and explicit-flag (101×9) runs, per-line JSON + `normalizeToLogEvent` validation, `bash -n`/`--help`/exec bit, and the now-enforced `--dir` refusal under `~/.needle/logs` (direct, subdir, symlink, hostile `${TMPDIR}`) all pass.
+Re-verified 2026-09-19 at HEAD `ed7a57b` (fabric-ac34599b, dispatch 2): default (120×400 = 48,000 lines) and explicit-flag (101×9 = 909 lines) runs, per-line JSON + ingest-field validation + `normalizeToLogEvent` on all 48,909 lines (0 invalid), `bash -n`/`--help`/exec bit, and the `--dir` refusal under `~/.needle/logs` (direct, subdir, symlink, hostile `${TMPDIR}` — live logs dir byte-identical before/after) all pass; no script defect found.
