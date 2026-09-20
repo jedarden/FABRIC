@@ -455,15 +455,22 @@ describe('digest command (integration)', () => {
       // Skip if ~/.needle/logs/ has too many files (would take too long)
       try {
         const { execSync: execSync2 } = require('child_process');
-        const fileCount = execSync2(`ls -1 ~/.needle/logs/*.jsonl 2>/dev/null | wc -l`, {
-          encoding: 'utf-8',
-          timeout: 2000,
-        }).trim();
+        // find(1), not a shell glob: a very large logs dir overflows the
+        // glob's argument list ("Argument list too long"), the command
+        // fails, and the empty output would read as "safe to run".
+        // head caps the scan output; wc still yields a number.
+        const fileCount = execSync2(
+          `find ~/.needle/logs -maxdepth 1 -name '*.jsonl' -type f 2>/dev/null | head -11 | wc -l`,
+          {
+            encoding: 'utf-8',
+            timeout: 2000,
+          }
+        ).trim();
 
         // If there are more than 10 files, skip this test to avoid long runs
         const count = parseInt(fileCount, 10);
-        if (count > 10) {
-          console.log(`Skipping test: ${count} files in ~/.needle/logs/ (too many)`);
+        if (!Number.isFinite(count) || count > 10) {
+          console.log(`Skipping test: ${fileCount} jsonl files in ~/.needle/logs/ (too many or uncountable)`);
           return;
         }
       } catch (error) {
