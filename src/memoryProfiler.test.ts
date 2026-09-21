@@ -270,10 +270,14 @@ describe('Memory Profiler', () => {
 
     it('should enforce the 50-file on-disk limit, pruning the oldest first', { timeout: 60_000 }, async () => {
       // 55 placeholder snapshots, each older than the last (ages 6..60 min),
-      // all under the default size cap and well within the age limit.
+      // all under the default size cap and well within the age limit. The
+      // embedded filename timestamps run OPPOSITE to the mtimes (the oldest
+      // mtime carries the newest-looking name): the pruned set is then only
+      // explainable by mtime ordering — a cleanup that ranked by filename
+      // instead would prune the wrong six fakes and fail below.
       const fakes: string[] = [];
       for (let i = 0; i < 55; i++) {
-        fakes.push(writeFakeSnapshot(`heap-${1_000_000 + i}-test.heapsnapshot`, 1024, (60 - i) * 60_000));
+        fakes.push(writeFakeSnapshot(`heap-${1_050_000 - i}-test.heapsnapshot`, 1024, (60 - i) * 60_000));
       }
 
       // The real write is the newest file, pushing the directory to 56 files.
