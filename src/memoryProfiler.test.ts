@@ -469,6 +469,50 @@ describe('Memory Profiler', () => {
         }
       }
     });
+
+    it('should treat an invalid FABRIC_SNAPSHOT_MAX_TOTAL_BYTES as the 10 GiB default, not as a disabled cap', { timeout: 60_000 }, async () => {
+      // The fallback test above seeds only ~4MB, so it proves the override
+      // stops applying on invalid input but cannot distinguish "fall back to
+      // the documented default" from "fall back to no cap at all": a
+      // regression that returned Infinity (or NaN) for unparseable input
+      // would keep every assertion there green. Seeding past the default cap
+      // pins the fallback's VALUE, for both fallback branches (unparseable
+      // and non-positive): pruning still happens, with the same verdict as
+      // the unset-override test — oldest 6 GiB file gone, the pass stops
+      // once under 10 GiB, and the just-written snapshot survives.
+      const previousCap = process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+      try {
+        const fakeSize = 6 * 1024 ** 3; // two of these = 12 GiB > 10 GiB default
+        expect(2 * fakeSize).toBeGreaterThan(DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES);
+        const cases = [
+          { invalid: 'not-a-number', base: 11_000_000 }, // Number.isFinite branch
+          { invalid: '-5', base: 11_001_000 },           // parsed > 0 branch
+        ];
+        let priorWrites = 0;
+        for (const { invalid, base } of cases) {
+          const oldest = writeFakeSnapshot(`heap-${base}-test.heapsnapshot`, fakeSize, 10 * 60_000);
+          const middle = writeFakeSnapshot(`heap-${base + 1}-test.heapsnapshot`, fakeSize, 5 * 60_000);
+          process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = invalid;
+
+          const realFilepath = await profiler.writeHeapSnapshot('test');
+
+          expect(existsSync(oldest)).toBe(false);
+          expect(existsSync(middle)).toBe(true);
+          expect(existsSync(realFilepath)).toBe(true);
+          priorWrites += 1;
+          // The surviving middle seed plus every prior iteration's
+          // just-written snapshot; prior writes are newer than both seeds,
+          // so they are never prune candidates.
+          expect(profiler.getSnapshotCount()).toBe(1 + priorWrites);
+        }
+      } finally {
+        if (previousCap === undefined) {
+          delete process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES;
+        } else {
+          process.env.FABRIC_SNAPSHOT_MAX_TOTAL_BYTES = previousCap;
+        }
+      }
+    });
   });
 
   describe('In-Memory Snapshot Retention', () => {
