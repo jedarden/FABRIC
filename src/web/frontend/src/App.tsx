@@ -21,6 +21,7 @@ import OomAlertBanner from './components/OomAlertBanner';
 import SessionDigestPanel from './components/SessionDigestPanel';
 import GitIntegrationPanel from './components/GitIntegrationPanel';
 import ProductivityPanel from './components/ProductivityPanel';
+import FactoryPanel from './components/FactoryPanel';
 import FleetSummaryBar from './components/FleetSummaryBar';
 import SystemMemoryIndicator from './components/SystemMemoryIndicator';
 import HistoricalSessionsPanel from './components/HistoricalSessionsPanel';
@@ -266,6 +267,7 @@ const App: React.FC = () => {
   const [showGitIntegration, setShowGitIntegration] = useState(false);
   const [showNarrative, setShowNarrative] = useState(false);
   const [showProductivity, setShowProductivity] = useState(false);
+  const [showFactory, setShowFactory] = useState(false);
   const [showHistoricalSessions, setShowHistoricalSessions] = useState(false);
   const [showWorkerAnalytics, setShowWorkerAnalytics] = useState(false);
   const [showSystemMemory, setShowSystemMemory] = useState(false);
@@ -863,6 +865,14 @@ const App: React.FC = () => {
             <span className="productivity-toggle-label">Productivity</span>
           </button>
           <button
+            className={`factory-toggle ${showFactory ? 'active' : ''}`}
+            onClick={() => setShowFactory(!showFactory)}
+            title="Factory — verified-closure yield, cost per closure, routing and provider health"
+          >
+            <span className="factory-toggle-icon">&#x1F3ED;</span>
+            <span className="factory-toggle-label">Factory</span>
+          </button>
+          <button
             className={`sessions-toggle ${showHistoricalSessions ? 'active' : ''}`}
             onClick={() => setShowHistoricalSessions(!showHistoricalSessions)}
             title="Historical Sessions — browse past sessions and worker performance"
@@ -1076,6 +1086,13 @@ const App: React.FC = () => {
           <ProductivityPanel
             visible={showProductivity}
             onClose={() => setShowProductivity(false)}
+          />
+        )}
+
+        {showFactory && (
+          <FactoryPanel
+            visible={showFactory}
+            onClose={() => setShowFactory(false)}
           />
         )}
 

@@ -69,6 +69,7 @@ import {
   DEFAULT_MEMORY_LIMIT_BYTES,
 } from './workerMemoryLimiter.js';
 import { getMemorySampler } from './memorySampler.js';
+import { getFactoryPanelAggregator } from './factoryPanel.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -217,6 +218,10 @@ export class InMemoryEventStore implements EventStore {
 
     // Process event for semantic narrative (real-time)
     this.semanticNarrativeManager.processEvent(event);
+
+    // Process event for the factory panel (verified-closure yield, routing,
+    // provider health) — persists ledger events for restart replay.
+    getFactoryPanelAggregator().processEvent(event);
 
     // Add to batch buffer for relationship detection
     if (this.batchBuffer.length < MAX_BATCH_BUFFER_SIZE) {

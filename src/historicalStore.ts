@@ -128,7 +128,7 @@ export interface LearnedRecoveryEntry {
 // Database Schema
 // ============================================
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const CREATE_SESSIONS_TABLE = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -244,6 +244,24 @@ ALTER TABLE metric_samples ADD COLUMN host TEXT;
 ALTER TABLE session_worker_summaries ADD COLUMN host TEXT;
 `;
 
+// Schema v4: factory panel ledger (NEEDLE attempt.resolved / evidence_routing /
+// provider health / experiment lifecycle) — replayed on startup so the factory
+// panel survives a restart instead of zeroing.
+const CREATE_FACTORY_LEDGER_TABLE = `
+CREATE TABLE IF NOT EXISTS factory_ledger_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  worker_id TEXT,
+  adapter TEXT,
+  workspace TEXT,
+  payload TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_factory_ledger_ts ON factory_ledger_events(ts);
+CREATE INDEX IF NOT EXISTS idx_factory_ledger_kind ON factory_ledger_events(kind);
+`;
+
 // ============================================
 // Historical Store Class
 // ============================================
@@ -319,6 +337,11 @@ export class HistoricalStore {
       } catch {
         // Columns already exist — safe to ignore
       }
+    }
+
+    if (currentVersion < 4) {
+      // v4: factory panel ledger events
+      this.db.exec(CREATE_FACTORY_LEDGER_TABLE);
     }
 
     // Update version
@@ -734,6 +757,81 @@ export class HistoricalStore {
       }
     }
     return result;
+  }
+
+  // ============================================
+  // Factory Panel Ledger Persistence
+  // ============================================
+
+  /**
+   * Persist one factory-panel ledger event (attempt.resolved,
+   * agent.evidence_routing, provider.degraded/restored, experiment.stopped).
+   */
+  recordFactoryEvent(event: {
+    ts: number;
+    kind: string;
+    workerId?: string;
+    adapter?: string;
+    workspace?: string;
+    payload: string;
+  }): void {
+    this.db.prepare(`
+      INSERT INTO factory_ledger_events (ts, kind, worker_id, adapter, workspace, payload)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      event.ts,
+      event.kind,
+      event.workerId || null,
+      event.adapter || null,
+      event.workspace || null,
+      event.payload,
+    );
+  }
+
+  /**
+   * Read factory-panel ledger rows for replay, oldest first.
+   */
+  getFactoryEvents(options: { sinceTs?: number; kind?: string; limit?: number } = {}): Array<{
+    ts: number;
+    kind: string;
+    worker_id: string | null;
+    adapter: string | null;
+    workspace: string | null;
+    payload: string;
+  }> {
+    let query = 'SELECT ts, kind, worker_id, adapter, workspace, payload FROM factory_ledger_events WHERE 1=1';
+    const params: (string | number)[] = [];
+
+    if (options.sinceTs !== undefined) {
+      query += ' AND ts >= ?';
+      params.push(options.sinceTs);
+    }
+    if (options.kind) {
+      query += ' AND kind = ?';
+      params.push(options.kind);
+    }
+
+    query += ' ORDER BY ts ASC LIMIT ?';
+    params.push(options.limit || 100_000);
+
+    return this.db.prepare(query).all(...params) as Array<{
+      ts: number;
+      kind: string;
+      worker_id: string | null;
+      adapter: string | null;
+      workspace: string | null;
+      payload: string;
+    }>;
+  }
+
+  /**
+   * Delete factory ledger rows older than the given timestamp (retention).
+   */
+  pruneFactoryEvents(olderThanTs: number): number {
+    const result = this.db.prepare(
+      'DELETE FROM factory_ledger_events WHERE ts < ?'
+    ).run(olderThanTs);
+    return result.changes;
   }
 
   // ============================================
@@ -1331,6 +1429,7 @@ export class HistoricalStore {
     this.db.exec('DELETE FROM session_worker_summaries');
     this.db.exec('DELETE FROM error_history');
     this.db.exec('DELETE FROM task_metrics');
+    this.db.exec('DELETE FROM factory_ledger_events');
     this.db.exec('DELETE FROM sessions');
   }
 

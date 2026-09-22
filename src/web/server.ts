@@ -29,6 +29,7 @@ import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } fro
 import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
 import { getMemorySampler, type WorkerMemorySample } from '../memorySampler.js';
 import { loadConfiguredTheme, saveConfiguredTheme, isThemeName } from '../themeStore.js';
+import { getFactoryPanelAggregator, parseWindowLabel } from '../factoryPanel.js';
 
 /** Cache for the v8 module */
 let v8Module: typeof import('v8') | null = null;
@@ -1400,6 +1401,26 @@ export function createWebServer(options: WebServerOptions): WebServer {
         const { byProject } = scanBeadWorkspaces();
 
         res.json({ daily, workers, byProject });
+      } catch (err) {
+        res.status(500).json({ error: String(err) });
+      }
+    });
+
+    // Factory panel — verified-closure yield, cost per verified closure,
+    // unverified spend share, routing decisions and degraded providers,
+    // aggregated per adapter and per workspace over a rolling window.
+    app.get('/api/factory', (req: Request, res: Response) => {
+      try {
+        let windowMs: number | undefined;
+        if (req.query.windowMs) {
+          const n = Number(req.query.windowMs);
+          if (Number.isFinite(n) && n > 0) windowMs = n;
+        } else if (typeof req.query.window === 'string') {
+          const parsed = parseWindowLabel(req.query.window);
+          if (parsed !== null) windowMs = parsed;
+        }
+        const snapshot = getFactoryPanelAggregator().getSnapshot({ windowMs });
+        res.json(snapshot);
       } catch (err) {
         res.status(500).json({ error: String(err) });
       }

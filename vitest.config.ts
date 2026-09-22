@@ -4,7 +4,9 @@ export default defineConfig({
   test: {
     globals: true,
     exclude: ['node_modules', 'dist'],
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // Keep test-fixture factory ledger rows out of the live ~/.needle/fabric.db
+    env: { FABRIC_FACTORY_PERSISTENCE: 'off' },
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/**/*.test.ts'],
     environmentMatchGlobs: [
       ['src/web/frontend/**/*.test.tsx', 'jsdom'],
     ],

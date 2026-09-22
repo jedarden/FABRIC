@@ -9006,3 +9006,132 @@ body {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.1);
 }
+
+/* ============================================
+   Factory Panel (verified-closure yield)
+   ============================================ */
+
+.factory-panel {
+  width: 860px;
+}
+
+.factory-window {
+  padding: 0.2rem 0.55rem;
+  margin-right: 0.35rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.factory-window.active {
+  background: var(--accent-color, #4a9eff);
+  color: #fff;
+  border-color: var(--accent-color, #4a9eff);
+}
+
+.factory-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+}
+
+.factory-total {
+  display: flex;
+  flex-direction: column;
+  min-width: 7rem;
+}
+
+.factory-total-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.factory-total-value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: var(--mono-font, monospace);
+}
+
+.factory-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.factory-table th {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.factory-table td {
+  padding: 0.32rem 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  font-family: var(--mono-font, monospace);
+  font-size: 0.78rem;
+}
+
+.factory-table tbody tr:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.factory-key {
+  font-weight: 600;
+}
+
+.factory-verified {
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.factory-decomposed {
+  color: #fbbf24;
+}
+
+.factory-uncosted {
+  color: #f87171;
+}
+
+.factory-share {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.factory-latest-routing {
+  margin: 0 0 0.6rem 0;
+  font-size: 0.85rem;
+}
+
+.factory-degraded-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.factory-degraded {
+  color: #fbbf24;
+  font-size: 0.85rem;
+  padding: 0.15rem 0;
+}
+
+.factory-experiment-stops {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.factory-footer {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
