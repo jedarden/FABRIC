@@ -61,14 +61,64 @@ prompt:
     \ \u2014 never log or expose it\n- GET endpoints are open (read-only); POST endpoints\
     \ require Authorization Bearer header\n"
   templates:
-    pluck: "## Workflow\n\nYou are a coding agent. Complete the task below, then close\
-      \ the bead.\n\nSteps:\n1. Read the task description and context below\n2. Implement\
-      \ the required changes in {workspace_path}\n3. Commit your work: `git commit\
-      \ -am \"brief description of what was done\"`\n4. Push: `git push`\n5. Close\
-      \ the bead: `br close {bead_id} --body \"brief summary of what was implemented\"\
-      `\n\nIf you cannot complete the task \u2014 do NOT close the bead. It will be\
-      \ retried automatically.\n\n---\n\n## Task: {bead_title}\n\n{bead_body}\n\n\
-      ## Rules\n\n{workspace_instructions}\n\n## Context\n\n{context_file_contents}\n\
-      \nBead ID: {bead_id}\n"
+    pluck: |
+      ## Workflow
+
+      You are a coding agent. Complete the task below, then close the bead.
+
+      Steps:
+      1. Read the task description and context below
+      2. Implement the required changes in {workspace_path}
+      3. Commit your work -- stage the exact files you changed, then commit them:
+         `git add path/to/changed.file.ts && git commit -m "brief description of what was done"`
+         (never `git commit -am` or `git add -A` -- stage precise paths)
+      4. Push: `git push`
+      5. Verify, noting each command's exit code: `npx tsc --noEmit` and
+         `npx vitest run` (or `npm test`).
+      6. Close the bead with a reason that ENDS in a fenced `verified:` block
+         listing the verification commands you actually ran, one per line, with
+         the exit code each produced:
+
+         ```verified:
+         npx tsc --noEmit exit=0
+         npx vitest run exit=0
+         ```
+
+         The close-evidence gate judges this block and rejects any close whose
+         reason carries no `verified:` block ("close reason carries no
+         verification evidence"). Only go test/vet/build, cargo test/build,
+         npm test, pytest, make test and scripts/definition-of-done.sh claims
+         are re-run -- inside a bare checkout with no node_modules, so claim
+         `npx vitest run`, not `npm test`; any other claim is accepted as
+         evidence exactly as written. Write the reason to a file and pass it on
+         the command line -- an inline double-quoted reason eats the backtick
+         fence:
+
+         ```
+         FT=$({bead_cli} show {bead_id} --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["claim_epoch"])')
+         {bead_cli} close {bead_id} --fencing-token "$FT" --reason "$(cat /tmp/close-reason.txt)"
+         ```
+
+         (`br` is deprecated on this box; `--body` does not set a bead-rs close
+         reason.)
+
+      If you cannot complete the task -- do NOT close the bead. It will be
+      retried automatically.
+
+      ---
+
+      ## Task: {bead_title}
+
+      {bead_body}
+
+      ## Rules
+
+      {workspace_instructions}
+
+      ## Context
+
+      {context_file_contents}
+
+      Bead ID: {bead_id}
 bead_cli:
   backend: bead-rs
