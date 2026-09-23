@@ -242,11 +242,11 @@ Everything stays on your machine — FABRIC is a local collector, not a third-pa
 
 ## Log Retention (`fabric prune`)
 
-`~/.needle/logs/` grows unbounded as NEEDLE workers create telemetry JSONL and stderr logs. `fabric prune` enforces a retention policy:
+`~/.needle/logs/` can grow as NEEDLE workers create telemetry JSONL and stderr logs. `fabric prune` supports an explicit retention policy; omitted windows are indefinite:
 
 ```bash
-# Run with defaults (archive after 3 days, hard delete after 7 days)
-fabric prune
+# Inspect without a destructive policy (defaults are indefinite)
+fabric prune --dry-run
 
 # Dry run — see what would happen
 fabric prune --dry-run
@@ -260,10 +260,14 @@ fabric prune --source /path/to/logs
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--archive-after` | 3 days | Archive files older than this into `~/.needle/logs/archive/YYYY-MM-DD.tar.gz` |
-| `--max-age` | 7 days | Hard delete files older than this (safety net) |
-| `--archive-retain` | 30 days | Delete archive tarballs older than this |
+| `--archive-after` | indefinite | Archive files older than this into `~/.needle/logs/archive/YYYY-MM-DD.tar.gz` |
+| `--max-age` | indefinite | Hard delete files older than this (safety net) |
+| `--archive-retain` | indefinite | Delete archive tarballs older than this |
 | `--dry-run` | off | Report what would happen without making changes |
+
+Signed occurrence tombstones and legal holds live in the separate
+`~/.needle/retention-controls/` control plane. Active legal holds override
+tombstones and prune windows, and raw event ingestion has no delete route.
 
 The pruner emits `mend.logs_pruned` events to `~/.needle/logs/fabric-mend.jsonl`, visible to FABRIC's directory tailer. Run via cron for automatic retention:
 

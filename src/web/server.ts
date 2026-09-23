@@ -25,7 +25,13 @@ import { parseGitEvents } from '../gitParser.js';
 import { generatePRPreview } from '../tui/utils/prPreview.js';
 import { getMemoryProfiler, shouldCapturePressureSnapshot, isSnapshotTrigger, SNAPSHOT_TRIGGERS, type SnapshotTrigger } from '../memoryProfiler.js';
 import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport } from '../heapDiff.js';
-import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions } from '../logPruner.js';
+import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions, DEFAULT_RETENTION_POLICY } from '../logPruner.js';
+import {
+  RetentionControlStore,
+  isLegalHoldActive,
+  validateRetentionControlRecord,
+  type RetentionControlRecord,
+} from '../retentionControls.js';
 import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
 import { getMemorySampler, type WorkerMemorySample } from '../memorySampler.js';
 import { loadConfiguredTheme, saveConfiguredTheme, isThemeName } from '../themeStore.js';
@@ -119,6 +125,8 @@ export interface WebServerOptions {
   deduplicator?: EventDeduplicator;
   /** CLI filter for worker/level - applied at tailer level */
   cliFilter?: import('../types.js').EventFilter;
+  /** Append-only signed retention controls, kept outside the raw log store. */
+  retentionControlStore?: RetentionControlStore;
 }
 
 export interface WebServer extends EventEmitter {
@@ -139,7 +147,7 @@ export interface WebServer extends EventEmitter {
  * Create the FABRIC web server
  */
 export function createWebServer(options: WebServerOptions): WebServer {
-  const { port, logPath, store, authToken, otlpHttpPort, maxEventCount, deduplicator, cliFilter } = options;
+  const { port, logPath, store, authToken, otlpHttpPort, maxEventCount, deduplicator, cliFilter, retentionControlStore } = options;
   const emitter = new EventEmitter();
   const metrics = new ServerMetrics();
 
@@ -355,9 +363,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // Get current log retention state
     app.get('/api/retention', (_req: Request, res: Response) => {
       const policy = {
-        archiveAfterDays: 3,
-        maxAgeDays: 7,
-        archiveRetentionDays: 30,
+        ...DEFAULT_RETENTION_POLICY,
       };
       const state = computeRetentionState(logPath, policy);
 
@@ -384,6 +390,15 @@ export function createWebServer(options: WebServerOptions): WebServer {
           filesDeleted: (lastPrune as Record<string, unknown>).files_deleted,
           bytesFreed: (lastPrune as Record<string, unknown>).bytes_freed,
         } : null,
+        controls: (() => {
+          const records = retentionControlStore?.records() ?? [];
+          return {
+            total: records.length,
+            activeHolds: records.filter(record =>
+              record.recordType === 'legal_hold' && isLegalHoldActive(record)
+            ).length,
+          };
+        })(),
       });
     });
 
@@ -393,7 +408,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // the policy's 403).
     app.post('/api/retention/prune', (req: Request, res: Response) => {
       // Parse optional overrides from request body
-      const options: Partial<PruneOptions> = { logDir: logPath };
+      const options: Partial<PruneOptions> = { logDir: logPath, controlStore: retentionControlStore };
       if (req.body) {
         if (typeof req.body.archiveAfterDays === 'number') {
           options.archiveAfterDays = req.body.archiveAfterDays;
@@ -444,6 +459,40 @@ export function createWebServer(options: WebServerOptions): WebServer {
         });
       }
     });
+
+    // Signed retention controls have their own append-only authority. Raw
+    // event ingestion never calls this store and cannot manufacture a control
+    // record by adding fields to /api/events.
+    app.get('/api/retention/controls', (_req: Request, res: Response) => {
+      res.json(retentionControlStore?.records() ?? []);
+    });
+
+    const appendRetentionControl = (expectedType?: RetentionControlRecord['recordType']) =>
+      (req: Request, res: Response): void => {
+        if (!retentionControlStore) {
+          res.status(503).json({ error: 'Retention control store is not configured' });
+          return;
+        }
+        try {
+          const record = req.body as RetentionControlRecord;
+          validateRetentionControlRecord(record);
+          if (expectedType !== undefined && record.recordType !== expectedType) {
+            res.status(400).json({ error: `Expected ${expectedType} record` });
+            return;
+          }
+          const stored = retentionControlStore.append(record);
+          res.status(201).json({ success: true, record: stored });
+        } catch (error) {
+          res.status(400).json({
+            error: 'Invalid retention control',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      };
+
+    app.post('/api/retention/controls', appendRetentionControl());
+    app.post('/api/retention/tombstones', appendRetentionControl('occurrence_tombstone'));
+    app.post('/api/retention/holds', appendRetentionControl('legal_hold'));
 
     // ============================================
     // Theme API Endpoints
@@ -766,6 +815,16 @@ export function createWebServer(options: WebServerOptions): WebServer {
         console.error('Error processing POST /api/events/batch:', err);
         res.status(500).json({ error: 'Internal server error', message: err instanceof Error ? err.message : 'Unknown error' });
       }
+    });
+
+    // There is intentionally no event deletion API. Keep unknown API methods
+    // from falling through to the SPA fallback with a misleading 200 response.
+    app.use('/api/events', (req: Request, res: Response, next) => {
+      if (req.method === 'DELETE') {
+        res.status(405).json({ error: 'Event deletion is not supported' });
+        return;
+      }
+      next();
     });
 
     // Get worker details

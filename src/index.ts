@@ -32,6 +32,33 @@ export {
   DEFAULT_DIGEST_AI_MODEL,
 } from './digestAi.js';
 export type { DigestAiConfig, DigestAiResult, DigestAiClient } from './digestAi.js';
+export {
+  RETENTION_CONTROL_SCHEMA_VERSION,
+  RETENTION_SIGNATURE_ALGORITHM,
+  RetentionControlStore,
+  canonicalizeRetentionRecord,
+  createSignedOccurrenceTombstone,
+  createSignedLegalHold,
+  decideOccurrenceDeletion,
+  defaultRetentionControlDirectory,
+  generateRetentionAuthorityKeyPair,
+  isLegalHoldActive,
+  isOccurrenceHeld,
+  occurrenceIdForPath,
+  validateRetentionControlRecord,
+  verifyRetentionControlSignature,
+} from './retentionControls.js';
+export type {
+  DeletionDecision,
+  LegalHoldInput,
+  LegalHoldRecord,
+  LegalHoldSelector,
+  OccurrenceTombstone,
+  OccurrenceTombstoneInput,
+  RetentionControlRecord,
+  RetentionOccurrence,
+  RetentionReasonClass,
+} from './retentionControls.js';
 export { WorkerAnalytics, getWorkerAnalytics, resetWorkerAnalytics } from './workerAnalytics.js';
 export { SemanticNarrativeGenerator, getSemanticNarrativeManager } from './semanticNarrative.js';
 export {

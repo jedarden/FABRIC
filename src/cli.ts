@@ -371,6 +371,10 @@ program
 
     try {
       const store = getStore();
+      const { RetentionControlStore, defaultRetentionControlDirectory } = await import('./retentionControls.js');
+      const retentionControlStore = new RetentionControlStore({
+        directory: defaultRetentionControlDirectory(resolved.path),
+      });
       const server = createWebServer({
         port,
         logPath: resolved.path,
@@ -380,6 +384,7 @@ program
         maxEventCount,
         deduplicator,
         cliFilter: Object.keys(filter).length > 0 ? filter : undefined,
+        retentionControlStore,
       });
 
       // Setup log tailing
@@ -716,23 +721,29 @@ program
   .command('prune')
   .description('Prune old NEEDLE log files (archive + delete)')
   .option('--source <path>', 'Log directory to prune (default: ~/.needle/logs)')
-  .option('--archive-after <days>', 'Archive files older than N days', '3')
-  .option('--archive-retain <days>', 'Delete archives older than N days', '30')
-  .option('--max-age <days>', 'Delete files older than N days regardless', '7')
+  .option('--archive-after <days>', 'Archive files older than N days (omitted: indefinite)')
+  .option('--archive-retain <days>', 'Delete archives older than N days (omitted: indefinite)')
+  .option('--max-age <days>', 'Delete files older than N days regardless (omitted: indefinite)')
   .option('--dry-run', 'Report what would happen without making changes')
   .action(async (options) => {
     const { pruneLogs, formatPruneResult } = await import('./logPruner.js');
+    const { RetentionControlStore, defaultRetentionControlDirectory } = await import('./retentionControls.js');
     const logDir = options.source
       ? (options.source.startsWith('~') ? options.source.replace('~', HOME) : options.source)
       : `${HOME}/.needle/logs`;
 
-    const result = pruneLogs({
+    const pruneOptions: Parameters<typeof pruneLogs>[0] = {
       logDir,
-      archiveAfterDays: parseInt(options.archiveAfter, 10) || 3,
-      archiveRetentionDays: parseInt(options.archiveRetain, 10) || 30,
-      maxAgeDays: parseInt(options.maxAge, 10) || 7,
+      controlStore: new RetentionControlStore({
+        directory: defaultRetentionControlDirectory(logDir),
+      }),
       dryRun: !!options.dryRun,
-    });
+    };
+    if (options.archiveAfter !== undefined) pruneOptions.archiveAfterDays = parseInt(options.archiveAfter, 10);
+    if (options.archiveRetain !== undefined) pruneOptions.archiveRetentionDays = parseInt(options.archiveRetain, 10);
+    if (options.maxAge !== undefined) pruneOptions.maxAgeDays = parseInt(options.maxAge, 10);
+
+    const result = pruneLogs(pruneOptions);
 
     console.log(formatPruneResult(result, !!options.dryRun));
   });

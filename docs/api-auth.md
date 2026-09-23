@@ -70,6 +70,9 @@ Every `POST` route registered by `src/web/server.ts`:
 | `POST /api/events` | Ingests a NEEDLE event into the store |
 | `POST /api/events/batch` | Ingests a batch of NEEDLE events |
 | `POST /api/retention/prune` | Archives/deletes NEEDLE log files (unless `dryRun: true`) |
+| `POST /api/retention/controls` | Appends a pre-signed tombstone or legal-hold record |
+| `POST /api/retention/tombstones` | Appends a pre-signed occurrence tombstone |
+| `POST /api/retention/holds` | Appends a pre-signed legal-hold record |
 | `POST /api/theme` | Persists the dashboard theme to `~/.fabric/theme.json` |
 | `POST /api/memory/capture` | Records a memory snapshot (profiler state) |
 | `POST /api/memory/baseline` | Sets the memory baseline used by `GET /api/memory/diff` |
@@ -80,6 +83,13 @@ Every `POST` route registered by `src/web/server.ts`:
 
 All other routes are `GET` and intentionally open. The memory endpoints are
 also documented, with their auth, in `docs/heap-snapshot-retention.md`.
+
+Retention controls are append-only and stored outside the raw log directory.
+They must already be signed by the tenant authority; the raw `POST /api/events`
+ingestion path cannot create or delete a control record. FABRIC intentionally
+does not expose a `DELETE` event or control route. An active legal hold wins
+over both a tombstone and any age-based prune policy. With no explicit prune
+window, retention is indefinite.
 
 ## Verifying
 

@@ -441,9 +441,9 @@ fabric prune [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--source <path>` | `~/.needle/logs/` | Log directory to prune |
-| `--archive-after <days>` | `3` | Archive files older than N days |
-| `--archive-retain <days>` | `30` | Delete archives older than N days |
-| `--max-age <days>` | `7` | Delete files older than N days regardless |
+| `--archive-after <days>` | indefinite | Archive files older than N days |
+| `--archive-retain <days>` | indefinite | Delete archives older than N days |
+| `--max-age <days>` | indefinite | Delete files older than N days regardless |
 | `--dry-run` | — | Report what would happen without making changes |
 
 ### Archive Structure

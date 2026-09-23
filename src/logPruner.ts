@@ -5,11 +5,15 @@
  * dated tarballs and deletes expired archives. Emits mend.logs_pruned
  * events visible to FABRIC's directory tailer.
  *
- * Policy:
+ * Policy (when explicitly configured):
  *   1. Files older than archiveAfterDays → archived into ~/.needle/logs/archive/YYYY-MM-DD.tar.gz
  *   2. Original files deleted after successful archive
  *   3. Archive tarballs older than archiveRetentionDays → deleted
  *   4. Safety net: files older than maxAgeDays deleted directly (even if not archived)
+ *
+ * With no explicit age policy, retention is indefinite. Signed occurrence
+ * tombstones may still authorize removal, but an active legal hold always
+ * overrides both age policy and tombstones.
  *
  * The pruner skips the archive/ directory and fabric-mend events file.
  */
@@ -17,6 +21,23 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import {
+  decideOccurrenceDeletion,
+  isOccurrenceHeld,
+  occurrenceIdForPath,
+  type RetentionControlRecord,
+  type RetentionControlStore,
+} from './retentionControls.js';
+
+/** An omitted policy is intentionally indefinite. Deletion requires an
+ * explicit policy window or a signed occurrence tombstone. */
+export const INDEFINITE_RETENTION_DAYS = Infinity;
+
+export const DEFAULT_RETENTION_POLICY = {
+  archiveAfterDays: INDEFINITE_RETENTION_DAYS,
+  maxAgeDays: INDEFINITE_RETENTION_DAYS,
+  archiveRetentionDays: INDEFINITE_RETENTION_DAYS,
+} as const;
 
 export interface RetentionState {
   fileCount: number;
@@ -35,20 +56,29 @@ export interface PruneOptions {
   /** Directory to prune (default: ~/.needle/logs) */
   logDir: string;
 
-  /** Archive files older than this many days (default: 3) */
-  archiveAfterDays: number;
+  /** Archive files older than this many days; omitted means indefinite. */
+  archiveAfterDays?: number;
 
-  /** Delete archive tarballs older than this many days (default: 30) */
-  archiveRetentionDays: number;
+  /** Delete archive tarballs older than this many days; omitted means indefinite. */
+  archiveRetentionDays?: number;
 
-  /** Hard maximum age — files older than this are deleted even if not archived (default: 7) */
-  maxAgeDays: number;
+  /** Hard maximum age; omitted means indefinite. */
+  maxAgeDays?: number;
 
   /** Dry run — report what would happen without making changes */
   dryRun: boolean;
 
   /** File patterns to skip (matched against basename) */
   skipPatterns: string[];
+
+  /** Signed controls read from the control plane, never from raw events. */
+  controls?: readonly RetentionControlRecord[];
+
+  /** Optional append-only control store outside logDir. */
+  controlStore?: RetentionControlStore;
+
+  /** Tenant whose occurrence controls apply to this log directory. */
+  tenantId?: string;
 }
 
 export interface PruneResult {
@@ -283,6 +313,10 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
+function formatRetentionDays(days: number): string {
+  return Number.isFinite(days) ? `${days}d` : 'indefinite';
+}
+
 /**
  * Run the log pruning policy.
  *
@@ -291,13 +325,29 @@ function formatBytes(bytes: number): string {
 export function pruneLogs(options: Partial<PruneOptions> = {}): PruneResult {
   const startMs = Date.now();
   const logDir = options.logDir || defaultLogDir();
-  const archiveAfterDays = options.archiveAfterDays ?? 3;
-  const archiveRetentionDays = options.archiveRetentionDays ?? 30;
-  const maxAgeDays = options.maxAgeDays ?? 7;
+  const archiveAfterDays = options.archiveAfterDays ?? DEFAULT_RETENTION_POLICY.archiveAfterDays;
+  const archiveRetentionDays = options.archiveRetentionDays ?? DEFAULT_RETENTION_POLICY.archiveRetentionDays;
+  const maxAgeDays = options.maxAgeDays ?? DEFAULT_RETENTION_POLICY.maxAgeDays;
   const dryRun = options.dryRun ?? false;
   const skipPatterns = options.skipPatterns ?? [];
   const skipRegexes = skipPatterns.map(p => new RegExp(p));
   const policy = { archiveAfterDays, maxAgeDays, archiveRetentionDays };
+  const controls = [
+    ...(options.controls ?? []),
+    ...(options.controlStore?.records() ?? []),
+  ];
+  const explicitAgePolicy = options.archiveAfterDays !== undefined ||
+    options.archiveRetentionDays !== undefined || options.maxAgeDays !== undefined;
+
+  const occurrenceFor = (filePath: string) => ({
+    occurrenceId: occurrenceIdForPath(filePath),
+    tenantId: options.tenantId,
+    path: filePath,
+  });
+
+  const held = (filePath: string): boolean => isOccurrenceHeld(occurrenceFor(filePath), controls);
+  const tombstoned = (filePath: string): boolean =>
+    decideOccurrenceDeletion(occurrenceFor(filePath), controls).allowed;
 
   if (!fs.existsSync(logDir)) {
     return {
@@ -332,7 +382,9 @@ export function pruneLogs(options: Partial<PruneOptions> = {}): PruneResult {
   // Phase 1: Archive old files (older than archiveAfterDays)
   const archiveCutoff = daysAgo(archiveAfterDays);
   const fullPaths = logFiles.map(f => path.join(logDir, f));
-  const groups = groupByDate(fullPaths, archiveCutoff);
+  const groups = explicitAgePolicy
+    ? groupByDate(fullPaths.filter(filePath => !held(filePath)), archiveCutoff)
+    : new Map<string, FileGroup>();
 
   for (const [date, group] of groups) {
     // Skip files that are also past maxAgeDays — they'll be deleted in phase 3
@@ -363,7 +415,7 @@ export function pruneLogs(options: Partial<PruneOptions> = {}): PruneResult {
   for (const archive of existingArchives) {
     const archivePath = path.join(archiveDir, archive);
     const stat = fs.statSync(archivePath);
-    if (stat.mtimeMs < archiveAgeCutoff) {
+    if (explicitAgePolicy && !held(archivePath) && stat.mtimeMs < archiveAgeCutoff) {
       if (!dryRun) fs.unlinkSync(archivePath);
       archivesDeleted++;
       bytesFreed += stat.size;
@@ -380,7 +432,9 @@ export function pruneLogs(options: Partial<PruneOptions> = {}): PruneResult {
     try {
       const stat = fs.statSync(fullPath);
       if (!stat.isFile()) continue;
-      if (stat.mtimeMs < maxCutoff) {
+      const controlDelete = tombstoned(fullPath);
+      const ageDelete = explicitAgePolicy && !held(fullPath) && stat.mtimeMs < maxCutoff;
+      if (controlDelete || ageDelete) {
         if (!dryRun) fs.unlinkSync(fullPath);
         filesDeleted++;
         bytesFreed += stat.size;
@@ -440,7 +494,7 @@ export function formatPruneResult(result: PruneResult, dryRun: boolean): string 
     `    Current files: ${rs.fileCount} (${formatBytes(rs.totalSizeBytes)})`,
     `    Oldest file:   ${rs.oldestFileAgeDays.toFixed(1)} days`,
     `    Archives:      ${rs.archiveCount} (${formatBytes(rs.archiveSizeBytes)})`,
-    `    Policy:        archive>${rs.policy.archiveAfterDays}d, max>${rs.policy.maxAgeDays}d, retain>${rs.policy.archiveRetentionDays}d`,
+    `    Policy:        archive>${formatRetentionDays(rs.policy.archiveAfterDays)}, max>${formatRetentionDays(rs.policy.maxAgeDays)}, retain>${formatRetentionDays(rs.policy.archiveRetentionDays)}`,
   ];
   return lines.join('\n');
 }

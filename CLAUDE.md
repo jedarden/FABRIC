@@ -76,15 +76,21 @@ fabric:
 
 ## Log Retention Policy
 
-FABRIC automatically manages NEEDLE log file retention to prevent unbounded growth.
+FABRIC can manage NEEDLE log file retention when an explicit prune window is supplied.
+Omitted retention windows are indefinite.
 
 ### Policy
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `archiveAfterDays` | 3 | Files older than this are archived to `~/.needle/logs/archive/` |
-| `maxAgeDays` | 7 | Files older than this are deleted (even if not archived) |
-| `archiveRetentionDays` | 30 | Archive tarballs older than this are deleted |
+| `archiveAfterDays` | indefinite | Files older than this are archived when explicitly configured |
+| `maxAgeDays` | indefinite | Files older than this are deleted when explicitly configured |
+| `archiveRetentionDays` | indefinite | Archive tarballs older than this are deleted when explicitly configured |
+
+Signed occurrence tombstones and legal holds are stored in the separate
+`~/.needle/retention-controls/` control plane. An active legal hold overrides
+both tombstones and prune windows. The raw event ingestion endpoint has no
+delete route and cannot write retention controls.
 
 ### Automatic Execution
 
