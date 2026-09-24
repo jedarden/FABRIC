@@ -27,8 +27,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer as createNetServer } from 'node:net';
+import type { Option } from 'commander';
 import { createWebServer, type WebServer } from './web/server.js';
 import { InMemoryEventStore } from './store.js';
+import { parseMaxEventsOption, parseSnapshotIntervalOption, program } from './cli.js';
 
 const DIST_CLI = join(process.cwd(), 'dist', 'cli.js');
 
@@ -228,6 +230,86 @@ describe('fabric web --help (option parsing surface)', () => {
     // 30-minute default
     expect(help).toContain('--snapshot-interval <minutes>');
     expect(help).toContain('Interval between heap snapshots (default: 30)');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Option-definition contract (commander source of truth)
+// ─────────────────────────────────────────────────────────────────────
+// The `web --help` assertions above pin the rendered surface; these pin the
+// same contract one layer down — the Option definitions themselves — so a
+// help-rendering change (re-wrapping, reordering, wording churn around the
+// documented defaults) cannot mask a drift in what is actually registered.
+// Importing ./cli.js is side-effect-free: program.parse() only runs when the
+// module itself is the node entry point.
+
+describe('operational option definitions (commander source of truth)', () => {
+  const webCmd = program.commands.find((c) => c.name() === 'web');
+
+  function webOption(name: string): Option | undefined {
+    return webCmd?.options.find((opt) => opt.name() === name);
+  }
+
+  it('registers the web command', () => {
+    expect(webCmd).toBeDefined();
+  });
+
+  it('pins --max-events presence, value shape, and the documented no-cap default', () => {
+    const opt = webOption('max-events');
+    expect(opt?.flags).toBe('--max-events <number>');
+    expect(opt?.description).toContain('no cap');
+    // "no cap" is a real absence: no implicit commander defaultValue may
+    // creep in behind the parse-side fallback.
+    expect(opt?.defaultValue).toBeUndefined();
+  });
+
+  it('pins --heap-snapshots as a boolean flag with the production-only default', () => {
+    const opt = webOption('heap-snapshots');
+    // Boolean flag: presence only, no value shape.
+    expect(opt?.flags).toBe('--heap-snapshots');
+    expect(opt?.description).toContain('production');
+    expect(opt?.defaultValue).toBeUndefined();
+  });
+
+  it('pins --snapshot-interval presence, value shape, and the 30-minute default', () => {
+    const opt = webOption('snapshot-interval');
+    expect(opt?.flags).toBe('--snapshot-interval <minutes>');
+    expect(opt?.description).toContain('default: 30');
+    // The commander-level default: a bare `web` invocation starts from '30'
+    // before the parse-side fallback ever runs.
+    expect(opt?.defaultValue).toBe('30');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Parse-side fallbacks (web action seam)
+// ─────────────────────────────────────────────────────────────────────
+// The web action resolves both options through these exported helpers; the
+// spawned-process suites above verify their end-to-end propagation, these
+// pin the fallback semantics at the seam itself.
+
+describe('web action parse-side fallbacks', () => {
+  it('--max-events: absent resolves to undefined (unset)', () => {
+    expect(parseMaxEventsOption(undefined)).toBeUndefined();
+    expect(parseMaxEventsOption('')).toBeUndefined();
+  });
+
+  it('--max-events: non-numeric resolves to undefined, never NaN', () => {
+    expect(parseMaxEventsOption('abc')).toBeUndefined();
+  });
+
+  it('--max-events: numeric values parse through', () => {
+    expect(parseMaxEventsOption('100')).toBe(100);
+    expect(parseMaxEventsOption('5abc')).toBe(5);
+  });
+
+  it('--snapshot-interval: absent or non-numeric falls back to the documented 30', () => {
+    expect(parseSnapshotIntervalOption(undefined)).toBe(30);
+    expect(parseSnapshotIntervalOption('abc')).toBe(30);
+  });
+
+  it('--snapshot-interval: a provided interval parses through', () => {
+    expect(parseSnapshotIntervalOption('5')).toBe(5);
   });
 });
 

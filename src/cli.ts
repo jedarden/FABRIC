@@ -21,6 +21,7 @@ import { createConfigCommand } from './config.js';
 import { applyAllWorkerLimits } from './workerMemoryLimiter.js';
 import * as fs from 'fs';
 import * as net from 'net';
+import { pathToFileURL } from 'node:url';
 import type { LogLevel, EventFilter, LogEvent } from './types.js';
 
 type ResolvedSource = { kind: 'directory'; path: string } | { kind: 'file'; path: string };
@@ -134,7 +135,26 @@ async function startOtlpHttpListener(
   });
 }
 
-const program = new Command();
+/**
+ * Parse-side fallback for `--max-events`: absent or non-numeric values
+ * resolve to undefined (no cap) rather than NaN, so the liveness guard and
+ * the /api/health overload comparison treat them as unset.
+ */
+export function parseMaxEventsOption(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * Parse-side fallback for `--snapshot-interval`: absent or non-numeric
+ * values fall back to the documented 30-minute default.
+ */
+export function parseSnapshotIntervalOption(raw: string | undefined): number {
+  return parseInt(raw ?? '', 10) || 30;
+}
+
+export const program = new Command();
 
 program
   .name('fabric')
@@ -328,7 +348,7 @@ program
     const port = parseInt(options.port, 10) || 3000;
     const authToken = options.authToken || process.env.FABRIC_AUTH_TOKEN;
     const otlpHttpAddr: string | undefined = options.otlpHttp;
-    const maxEventCount = options.maxEvents ? parseInt(options.maxEvents, 10) : undefined;
+    const maxEventCount = parseMaxEventsOption(options.maxEvents);
 
     // Validate level filter if provided
     const validLevels = ['debug', 'info', 'warn', 'error'];
@@ -352,7 +372,7 @@ program
 
     // Enable heap snapshots for leak detection in production (NODE_ENV=production)
     const enableHeapSnapshots = options.heapSnapshots ?? (process.env.NODE_ENV === 'production');
-    const snapshotIntervalMinutes = parseInt(options.snapshotInterval, 10) || 30;
+    const snapshotIntervalMinutes = parseSnapshotIntervalOption(options.snapshotInterval);
 
     // Initialize memory profiler for leak detection
     const { getMemoryProfiler } = await import('./memoryProfiler.js');
@@ -907,4 +927,12 @@ program
 // Add config command
 program.addCommand(createConfigCommand());
 
-program.parse();
+// Only parse when executed directly (`node dist/cli.js ...`). Importing this
+// module (tests, tooling) must get the assembled program without parsing —
+// otherwise commander would consume the importer's process.argv.
+const invokedAsMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedAsMain) {
+  program.parse();
+}
