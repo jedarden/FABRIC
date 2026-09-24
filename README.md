@@ -41,13 +41,23 @@ Live browser dashboard at `localhost:3000`:
 # Install from npm
 npm install -g @needle/fabric
 
-# Or clone and build from source
-git clone https://github.com/jedarden/FABRIC
+# Or clone and build from source (canonical repository — see below)
+git clone https://git.ardenone.com/jedarden/FABRIC.git
 cd FABRIC
 npm install
 npm run build
 npm run build:web
 ```
+
+### Source repository
+
+The canonical repository is **Forgejo**: `https://git.ardenone.com/jedarden/FABRIC`. Clone from it, and push to it — `origin` points there, and all development commits land on `main`.
+
+The GitHub repository (`github.com/jedarden/FABRIC`) is a **read-only mirror**, kept in sync automatically by Forgejo's server-side push mirror on every commit. The canonical workflow:
+
+- Clone and push against Forgejo (`origin`); never set up client-side dual-push to GitHub — the mirror is updated server-side.
+- Never force-push (`--force` / `--force-with-lease`). If Forgejo and the mirror ever diverge, reconcile with a merge commit.
+- GitHub issues/PRs are accepted as a convenience, but changes themselves are made on Forgejo.
 
 ### Verifying the installation (smoke test)
 
