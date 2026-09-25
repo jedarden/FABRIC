@@ -457,5 +457,16 @@ describe('Memory & Heap Snapshot API', () => {
       const response = await fetchApi('/api/memory/stats');
       expect(response.status).toBe(200);
     });
+
+    it('should allow the baseline-diff GET without a token', async () => {
+      const response = await fetchApi('/api/memory/diff');
+
+      // Reachable unauthenticated: it answers as the endpoint itself
+      // (200 with a baseline set, 404 without) — never as the auth
+      // middleware (401/403).
+      expect([401, 403]).not.toContain(response.status);
+      const data = await response.json() as any;
+      expect(typeof data).toBe('object');
+    });
   });
 });
