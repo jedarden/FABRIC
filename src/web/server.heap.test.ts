@@ -17,6 +17,7 @@ import { createWebServer, WebServer } from './server.js';
 import { InMemoryEventStore } from '../store.js';
 import { resetCrossReferenceManager } from '../crossReferenceManager.js';
 import { getMemoryProfiler } from '../memoryProfiler.js';
+import type { MemorySnapshot } from '../memoryProfiler.js';
 
 // Isolate from the live service's snapshot directory BEFORE the server (and
 // its memoryProfiler/heapDiff imports) resolves it — same pattern as
@@ -262,8 +263,9 @@ describe('Memory & Heap Snapshot API', () => {
   describe('GET /api/memory/snapshots (in-memory)', () => {
     it('should return at most the last 10 snapshots by default', async () => {
       const profiler = getMemoryProfiler();
+      const captured: MemorySnapshot[] = [];
       for (let i = 0; i < 12; i++) {
-        profiler.capture();
+        captured.push(profiler.capture());
       }
 
       const response = await fetchApi('/api/memory/snapshots');
@@ -272,6 +274,16 @@ describe('Memory & Heap Snapshot API', () => {
       const data = await response.json() as any;
       expect(data.count).toBe(10);
       expect(data.snapshots).toHaveLength(10);
+      // Capped at 10 AND drawn from the tail: exactly the 10 most recent
+      // captures, in capture order (slice(-10) semantics).
+      expect(data.snapshots).toEqual(
+        captured.slice(-10).map(s => ({
+          timestamp: s.timestamp,
+          rss: s.rss,
+          heapUsed: s.heapUsed,
+          heapTotal: s.heapTotal,
+        })),
+      );
       for (const snapshot of data.snapshots) {
         expect(snapshot.timestamp).toBeGreaterThan(0);
         expect(snapshot.rss).toBeGreaterThan(0);
