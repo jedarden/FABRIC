@@ -1747,38 +1747,25 @@ describe('Web Server Auth', () => {
 
   // docs/api-auth.md: the policy is uniform — EVERY POST route requires the
   // Bearer token when one is configured, and a single global middleware is
-  // the only enforcement point. This sweep pins that invariant across the
-  // full route inventory (event ingestion, retention, theme, all four memory
-  // mutation routes, cost alerts, and the OTLP/HTTP receiver), so a route
-  // added without auth protection — or a middleware-ordering regression —
-  // fails here. Rejections happen before handlers run, so the sweep has no
-  // side effects; the per-route describes above and in server.heap.test.ts
-  // cover the valid-token happy paths.
+  // the only enforcement point. The route list below is DERIVED from the
+  // live router (getPostRoutePatterns), so a route added without auth
+  // protection — or a middleware-ordering regression — fails here without
+  // anyone remembering to extend a hand-maintained inventory. The full
+  // contract (both HTTP listeners, valid-token pass-through, rejection
+  // before parsing and before side effects) is pinned in
+  // server.authRoutes.test.ts; the per-route describes above and in
+  // server.heap.test.ts cover the valid-token happy paths.
   describe('Auth policy consistency: every POST endpoint is gated', () => {
     let store: InMemoryEventStore;
     let server: WebServer;
     let port: number;
     const AUTH_TOKEN = 'test-sweep-token-24680';
 
-    // Every POST route in src/web/server.ts. Keep in sync when adding one.
-    const postRoutes: Array<[string, string | undefined]> = [
-      ['/api/events', JSON.stringify(validEvent)],
-      ['/api/events/batch', JSON.stringify([validEvent])],
-      ['/api/retention/prune', JSON.stringify({ dryRun: true })],
-      ['/api/retention/controls', JSON.stringify({})],
-      ['/api/retention/tombstones', JSON.stringify({})],
-      ['/api/retention/holds', JSON.stringify({})],
-      ['/api/theme', JSON.stringify({ theme: 'light' })],
-      ['/api/memory/capture', undefined],
-      ['/api/memory/baseline', undefined],
-      ['/api/memory/heap-snapshot', JSON.stringify({ trigger: 'manual' })],
-      ['/api/memory/trend/save', undefined],
-      ['/api/cost/alerts/test-alert/acknowledge', undefined],
-      // OTLP/HTTP receiver shares the app and its auth middleware.
-      ['/v1/logs', undefined],
-      ['/v1/traces', undefined],
-      ['/v1/metrics', undefined],
-    ];
+    // Every registered POST route, discovered from the app's own router
+    // (including the mounted OTLP/HTTP receiver). :param placeholders are
+    // substituted with a concrete segment.
+    const postRoutes = (): string[] =>
+      server.getPostRoutePatterns().map((pattern) => pattern.replace(/:[^/]+/g, 'test-alert'));
 
     beforeEach(async () => {
       store = new InMemoryEventStore();
@@ -1819,8 +1806,10 @@ describe('Web Server Auth', () => {
       });
 
     it('should reject every POST route without an Authorization header with 401', async () => {
-      for (const [route, body] of postRoutes) {
-        const response = await post(route, body);
+      for (const route of postRoutes()) {
+        // Deliberately malformed body: rejection must precede JSON parsing
+        // (a rejection after parsing would surface as 400, not 401).
+        const response = await post(route, '{not-json');
         expect(response.status, `${route} must reject unauthenticated POSTs`).toBe(401);
         const data = await response.json() as any;
         expect(data.error, route).toBe('Missing authorization');
@@ -1828,8 +1817,8 @@ describe('Web Server Auth', () => {
     });
 
     it('should reject every POST route with a wrong token with 403', async () => {
-      for (const [route, body] of postRoutes) {
-        const response = await post(route, body, 'wrong-token');
+      for (const route of postRoutes()) {
+        const response = await post(route, '{not-json', 'wrong-token');
         expect(response.status, `${route} must reject invalid tokens`).toBe(403);
       }
     });

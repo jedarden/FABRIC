@@ -137,6 +137,14 @@ export interface WebServer extends EventEmitter {
   getPort(): number;
   /** The actual bound OTLP/HTTP listener port once listening; undefined when no OTLP listener was configured. */
   getOtlpPort(): number | undefined;
+  /**
+   * Route discovery for the auth contract tests (docs/api-auth.md): every
+   * path pattern the app registers a POST handler for, including routes
+   * contributed by mounted sub-routers (the OTLP/HTTP receiver). Sorted and
+   * de-duplicated. Patterns keep their `:param` placeholders. Empty before
+   * start() has registered the routes.
+   */
+  getPostRoutePatterns(): string[];
   broadcast(event: LogEvent): void;
   broadcastCollisions(): void;
   recordEvent(host?: string, workerId?: string): void;
@@ -177,8 +185,10 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // route can opt out and none needs its own auth check. Missing header →
     // 401; wrong token → 403. Rejection happens before body parsing and
     // before any handler runs, so an unauthorized request has no side
-    // effects. New POST routes are protected automatically; the sweep test
-    // in server.test.ts ("Auth policy consistency") pins this invariant.
+    // effects. New POST routes are protected automatically; the
+    // route-discovery contract tests in server.authRoutes.test.ts sweep
+    // getPostRoutePatterns() — the live router inventory — on both listeners
+    // to pin this invariant.
     const authMiddleware = (req: Request, res: Response, next: () => void) => {
       if (!authToken) {
         next();
@@ -2198,6 +2208,40 @@ export function createWebServer(options: WebServerOptions): WebServer {
     return typeof addr === 'object' && addr !== null ? addr.port : undefined;
   }
 
+  // ── Route discovery ───────────────────────────────────────────
+  // Walks the live Express router stack so POST auth coverage can be
+  // derived from what is actually registered instead of a hand-maintained
+  // inventory (docs/api-auth.md). Recurses into mounted sub-routers — the
+  // OTLP/HTTP receiver is a Router mounted on the app, and its /v1/* routes
+  // must be swept like any native app.post. The typings' ILayer/IRoute don't
+  // expose the runtime `route.methods` / `handle.stack` shapes, hence the
+  // structural cast.
+  function getPostRoutePatterns(): string[] {
+    const patterns = new Set<string>();
+    const walk = (stack: unknown[], prefix: string): void => {
+      for (const entry of stack) {
+        const layer = entry as {
+          route?: { path?: unknown; methods?: Record<string, unknown> };
+          handle?: { stack?: unknown };
+          path?: unknown;
+        };
+        if (layer.route && typeof layer.route.path === 'string' && layer.route.methods?.post) {
+          patterns.add(prefix + layer.route.path);
+          continue;
+        }
+        // Mounted sub-router: its layers carry paths relative to the mount point.
+        const subStack = layer.handle?.stack;
+        if (Array.isArray(subStack)) {
+          const mountPath = typeof layer.path === 'string' && layer.path !== '/' ? layer.path.replace(/\/+$/, '') : '';
+          walk(subStack as unknown[], prefix + mountPath);
+        }
+      }
+    };
+    const stack = (app as { router?: { stack?: unknown } } | undefined)?.router?.stack;
+    if (Array.isArray(stack)) walk(stack, '');
+    return [...patterns].sort();
+  }
+
   function broadcast(event: LogEvent): void {
     // Serialize once, reuse for all clients (reduces JSON.stringify overhead)
     const message = JSON.stringify({ type: 'event', data: event });
@@ -2258,7 +2302,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     metrics.tailerFilesWatched = count;
   }
 
-  return Object.assign(emitter, { start, stop, getPort, getOtlpPort, broadcast, broadcastCollisions, recordEvent, setTailerFilesWatched });
+  return Object.assign(emitter, { start, stop, getPort, getOtlpPort, getPostRoutePatterns, broadcast, broadcastCollisions, recordEvent, setTailerFilesWatched });
 }
 
 export default createWebServer;

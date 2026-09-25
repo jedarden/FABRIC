@@ -33,11 +33,23 @@ Consequences of this design:
   an unauthorized request has no side effects: no heap snapshot written, no
   theme persisted, no events ingested, no baseline captured.
 
-The invariant is pinned by the sweep test in `src/web/server.test.ts`
-(`describe('Auth policy consistency: every POST endpoint is gated')`), which
-asserts every route in the inventory below answers `401` without a header and
-`403` with a wrong token. If you add a POST route, add it to that sweep's
-`postRoutes` list.
+The invariant is pinned by route-discovery contract tests, not a
+hand-maintained list: `WebServer.getPostRoutePatterns()` (in
+`src/web/server.ts`) walks the live Express router — including the mounted
+OTLP receiver — and the suites sweep exactly that inventory.
+`src/web/server.authRoutes.test.ts` is the full contract: every discovered
+POST route on **both HTTP listeners**, for 401 (no header), 403 (wrong
+token), valid-token pass-through, **unset-token mode** (no token configured
+→ every POST passes on both listeners and handlers really run), and
+**malformed bodies** (a valid token + malformed JSON dies at the parse layer
+— `400` from body-parser on `/api/*`, the receiver's decode failure on
+`/v1/*` — with no handler side effect), plus rejection-before-side-effects
+(no events or OTLP records ingested, no theme persisted, no prune attempt
+recorded). The `Auth policy consistency` describe in `src/web/server.test.ts`
+re-sweeps the discovered routes for 401/403. If you add a POST route it is
+covered automatically the moment it is registered — there is no list to
+update. The table below is descriptive documentation only; the router is the
+source of truth.
 
 ## Token configuration
 
@@ -61,9 +73,10 @@ substitutes).
 | Header is not `Bearer <token>`, or token is wrong | `403` | `{"error": "Forbidden", "message": "Invalid or expired token"}` |
 | Valid token | — | Request proceeds to the handler |
 
-## Route inventory (complete, as of 2026-09)
+## Route inventory (descriptive, as of 2026-09)
 
-Every `POST` route registered by `src/web/server.ts`:
+Every `POST` route `src/web/server.ts` currently registers — derived from
+`getPostRoutePatterns()`, so the test sweeps track this table automatically:
 
 | Route | What it mutates |
 |---|---|
