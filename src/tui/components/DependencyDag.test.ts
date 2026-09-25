@@ -266,8 +266,21 @@ describe('DependencyDag', () => {
       expect(mockBoxInstance.key).toHaveBeenCalledWith(['s'], expect.any(Function));
     });
 
-    it('should bind refresh key', () => {
-      expect(mockBoxInstance.key).toHaveBeenCalledWith(['R'], expect.any(Function));
+    it('should bind force refresh to C-r (r/R deconfliction)', () => {
+      expect(mockBoxInstance.key).toHaveBeenCalledWith(['C-r'], expect.any(Function));
+    });
+
+    it('should not bind R for refresh (R is the global replay toggle)', () => {
+      const refreshBindings = mockBoxInstance.key.mock.calls.filter(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('C-r')
+      );
+      expect(refreshBindings).toHaveLength(1);
+      expect(refreshBindings[0]?.[0]).toEqual(['C-r']);
+      expect(
+        mockBoxInstance.key.mock.calls.some(
+          (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('R')
+        )
+      ).toBe(false);
     });
 
     it('should bind filter key', () => {
@@ -347,15 +360,15 @@ describe('DependencyDag', () => {
   });
 
   describe('refresh', () => {
-    it('should force refresh on R key', () => {
-      const RCall = mockBoxInstance.key.mock.calls.find(
-        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('R')
+    it('should force refresh on C-r key', () => {
+      const crCall = mockBoxInstance.key.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('C-r')
       );
-      const RHandler = RCall?.[1];
+      const crHandler = crCall?.[1];
 
-      if (RHandler) {
+      if (crHandler) {
         vi.clearAllMocks();
-        RHandler();
+        crHandler();
         expect(refreshDependencyGraph).toHaveBeenCalled();
       }
     });
@@ -627,7 +640,7 @@ describe('DependencyDag', () => {
       expect(content).toContain('[r]eady');
       expect(content).toContain('[s]tats');
       expect(content).toContain('[f]ilter');
-      expect(content).toContain('[R]efresh');
+      expect(content).toContain('[C-r] refresh');
     });
   });
 

@@ -389,6 +389,42 @@ describe('TUI Regression Tests', () => {
       expect(() => rHandler()).not.toThrow();
     });
 
+    it('should bind session replay to R without claiming lowercase r', () => {
+      const mockScreen = getMockScreen();
+
+      const replayCalls = mockScreen.key.mock.calls.filter(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('R')
+      );
+
+      // Regression guard for the r/R deconfliction: replay used to register
+      // ['R', 'r'], which made the refresh key switch views instead of
+      // re-rendering. Replay must be bound to uppercase R alone.
+      expect(replayCalls.length).toBeGreaterThan(0);
+      replayCalls.forEach((call: unknown[]) => {
+        expect(call[0]).toEqual(['R']);
+      });
+    });
+
+    it('should keep lowercase r a pure re-render with no view switch', () => {
+      const mockScreen = getMockScreen();
+
+      const rCall = mockScreen.key.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes('r')
+      );
+      expect(rCall).toBeDefined();
+      expect(rCall?.[0]).toEqual(['r']);
+
+      const rHandler = rCall?.[1] as () => void;
+      rHandler();
+
+      // The re-render fired...
+      expect(mockScreen.render).toHaveBeenCalled();
+      // ...and no view switch happened: the replay header must never appear.
+      const boxMock = (blessed.box as Mock)();
+      const contentCalls = boxMock.setContent.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(contentCalls).not.toContain(' FABRIC - Session Replay');
+    });
+
     it('should return to default from any view with escape', () => {
       const mockScreen = getMockScreen();
 

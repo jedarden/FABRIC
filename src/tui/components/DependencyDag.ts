@@ -107,7 +107,9 @@ export class DependencyDag {
       this.render();
     });
 
-    this.box.key(['R'], () => {
+    // C-r, not R: the global replay toggle owns R (blessed fires every
+    // matching handler, so an R binding here would also switch to replay)
+    this.box.key(['C-r'], () => {
       this.forceRefresh();
     });
 
@@ -296,7 +298,7 @@ export class DependencyDag {
     lines.push('');
     lines.push('{gray-fg}─────────────────────────────────────────────────────{/}');
     lines.push(
-      '{gray-fg}[t]ree [b]lockers [r]eady [s]tats [f]ilter [R]efresh [↑/↓] navigate{/}'
+      '{gray-fg}[t]ree [b]lockers [r]eady [s]tats [f]ilter [C-r] refresh [↑/↓] navigate{/}'
     );
 
     this.box.setContent(lines.join('\n'));

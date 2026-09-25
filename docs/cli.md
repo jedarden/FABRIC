@@ -101,7 +101,8 @@ only inside specific views (transcript search), not globally.
 | `Escape` | In order: close the worker detail overlay if it is open; otherwise return to the default view (no-op if already there). It never dismisses the help overlay, and when it closes the command palette the global step-back fires as well (see the palette section) |
 | `Ctrl+K` | Command palette (see below) |
 | `Ctrl+T` | Toggle dark / light theme |
-| `r` | Re-render the screen — note this key also toggles session replay (see *Binding conflicts*) |
+| `r` | Re-render the screen — view-local `r` actions (refresh, reset, ready tasks) fire alongside it |
+| `R` | Toggle the session replay view — uppercase only; `r` always re-renders and never switches views |
 
 #### Views — entry and exit
 
@@ -110,7 +111,7 @@ only inside specific views (transcript search), not globally.
 | Default (worker grid + activity stream) | `FABRIC - Worker Activity Monitor` | startup, `Escape`, or toggling a view off |
 | File heatmap | `FABRIC - File Heatmap` | `H` or `h` |
 | Task dependency DAG | `FABRIC - Task Dependency DAG` | `D` or `d` |
-| Session replay | `FABRIC - Session Replay` | `R` or `r` |
+| Session replay | `FABRIC - Session Replay` | `R` |
 | Error groups | `FABRIC - Error Groups` | `E` or `e` |
 | Session digest | `FABRIC - Session Digest` | `G` or `g` |
 | Collision alerts | `FABRIC - Collision Alerts` | `C` or `c` |
@@ -175,7 +176,7 @@ collisions · `a` show anomalies only · `↑`/`↓`/`j`/`k` navigate · `g`/`G`
 jump to first/last.
 
 **Task dependency DAG** (`D`): `t` tree · `b` top blockers · `r` ready tasks
-· `s` statistics · `f` cycle filters · `R` force refresh · `↑`/`↓`/`j`/`k`
+· `s` statistics · `f` cycle filters · `C-r` force refresh · `↑`/`↓`/`j`/`k`
 navigate · `g`/`G` jump to first/last.
 
 **Session replay** (`R`): `Space` / `p` play/pause · `←`/`→` (or `b`/`n`) step
@@ -183,8 +184,8 @@ backward/forward · `↑`/`↓` speed down/up · `1`–`5` set 0.5x / 1x / 2x / 
 10x · `Home`/`End` jump to start/end · `e`/`E`/`m` export (file / base64 /
 Markdown) · `i` import. The footer shows the live transport state
 (`READY`/`PLAYING`/`PAUSED`/`ENDED`) and current speed. Use `Home` to rewind
-while staying in the view — `r` resets but also toggles the view closed
-(*Binding conflicts*).
+while staying in the view — `r` resets playback without leaving the view
+(the global re-render fires alongside the reset).
 
 **Error groups** (`E`): `↑`/`↓`/`j`/`k` navigate groups · `Enter` / `Space`
 expand / collapse detail.
@@ -241,7 +242,7 @@ both fire — the local action runs and the global toggle switches views:
 
 | Key | Global effect | Local effect (focused view) |
 |-----|---------------|------------------------------|
-| `r` | Toggles session replay (plus a legacy re-render) | Reset in replay, ready-tasks sub-view in DAG, refresh in git, narrative, analytics, xref, budget — the local action runs, then the view switches to replay |
+| `r` | Re-renders the screen (never switches views) | Reset in replay, ready-tasks sub-view in DAG, refresh in git, narrative, analytics, xref, budget — every local `r` action is itself a refresh, so the combined effect is a data refresh plus a re-render |
 | `g` / `G` | Toggles session digest | Jump to top/bottom in worker grid, heatmap, DAG |
 | `h` | Enters the heatmap | Move comparison selection in worker analytics |
 | `d` | Enters the DAG | Diff sub-view in git integration |
@@ -250,11 +251,15 @@ both fire — the local action runs and the global toggle switches views:
 | `p` | Pin selected worker (default view only) | Pause activity stream, play/pause replay, PR preview in git |
 | `N` | Enters semantic narrative | Previous search match in transcript |
 
-In practice: `r` always ends in (or leaves) the replay view, and `d`/`e`/`c`/`h`
-inside the git/digest/transcript/heatmap/analytics views will also switch you
-away — expect the view change and re-enter with the view's uppercase key.
-Keys unique to a single view (`s`, `a`, `f`, `t`, `b`, `n`, `l`, `m`, `x`,
-`i`, `1`–`5`, `Home`/`End`) have no global collision.
+The `r` / `R` pair is deconflicted: `r` re-renders, `R` toggles session replay,
+and the DAG view's force refresh moved from `R` to `C-r` so it cannot collide
+with the replay toggle.
+
+In practice: `d`/`e`/`c`/`h` inside the git/digest/transcript/heatmap/analytics
+views will also switch you away — expect the view change and re-enter with the
+view's uppercase key. Keys unique to a single view (`s`, `a`, `f`, `t`, `b`,
+`n`, `l`, `m`, `x`, `i`, `1`–`5`, `Home`/`End`) and the deconflicted
+`r` / `R` / `C-r` bindings have no view-switching collision.
 
 ---
 

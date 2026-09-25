@@ -523,8 +523,9 @@ export class FabricTuiApp {
       this.toggleDagView();
     });
 
-    // Toggle session replay view
-    this.screen.key(['R', 'r'], () => {
+    // Toggle session replay view (R only — lowercase r is the refresh key;
+    // binding r here too made r toggle replay instead of re-rendering)
+    this.screen.key(['R'], () => {
       this.toggleReplayView();
     });
 
@@ -1278,7 +1279,7 @@ export class FabricTuiApp {
 
       // Update header
       this.headerBox.setContent(' FABRIC - Task Dependency DAG');
-      this.footerBox.setContent(' [t]ree [b]lockers [r]eady [s]tats [f]ilter [R]efresh [Esc] Back  [q] Quit');
+      this.footerBox.setContent(' [t]ree [b]lockers [r]eady [s]tats [f]ilter [C-r] refresh [Esc] Back  [q] Quit');
     } else if (mode === 'replay') {
       // Hide other panels
       this.workerGrid.getElement().hide();
@@ -1959,7 +1960,7 @@ Dependency DAG View:
   r       - Ready tasks
   s       - Statistics
   f       - Cycle filters
-  R       - Force refresh
+  C-r     - Force refresh
   Esc     - Return to default view
 
 Session Replay:
