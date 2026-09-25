@@ -325,6 +325,23 @@ describe('generateAiDigestNarrative', () => {
     expect((result as { ok: false; reason: string }).reason).toContain('timed out');
   });
 
+  test('falls back when the deadline fires while the request is in flight', async () => {
+    // A real timeout rejects a promise that was still pending, not one that
+    // failed synchronously — model that shape: the client holds the request
+    // open, then the SDK deadline ends it.
+    const hangsThenTimesOut: DigestAiClient = {
+      messages: {
+        create: () =>
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Anthropic.APIConnectionTimeoutError()), 20);
+          }),
+      },
+    };
+    const result = await generateAiDigestNarrative(makeDigest(), CONFIG, hangsThenTimesOut);
+    expect(result).toMatchObject({ ok: false });
+    expect((result as { ok: false; reason: string }).reason).toContain('Request timed out');
+  });
+
   test('falls back on a typed API error after retries are exhausted', async () => {
     const rateLimited: DigestAiClient = {
       messages: {
@@ -363,6 +380,37 @@ describe('generateAiDigestNarrative', () => {
       }),
     );
     expect(result).toMatchObject({ ok: true, narrative: 'Part one.\n\nPart two.' });
+  });
+
+  describe('malformed provider responses', () => {
+    /**
+     * The SDK does not validate response bodies — whatever JSON the provider
+     * sends back is handed to us as-is (verified against @anthropic-ai/sdk
+     * 0.126.0). The fallback contract requires every malformed shape to
+     * degrade to { ok: false } without throwing.
+     */
+    function staticClient(body: unknown): DigestAiClient {
+      return {
+        messages: {
+          create: (async () => body) as DigestAiClient['messages']['create'],
+        },
+      };
+    }
+
+    const malformedBodies: Array<[string, unknown]> = [
+      ['content missing entirely', { stop_reason: 'end_turn' }],
+      ['content null', { content: null, stop_reason: 'end_turn' }],
+      ['content a bare string instead of blocks', { content: 'just a string', stop_reason: 'end_turn' }],
+      ['content holding null blocks', { content: [null, undefined], stop_reason: 'end_turn' }],
+      ['text blocks with whitespace-only text', { content: [{ type: 'text', text: '   ' }], stop_reason: 'end_turn' }],
+    ];
+
+    for (const [label, body] of malformedBodies) {
+      test(`falls back without throwing on ${label}`, async () => {
+        const result = await generateAiDigestNarrative(makeDigest(), CONFIG, staticClient(body));
+        expect(result).toEqual({ ok: false, reason: 'response contained no text content' });
+      });
+    }
   });
 });
 

@@ -621,8 +621,11 @@ describe('digest command (integration)', () => {
      * CLI reaches it through ANTHROPIC_BASE_URL (the same override the
      * unreachable-provider test uses), so the --ai success path is exercised
      * end-to-end — CLI → SDK → provider → output — without a real key.
+     *
+     * `respondWith` replaces the canned well-formed body, for providers that
+     * answer 200 with a malformed message.
      */
-    function startFakeMessagesApi(): Promise<{
+    function startFakeMessagesApi(respondWith?: unknown): Promise<{
       baseUrl: string;
       requests: Array<{ path: string | undefined; body: any; apiKey: string | undefined }>;
       close: () => Promise<void>;
@@ -637,7 +640,7 @@ describe('digest command (integration)', () => {
             try { body = JSON.parse(raw); } catch { /* non-JSON body: recorded as null */ }
             requests.push({ path: req.url, body, apiKey: req.headers['x-api-key'] as string | undefined });
             res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(JSON.stringify({
+            res.end(JSON.stringify(respondWith ?? {
               id: 'msg_digest_integration_test',
               type: 'message',
               role: 'assistant',
@@ -670,6 +673,32 @@ describe('digest command (integration)', () => {
           resolve({
             baseUrl: `http://127.0.0.1:${port}`,
             requests,
+            close: () =>
+              new Promise<void>((res) => {
+                server.closeAllConnections?.();
+                server.close(() => res());
+              }),
+          });
+        });
+      });
+    }
+
+    /**
+     * Provider that accepts the Messages-API request and then goes silent:
+     * the socket stays open with no response, so only the SDK's request
+     * deadline (FABRIC_DIGEST_AI_TIMEOUT_MS) can end the attempt.
+     */
+    function startHangingMessagesApi(): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+      return new Promise((resolve) => {
+        const server = createServer(() => {
+          // Deliberately never respond — the timeout path needs a request
+          // that connects but never completes.
+        });
+        server.listen(0, '127.0.0.1', () => {
+          const addr = server.address();
+          const port = addr && typeof addr === 'object' ? addr.port : 0;
+          resolve({
+            baseUrl: `http://127.0.0.1:${port}`,
             close: () =>
               new Promise<void>((res) => {
                 server.closeAllConnections?.();
@@ -734,6 +763,69 @@ describe('digest command (integration)', () => {
         // The CLI flag wins over the env default in the actual provider request.
         expect(fake.requests).toHaveLength(1);
         expect(fake.requests[0].body?.model).toBe('cli-override-model');
+      } finally {
+        await fake.close();
+      }
+    }, 30000);
+
+    test('--ai with a provider that hangs until the timeout degrades to the deterministic digest and exits 0', async () => {
+      const hanging = await startHangingMessagesApi();
+      try {
+        // 1s request deadline: a real in-flight request, not a fast failure,
+        // while keeping the test quick. maxRetries=0 so retries cannot eat
+        // the deadline before the timeout fires.
+        const { status, stdout, stderr } = await runDigestWithEnvAsync('--ai', envWithoutAiKeys({
+          FABRIC_DIGEST_AI_API_KEY: 'sk-ant-integration-test-sentinel',
+          FABRIC_DIGEST_AI_MAX_RETRIES: '0',
+          FABRIC_DIGEST_AI_TIMEOUT_MS: '1000',
+          ANTHROPIC_BASE_URL: hanging.baseUrl,
+        }));
+
+        expect(status).toBe(0);
+        expect(stderr).toMatch(/AI digest failed/);
+        expect(stderr).toMatch(/timed?\s*out/i);
+        expect(stderr).toContain('using deterministic digest');
+
+        // The deterministic digest is intact; no AI section was appended.
+        expect(stdout).toContain('# Session Digest');
+        expect(stdout).toContain('## Summary');
+        expect(stdout).not.toContain('## AI Narrative');
+      } finally {
+        await hanging.close();
+      }
+    }, 30000);
+
+    test('--ai with a malformed provider response (200 without content) degrades to the deterministic digest and exits 0', async () => {
+      // The harshest malformed shape: HTTP 200 with a message whose `content`
+      // field is absent. The SDK performs no body validation and hands it
+      // through untouched, so the narrative extractor itself must refuse it
+      // gracefully instead of throwing (a throw would hit the CLI's outer
+      // catch and exit 1 with the digest lost).
+      const fake = await startFakeMessagesApi({
+        id: 'msg_malformed_no_content',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-opus-5',
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      });
+      try {
+        const { status, stdout, stderr } = await runDigestWithEnvAsync('--ai', envWithoutAiKeys({
+          FABRIC_DIGEST_AI_API_KEY: 'sk-ant-integration-test-sentinel',
+          FABRIC_DIGEST_AI_MAX_RETRIES: '0',
+          FABRIC_DIGEST_AI_TIMEOUT_MS: '15000',
+          ANTHROPIC_BASE_URL: fake.baseUrl,
+        }));
+
+        expect(status).toBe(0);
+        expect(stderr).toMatch(/AI digest failed/);
+        expect(stderr).toContain('response contained no text content');
+        expect(stderr).toContain('using deterministic digest');
+
+        expect(stdout).toContain('# Session Digest');
+        expect(stdout).toContain('## Summary');
+        expect(stdout).not.toContain('## AI Narrative');
       } finally {
         await fake.close();
       }

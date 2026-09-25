@@ -237,12 +237,18 @@ export async function generateAiDigestNarrative(
     return { ok: false, reason: `provider request failed: ${message}` };
   }
 
-  if (response.stop_reason === 'refusal') {
+  if (response?.stop_reason === 'refusal') {
     return { ok: false, reason: 'model declined the request (stop_reason=refusal)' };
   }
 
-  const narrative = response.content
-    .filter((b) => b.type === 'text' && typeof b.text === 'string')
+  // Malformed responses are a documented fallback trigger. The SDK does not
+  // validate response bodies, so `content` can arrive missing, null, a
+  // non-array, or holding non-object blocks — every such shape must degrade
+  // exactly like an empty response, never throw.
+  const blocks = Array.isArray(response?.content) ? response.content : [];
+
+  const narrative = blocks
+    .filter((b) => !!b && b.type === 'text' && typeof b.text === 'string')
     .map((b) => b.text!.trim())
     .filter((t) => t.length > 0)
     .join('\n\n')
