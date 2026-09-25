@@ -10,7 +10,7 @@
  * Bearer token) and invalid-input behavior.
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, beforeAll, vi, type MockInstance } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createWebServer, WebServer } from './server.js';
@@ -468,5 +468,125 @@ describe('Memory & Heap Snapshot API', () => {
       const data = await response.json() as any;
       expect(typeof data).toBe('object');
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Memory-pressure capture (server monitor seam)
+// ─────────────────────────────────────────────────────────────────────
+// server.ts's memory check (every 30s) turns process.memoryUsage() against
+// v8's heap_size_limit into a heap-usage percent and, via
+// shouldCapturePressureSnapshot, writes a 'memory-pressure' heap snapshot.
+// The policy function itself is unit-tested in memoryProfiler.test.ts; what
+// only exists at this seam is the wiring (monitor → policy →
+// writeHeapSnapshot with the 'memory-pressure' trigger) and the
+// lastPressureSnapshot bookkeeping that enforces the documented 30-minute
+// cooldown across checks. Verified here with fake timers and a spied write
+// so no test allocates real heap pressure or pays a real stop-the-world
+// snapshot write — same seam pattern as the liveness-guard tests in
+// cliOperationalOptions.test.ts.
+
+describe('Memory-pressure capture (server monitor seam)', () => {
+  let store: InMemoryEventStore;
+  let server: WebServer;
+  let writeSpy: MockInstance;
+  let memoryUsageSpy: MockInstance;
+  let consoleErrorSpy: MockInstance;
+  let consoleWarnSpy: MockInstance;
+  let realUsage: NodeJS.MemoryUsage;
+  let heapLimitBytes: number;
+
+  beforeAll(async () => {
+    // 90% of the REAL heap_size_limit sits above the documented 80%
+    // threshold whatever v8 reports for this worker, so the monitor sees
+    // sustained pressure without anyone allocating it.
+    realUsage = process.memoryUsage();
+    heapLimitBytes = (await import('v8')).getHeapStatistics().heap_size_limit;
+  });
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+
+    const profiler = getMemoryProfiler();
+    memoryUsageSpy = vi.spyOn(process, 'memoryUsage').mockImplementation(() => ({
+      ...realUsage,
+      heapUsed: Math.floor(heapLimitBytes * 0.9),
+    }));
+    writeSpy = vi.spyOn(profiler, 'writeHeapSnapshot')
+      .mockResolvedValue(path.join(SNAPSHOT_DIR, 'spied-pressure.heapsnapshot'));
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    store = new InMemoryEventStore();
+    resetCrossReferenceManager();
+    server = createWebServer({
+      port: 0,
+      logPath: '/tmp/test-logs',
+      store,
+      authToken: 'pressure-seam-token',
+    });
+    await new Promise<void>((resolve) => {
+      server.on('start', () => resolve());
+      server.start();
+    });
+  });
+
+  afterEach(async () => {
+    // Real timers before stop(): the monitor's interval handle lives in the
+    // fake clock (server.stop() does not clear it), and dropping the fake
+    // clock is what guarantees no further checks fire into a stopped server.
+    vi.useRealTimers();
+    await new Promise<void>((resolve) => {
+      server.on('stop', () => resolve());
+      server.stop();
+    });
+    getMemoryProfiler().writeSnapshots = false;
+    memoryUsageSpy.mockRestore();
+    writeSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    store.clear();
+    resetCrossReferenceManager();
+  });
+
+  it('captures a memory-pressure snapshot on the first pressured check', async () => {
+    getMemoryProfiler().writeSnapshots = true;
+
+    await vi.advanceTimersByTimeAsync(30_000); // first memory check
+
+    // The trigger name comes from this seam, not the policy: the monitor is
+    // the only caller that names captures 'memory-pressure' on its own.
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(writeSpy).toHaveBeenCalledWith('memory-pressure');
+  });
+
+  it('holds the documented 30-minute cooldown while pressure persists, then re-captures', async () => {
+    // docs/heap-snapshot-retention.md: "at most one capture per 30-minute
+    // cooldown while pressure persists". Every check below reports 90% heap
+    // usage, so the cooldown — not a pressure gap — is what gates writes.
+    // lastPressureSnapshot is bookkept here in server.ts, so this seam is
+    // the only place the end-to-end spacing is observable.
+    getMemoryProfiler().writeSnapshots = true;
+
+    await vi.advanceTimersByTimeAsync(30_000); // capture #1
+    // 29 more minutes of pressured checks (58 of them): all inside the
+    // cooldown, so exactly one write so far.
+    await vi.advanceTimersByTimeAsync(29 * 60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    // Crossing 30 minutes since the last capture re-arms the policy.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(writeSpy).toHaveBeenNthCalledWith(2, 'memory-pressure');
+  });
+
+  it('never captures under sustained pressure when snapshot writing is disabled', async () => {
+    // The monitor's enablement gate (CLI --heap-snapshots / NODE_ENV=production).
+    // Test-process default is false; pressure alone must not write.
+    getMemoryProfiler().writeSnapshots = false;
+
+    await vi.advanceTimersByTimeAsync(31 * 60_000);
+    expect(writeSpy).not.toHaveBeenCalled();
   });
 });

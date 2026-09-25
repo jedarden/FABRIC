@@ -371,7 +371,11 @@ class MemoryProfiler {
       this.capture();
 
       if (this.writeSnapshots && this.autoSnapshot) {
-        this.writeHeapSnapshot()
+        // Name the trigger explicitly: the function default is 'manual', and
+        // an unnamed call made every scheduled capture indistinguishable on
+        // disk from a user-initiated one (docs/heap-snapshot-retention.md,
+        // Trigger Reasons: periodic = scheduled automatic capture).
+        this.writeHeapSnapshot('periodic')
           .then(filepath => console.error(`Heap snapshot written: ${filepath}`))
           .catch(err => console.error(`Failed to write heap snapshot: ${err}`));
       }

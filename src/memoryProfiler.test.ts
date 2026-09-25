@@ -5,8 +5,8 @@
  * retention policy, and file reading capabilities.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
-import { getMemoryProfiler, shouldCapturePressureSnapshot, MEMORY_PRESSURE_THRESHOLD_PERCENT, PRESSURE_SNAPSHOT_COOLDOWN_MS, MAX_DISK_SNAPSHOTS, MAX_SNAPSHOT_AGE_DAYS, DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES, MAX_IN_MEMORY_SNAPSHOTS, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi, type MockInstance } from 'vitest';
+import { getMemoryProfiler, shouldCapturePressureSnapshot, isSnapshotTrigger, SNAPSHOT_TRIGGERS, MEMORY_PRESSURE_THRESHOLD_PERCENT, PRESSURE_SNAPSHOT_COOLDOWN_MS, MAX_DISK_SNAPSHOTS, MAX_SNAPSHOT_AGE_DAYS, DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES, MAX_IN_MEMORY_SNAPSHOTS, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
 import { getHeapSnapshots, compareSnapshots } from './heapDiff.js';
 import { existsSync, unlinkSync, readdirSync, readFileSync, mkdirSync, rmSync, writeFileSync, truncateSync, utimesSync } from 'fs';
 import { join } from 'path';
@@ -571,6 +571,213 @@ describe('Memory Profiler', () => {
       const now = Date.now();
       expect(shouldCapturePressureSnapshot(85, true, now - (PRESSURE_SNAPSHOT_COOLDOWN_MS - 1), now)).toBe(false);
       expect(shouldCapturePressureSnapshot(85, true, now - PRESSURE_SNAPSHOT_COOLDOWN_MS, now)).toBe(true);
+    });
+  });
+
+  describe('Trigger Validation', () => {
+    it('should pin the documented trigger set', () => {
+      // docs/heap-snapshot-retention.md, Trigger Reasons table: exactly these
+      // five reasons. The set guards the HTTP boundary (server.ts rejects any
+      // other value with 400) and the type; adding or removing an entry is a
+      // documented-surface change and must be deliberate.
+      expect([...SNAPSHOT_TRIGGERS]).toEqual(['manual', 'memory-pressure', 'periodic', 'oom-risk', 'test']);
+    });
+
+    it('should accept every documented trigger', () => {
+      for (const trigger of SNAPSHOT_TRIGGERS) {
+        expect(isSnapshotTrigger(trigger)).toBe(true);
+      }
+    });
+
+    it('should reject values that must never reach a snapshot filename', () => {
+      // The trigger is interpolated into `heap-{ts}-{trigger}.heapsnapshot`,
+      // so arbitrary values are rejected rather than passed through raw — the
+      // unit-level counterpart of the 400 responses pinned in
+      // server.heap.test.ts. Covers path syntax in both separator styles,
+      // dot segments, empty/whitespace strings, case variants (matching is
+      // exact, not normalized), underscore near-misses of a documented
+      // trigger, and non-string inputs.
+      const rejects: unknown[] = [
+        '../../evil', 'a/b', 'a\\b', '..', '.', '', '  ',
+        'MANUAL', 'Manual', 'memory_pressure', 'manual ',
+        123, null, undefined, true, {}, ['manual'],
+      ];
+      for (const value of rejects) {
+        expect(isSnapshotTrigger(value), `expected ${JSON.stringify(value)} to be rejected`).toBe(false);
+      }
+    });
+
+    it('should keep every documented trigger filename-safe and round-trippable', () => {
+      // If a trigger ever joins the documented set carrying path syntax,
+      // isSnapshotTrigger alone would stop protecting the on-disk name, so
+      // the invariant is pinned on the set itself: each entry is plain
+      // lowercase kebab-case (no separators, no dot segments) and survives
+      // the filename round-trip getHeapSnapshots() performs when it parses
+      // the trigger back out of `heap-{ts}-{trigger}.heapsnapshot`.
+      for (const trigger of SNAPSHOT_TRIGGERS) {
+        expect(trigger).toMatch(/^[a-z][a-z0-9-]*$/);
+
+        const filename = `heap-1700000000000-${trigger}.heapsnapshot`;
+        const parsed = filename.match(/heap-\d+-(.+)\.heapsnapshot$/);
+        expect(parsed?.[1]).toBe(trigger);
+      }
+    });
+  });
+
+  describe('Periodic Capture Scheduler', () => {
+    // startPeriodicCapture() is the only scheduler behind the `periodic`
+    // trigger (docs/heap-snapshot-retention.md: "Scheduled automatic capture,
+    // every 30 minutes, configurable via --snapshot-interval"). The CLI
+    // contract tests pin the flag plumbing; these pin the scheduler's own
+    // behavior with fake timers so no test pays the real 30-minute cadence
+    // or a real heap-sized write.
+    const saved = { writeSnapshots: false, autoSnapshot: false, intervalMs: 30 * 60 * 1000 };
+
+    beforeEach(() => {
+      saved.writeSnapshots = profiler.writeSnapshots;
+      saved.autoSnapshot = profiler.autoSnapshot;
+      saved.intervalMs = profiler.snapshotIntervalMs;
+      profiler.writeSnapshots = false;
+      profiler.autoSnapshot = false;
+      profiler.snapshotIntervalMs = 1_000; // 1s ticks for test speed
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      profiler.stopPeriodicCapture();
+      vi.useRealTimers();
+      profiler.writeSnapshots = saved.writeSnapshots;
+      profiler.autoSnapshot = saved.autoSnapshot;
+      profiler.snapshotIntervalMs = saved.intervalMs;
+    });
+
+    function captureSpyStarting(): MockInstance {
+      // Counted via a spy rather than getRecent().length: the in-memory
+      // array is usually already saturated at MAX_IN_MEMORY_SNAPSHOTS by
+      // the time these tests run (earlier captures in this file), so the
+      // length no longer moves when a new capture evicts the oldest entry.
+      return vi.spyOn(profiler, 'capture');
+    }
+
+    it('captures in memory on the configured interval, not more often', async () => {
+      const captureSpy = captureSpyStarting();
+      profiler.startPeriodicCapture();
+
+      // One millisecond before the first tick: nothing yet — the interval
+      // respects the configured snapshotIntervalMs rather than capturing
+      // immediately.
+      await vi.advanceTimersByTimeAsync(999);
+      expect(captureSpy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(captureSpy).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(captureSpy).toHaveBeenCalledTimes(2);
+      captureSpy.mockRestore();
+    });
+
+    it('ignores a redundant start so ticks stay single', async () => {
+      // A second startPeriodicCapture() while running must not stack a second
+      // interval: two stacked intervals would double-capture on every tick.
+      const captureSpy = captureSpyStarting();
+      profiler.startPeriodicCapture();
+      profiler.startPeriodicCapture();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(captureSpy).toHaveBeenCalledTimes(2); // two ticks × one capture, not four
+      captureSpy.mockRestore();
+    });
+
+    it('delegates each tick to writeHeapSnapshot only when fully enabled', async () => {
+      const writeSpy = vi.spyOn(profiler, 'writeHeapSnapshot')
+        .mockResolvedValue(join(SNAPSHOT_DIR, 'spied-periodic.heapsnapshot'));
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        // Both flags required (cli.ts sets writeSnapshots on --heap-snapshots
+        // and autoSnapshot only in production): with both set, every tick
+        // writes, and it names the 'periodic' trigger explicitly — a no-arg
+        // call would resolve writeHeapSnapshot's 'manual' default and make
+        // every scheduled capture indistinguishable on disk from a
+        // user-initiated one.
+        profiler.writeSnapshots = true;
+        profiler.autoSnapshot = true;
+        profiler.startPeriodicCapture();
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(writeSpy).toHaveBeenCalledTimes(2);
+        expect(writeSpy).toHaveBeenCalledWith('periodic');
+      } finally {
+        writeSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    });
+
+    it('names scheduled captures with the periodic trigger on disk', { timeout: 60_000 }, async () => {
+      // Unmocked write: the scheduler's no-arg call resolves writeHeapSnapshot's
+      // default trigger, and that default is what names the file — the only
+      // place 'periodic' becomes observable (docs/heap-snapshot-retention.md,
+      // Trigger Reasons: "periodic — Scheduled automatic capture").
+      profiler.writeSnapshots = true;
+      profiler.autoSnapshot = true;
+      profiler.startPeriodicCapture();
+
+      // The write serializes the full heap asynchronously after the tick;
+      // keep advancing the fake clock while polling for the file. The first
+      // tick lands at 1s; each advanceTimersByTimeAsync flushes the pending
+      // microtasks, which drives the write's dynamic v8 import and its
+      // (blocking, seconds-long) serialization to completion. The scheduler
+      // is stopped the moment the file appears so the poll cannot write a
+      // cascade of further real snapshots.
+      let filepath: string | undefined;
+      for (let i = 0; i < 200 && filepath === undefined; i++) {
+        await vi.advanceTimersByTimeAsync(100);
+        filepath = readdirSync(SNAPSHOT_DIR).find(f => /^heap-\d+-periodic\.heapsnapshot$/.test(f));
+      }
+      profiler.stopPeriodicCapture();
+
+      expect(filepath).toBeDefined();
+    });
+
+    it('never writes snapshots unless both enablement flags are set', async () => {
+      const writeSpy = vi.spyOn(profiler, 'writeHeapSnapshot')
+        .mockResolvedValue(join(SNAPSHOT_DIR, 'spied-periodic.heapsnapshot'));
+
+      try {
+        profiler.startPeriodicCapture();
+
+        // Default: both flags off — memory sampling continues, no disk writes.
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(writeSpy).not.toHaveBeenCalled();
+
+        // writeSnapshots alone is not enough; the autoSnapshot gate must hold
+        // independently or an explicit --heap-snapshots outside production
+        // would silently start writing on the timer.
+        profiler.writeSnapshots = true;
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(writeSpy).not.toHaveBeenCalled();
+      } finally {
+        writeSpy.mockRestore();
+      }
+    });
+
+    it('stops the cadence on stopPeriodicCapture and tolerates a redundant stop', async () => {
+      const captureSpy = captureSpyStarting();
+      profiler.startPeriodicCapture();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(captureSpy).toHaveBeenCalledTimes(1);
+
+      // Both the real stop and a redundant one must be silent no-ops that
+      // leave no timer behind: nothing further captures after either.
+      profiler.stopPeriodicCapture();
+      profiler.stopPeriodicCapture();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(captureSpy).toHaveBeenCalledTimes(1);
+      captureSpy.mockRestore();
     });
   });
 
