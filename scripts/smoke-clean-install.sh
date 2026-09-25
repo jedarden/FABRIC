@@ -15,11 +15,19 @@
 #                                npm install <tarball> into an empty project
 #                                + bin link + --version/--help contract
 #   Phase 5  runtime smoke       clean environment (sandboxed $HOME, no ~/.needle):
-#                                fabric logs  single-file parse, directory hot-add,
-#                                             graceful SIGINT
-#                                fabric web   /api/health, SPA assets served from
-#                                             the installed package, graceful SIGINT
-#                                fabric tui   pty startup, graceful SIGINT
+#                                fabric logs   single-file parse, directory hot-add,
+#                                              graceful SIGINT
+#                                fabric web    /api/health, SPA assets served from
+#                                              the installed package, graceful SIGINT
+#                                fabric tui    pty startup, graceful SIGINT
+#                                fabric replay pty startup on fixture logs, graceful
+#                                              SIGINT
+#                                fabric prune  dry-run reports without touching, real
+#                                              run archives an aged fixture file
+#                                fabric digest directory + single-file --output runs
+#                                              over fixture logs
+#                                fabric config show / theme set + readback / invalid
+#                                              theme rejected / presets list / clear
 #
 # The runtime phase sandboxes $HOME. That is required for "clean environment"
 # fidelity and also keeps the cgroup worker-limiter (applyAllWorkerLimits reads
@@ -301,7 +309,134 @@ if ! grep -a -q 'FABRIC' "$OUT_D"; then fail "fabric tui: no UI rendered in pty 
 if grep -a -q 'Failed to start TUI' "$OUT_D"; then fail "fabric tui: reported startup failure"; fi
 pass "fabric tui: pty startup + graceful SIGINT exit"
 
+# 5e. fabric replay — pty startup on the fixture logs + graceful SIGINT.
+# Like tui, replay is a blessed screen; blessed's own SIGINT handler exits 0.
+OUT_E="$OUT_DIR/replay.log"
+REPLAY_CMD="env HOME=$SMOKE_HOME NO_COLOR=1 timeout --preserve-status -s INT 6 node $FABRIC_CLI replay --source $LOGS"
+set +e
+script -qec "$REPLAY_CMD" /dev/null >"$OUT_E" 2>&1
+REPLAY_RC=$?
+set -e
+if [ "$REPLAY_RC" -ne 0 ]; then
+  tail -40 "$OUT_E" >&2 || true
+  fail "fabric replay exited $REPLAY_RC (expected 0 after SIGINT)"
+fi
+if ! grep -a -q 'Session Replay' "$OUT_E"; then
+  fail "fabric replay: no session-replay banner in pty output"
+fi
+if grep -a -q 'Failed to start replay' "$OUT_E"; then fail "fabric replay: reported startup failure"; fi
+pass "fabric replay: pty startup over fixture logs + graceful SIGINT exit"
+
+# 5f. fabric prune — dry-run reports without touching, real run archives an
+# aged fixture copy. Everything happens under $WORK (scratch dir + sandboxed
+# HOME), never the real ~/.needle/logs.
+PRUNE_LOGS="$WORK/prune-logs"
+mkdir -p "$PRUNE_LOGS"
+cp "$LOGS"/*.jsonl "$PRUNE_LOGS/"
+printf '{"timestamp":"2026-04-22T10:00:00.000Z","event_type":"worker.started","worker_id":"smoke-aged-1111aaaa","session_id":"smoke-1","sequence":1,"data":{}}\n' \
+  > "$PRUNE_LOGS/smoke-aged-1111aaaa.jsonl"
+touch -d '30 days ago' "$PRUNE_LOGS/smoke-aged-1111aaaa.jsonl"
+
+OUT_F="$OUT_DIR/prune-dry.log"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" prune \
+      --dry-run --archive-after 7 --source "$PRUNE_LOGS" >"$OUT_F" 2>&1; then
+  tail -20 "$OUT_F" >&2 || true
+  fail "fabric prune (dry run) exited nonzero"
+fi
+grep -q '\[DRY RUN\] Prune complete' "$OUT_F" || fail "fabric prune: dry run did not report a dry-run pass"
+grep -q 'Files archived: 1' "$OUT_F" || fail "fabric prune: dry run did not report the aged file as archivable"
+[ -f "$PRUNE_LOGS/smoke-aged-1111aaaa.jsonl" ] || fail "fabric prune: dry run deleted the aged file"
+pass "fabric prune (dry run): aged fixture reported, nothing touched"
+
+OUT_F2="$OUT_DIR/prune-run.log"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" prune \
+      --archive-after 7 --source "$PRUNE_LOGS" >"$OUT_F2" 2>&1; then
+  tail -20 "$OUT_F2" >&2 || true
+  fail "fabric prune (real run) exited nonzero"
+fi
+grep -q 'Archives created: 1' "$OUT_F2" || fail "fabric prune: real run created no archive"
+grep -q 'Files archived: 1' "$OUT_F2" || fail "fabric prune: real run archived nothing"
+[ ! -f "$PRUNE_LOGS/smoke-aged-1111aaaa.jsonl" ] || fail "fabric prune: real run left the aged file in place"
+ARCHIVE_TAR="$(ls "$PRUNE_LOGS"/archive/*.tar.gz 2>/dev/null | head -1)"
+if [ -z "$ARCHIVE_TAR" ] || [ ! -f "$ARCHIVE_TAR" ]; then fail "fabric prune: no tarball in the archive directory"; fi
+tar -tzf "$ARCHIVE_TAR" | grep -q 'smoke-aged-1111aaaa.jsonl' || fail "fabric prune: archive tarball missing the aged file"
+pass "fabric prune (real run): aged fixture archived into $(basename "$ARCHIVE_TAR")"
+
+# 5g. fabric digest — deterministic digest over the fixture logs, both the
+# directory source (stdout) and the single-file --output workflow.
+OUT_G="$OUT_DIR/digest-dir.log"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" digest \
+      --source "$LOGS" >"$OUT_G" 2>&1; then
+  tail -20 "$OUT_G" >&2 || true
+  fail "fabric digest (directory source) exited nonzero"
+fi
+grep -q '# Session Digest' "$OUT_G" || fail "fabric digest: markdown header missing"
+grep -q '## Summary' "$OUT_G" || fail "fabric digest: summary section missing"
+grep -q 'alpha-d6288428' "$OUT_G" || fail "fabric digest: fixture workers missing from digest"
+grep -Eq '^Loaded [1-9][0-9]* events' "$OUT_G" || fail "fabric digest: no events loaded from fixtures"
+pass "fabric digest (directory): events loaded, markdown digest on stdout"
+
+OUT_G2="$OUT_DIR/digest-file.md"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" digest \
+      -f "$LOGS/alpha-d6288428.jsonl" --output "$OUT_G2" >"$OUT_DIR/digest-file.log" 2>&1; then
+  tail -20 "$OUT_DIR/digest-file.log" >&2 || true
+  fail "fabric digest (single file, --output) exited nonzero"
+fi
+[ -s "$OUT_G2" ] || fail "fabric digest: --output produced no file"
+grep -q '# Session Digest' "$OUT_G2" || fail "fabric digest: --output file lacks the markdown header"
+grep -q 'Digest written to' "$OUT_DIR/digest-file.log" || fail "fabric digest: --output path not reported"
+pass "fabric digest (--output): digest written to $OUT_G2"
+
+# 5h. fabric config — show, theme set + readback (persisted under the sandboxed
+# HOME), invalid-theme contract, presets listing, clear.
+OUT_H="$OUT_DIR/config-show.log"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" config >"$OUT_H" 2>&1; then
+  tail -20 "$OUT_H" >&2 || true
+  fail "fabric config (show) exited nonzero"
+fi
+grep -q 'FABRIC Configuration' "$OUT_H" || fail "fabric config: header missing"
+grep -q 'Current: dark' "$OUT_H" || fail "fabric config: default theme not reported"
+pass "fabric config: configuration rendered with the default theme"
+
+THEME_SET_LOG="$OUT_DIR/config-theme-set.log"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" config theme light >"$THEME_SET_LOG" 2>&1; then
+  tail -20 "$THEME_SET_LOG" >&2 || true
+  fail "fabric config theme light exited nonzero"
+fi
+grep -q 'Theme set to: light' "$THEME_SET_LOG" || fail "fabric config theme: set confirmation missing"
+grep -q '"theme": "light"' "$SMOKE_HOME/.fabric/theme.json" || fail "fabric config theme: light not persisted to ~/.fabric/theme.json"
+THEME_GET_LOG="$OUT_DIR/config-theme-get.log"
+env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" config theme >"$THEME_GET_LOG" 2>&1
+grep -q 'Current theme: light' "$THEME_GET_LOG" || fail "fabric config theme: readback did not return the persisted theme"
+pass "fabric config theme: set, persisted, and read back"
+
+THEME_BAD_LOG="$OUT_DIR/config-theme-invalid.log"
+set +e
+env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" config theme mauve >"$THEME_BAD_LOG" 2>&1
+THEME_BAD_RC=$?
+set -e
+if [ "$THEME_BAD_RC" -eq 0 ]; then fail "fabric config theme: invalid theme accepted"; fi
+grep -q "Invalid theme: mauve" "$THEME_BAD_LOG" || fail "fabric config theme: invalid theme error not reported"
+pass "fabric config theme: invalid theme rejected with exit $THEME_BAD_RC"
+
+PRESETS_LOG="$OUT_DIR/config-presets.log"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" config presets list >"$PRESETS_LOG" 2>&1; then
+  tail -20 "$PRESETS_LOG" >&2 || true
+  fail "fabric config presets list exited nonzero"
+fi
+grep -q 'Focus Presets' "$PRESETS_LOG" || fail "fabric config presets list: header missing"
+pass "fabric config presets list: renders in a clean HOME"
+
+CLEAR_LOG="$OUT_DIR/config-clear.log"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" config clear --all >"$CLEAR_LOG" 2>&1; then
+  tail -20 "$CLEAR_LOG" >&2 || true
+  fail "fabric config clear --all exited nonzero"
+fi
+grep -q 'Deleted' "$CLEAR_LOG" || fail "fabric config clear: no deletions reported"
+[ ! -f "$SMOKE_HOME/.fabric/theme.json" ] || fail "fabric config clear: theme.json survived --all"
+pass "fabric config clear --all: persisted config removed"
+
 # --- Summary -------------------------------------------------------------------
 
 phase "summary"
-log "source build, packaged tarball, clean npm install, and tui/web/logs startup all verified"
+log "source build, packaged tarball, clean npm install, and startup smoke for logs/web/tui/replay/prune/digest/config all verified"

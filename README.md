@@ -74,10 +74,20 @@ of `HEAD`, an empty install directory, and a sandboxed `$HOME` with no
    empty project, approximating `npm install -g @needle/fabric` without
    touching the global prefix. Checks the `fabric` bin link plus the
    `--version` / `--help` contract.
-3. **Runtime smoke** — `fabric logs` (single-file parse, directory hot-add,
-   graceful SIGINT), `fabric web` (`/api/health`, SPA assets served from the
-   installed package, graceful SIGINT), and `fabric tui` (startup on a pty via
-   `script`, graceful SIGINT).
+3. **Runtime smoke** — every command `fabric --help` documents, exercised
+   against the repo's JSONL fixtures inside a sandboxed `$HOME` (nothing
+   touches a real `~/.needle/logs`):
+   - `fabric logs` — single-file parse, directory hot-add, graceful SIGINT
+   - `fabric web` — `/api/health`, SPA assets served from the installed
+     package, graceful SIGINT
+   - `fabric tui` — startup on a pty via `script`, graceful SIGINT
+   - `fabric replay` — pty startup over the fixture logs, graceful SIGINT
+   - `fabric prune` — dry run reports an aged fixture without touching it,
+     then a real run archives it and the tarball is verified
+   - `fabric digest` — deterministic digest over the fixture directory on
+     stdout, and the single-file `--output` workflow
+   - `fabric config` — show, `theme` set/readback/persistence, invalid-theme
+     rejection, `presets list`, `clear --all`
 
 The sandboxed `$HOME` also keeps the runtime smoke away from real NEEDLE
 workers on a fleet host. Requires `git`, `curl`, `tar`, and `script`
@@ -388,6 +398,7 @@ NEEDLE's `otlp_metric_sink` is enabled in `~/.needle/config.yaml`, pushing aggre
 
 ## Documentation
 
+- [CLI Reference](docs/cli.md) — every `fabric` command (`tui`, `web`, `logs`, `replay`, `prune`, `digest`, `config`)
 - [NeedleEvent Schema](docs/schema.md) — canonical wire format shared with NEEDLE
 - [Metrics Export](docs/metrics.md) — Prometheus-compatible metrics for monitoring
 - [Implementation Plan](docs/plan.md)
