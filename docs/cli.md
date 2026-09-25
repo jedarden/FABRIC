@@ -21,7 +21,7 @@ The binary installs as `fabric` (or `fabric-node` if there's a naming conflict).
 | `fabric tail` / `fabric logs` | Tail log file and display events |
 | `fabric replay` | Replay worker session history |
 | `fabric prune` | Prune old log files |
-| `fabric digest` | Generate session digest from log file |
+| `fabric digest` | Generate session digest from a log source (directory or file) |
 | `fabric config` | Manage FABRIC configuration |
 
 ---
@@ -477,7 +477,7 @@ fabric prune --source /var/log/needle/
 
 ## `fabric digest`
 
-Generate session digest from log file.
+Generate session digest from a log source (directory or file).
 
 ### Usage
 
@@ -485,11 +485,25 @@ Generate session digest from log file.
 fabric digest [options]
 ```
 
+### Source resolution
+
+The source is resolved as `--source` → `-f/--file` → default, matching
+`resolveFromOptions` in `src/cli.ts`:
+
+1. `--source <path>` — validated with `fs.stat` and classified as directory
+   or file; exits 1 if the path does not exist (`~` is expanded).
+2. `-f, --file <path>` — legacy single-file mode: the path is used as-is,
+   with no existence check.
+3. Neither option — defaults to the `~/.needle/logs/` directory.
+
+There is no consolidated `workers.log`; a directory source tails every
+per-worker `*.jsonl` file in it.
+
 ### Options
 
 | Option | Alias | Default | Description |
 |--------|-------|---------|-------------|
-| `-f, --file <path>` | — | `~/.needle/logs/workers.log` | Log file to analyze |
+| `-f, --file <path>` | — | — | Legacy single-file mode (path used as-is; no existence check) |
 | `--source <path>` | — | `~/.needle/logs` | Log source (file or directory) |
 | `-o, --output <path>` | — | — | Output file (default: stdout) |
 | `-w, --worker <ids>` | — | — | Filter by worker IDs (comma-separated) |
@@ -737,6 +751,7 @@ fabric web --port 3000 --source ~/.needle/logs/ --otlp-http :4318
 | Variable | Purpose |
 |----------|---------|
 | `FABRIC_AUTH_TOKEN` | Auth token for POST endpoints (overrides `--auth-token`) |
+| `FABRIC_DIGEST_AI_*` | AI digest narrative configuration (`_API_KEY` — falls back to `ANTHROPIC_API_KEY` — `_MODEL`, `_MAX_TOKENS`, `_TIMEOUT_MS`, `_MAX_RETRIES`); see the [`fabric digest`](#fabric-digest) `--ai` section |
 | `NODE_ENV` | When `production`, enables heap snapshots by default |
 | `WATCHDOG_USEC` | systemd watchdog timeout (enables watchdog ping) |
 | `NOTIFY_SOCKET` | systemd notification socket (for watchdog) |
