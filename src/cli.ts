@@ -930,12 +930,22 @@ program
 // Add config command
 program.addCommand(createConfigCommand());
 
-// Only parse when executed directly (`node dist/cli.js ...`). Importing this
-// module (tests, tooling) must get the assembled program without parsing —
-// otherwise commander would consume the importer's process.argv.
-const invokedAsMain =
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
+// Only parse when executed directly (`node dist/cli.js ...`, or via the npm
+// bin link, which is a symlink to this file). Importing this module (tests,
+// tooling) must get the assembled program without parsing — otherwise
+// commander would consume the importer's process.argv.
+// Node resolves the entry module to its realpath, so import.meta.url is the
+// realpath URL while process.argv[1] keeps the invoked path; resolve argv[1]
+// before comparing or a bin-link invocation never matches and the CLI
+// silently no-ops (exit 0, no output).
+const invokedAsMain = (() => {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+})();
 if (invokedAsMain) {
   program.parse();
 }

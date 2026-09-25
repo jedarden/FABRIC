@@ -15,9 +15,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'fs';
-import { execFileSync } from 'child_process';
+import { readFileSync, existsSync, symlinkSync, mkdtempSync, rmSync } from 'fs';
+import { execFileSync, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -110,6 +111,36 @@ describe('npm pack contents (requires dist; pretest builds the CLI)', () => {
       expect(
         files.some((f) => /^dist\/web\/public\/assets\/index-[^/]+\.js$/.test(f))
       ).toBe(true);
+    },
+    60_000
+  );
+});
+
+describe('bin-link invocation contract (requires dist; pretest builds the CLI)', () => {
+  // npm's bin link is a symlink (node_modules/.bin/fabric -> dist/cli.js).
+  // Node reports the entry module's realpath in import.meta.url while
+  // process.argv[1] keeps the invoked path, so cli.ts's parse guard must
+  // realpath argv[1] before comparing — an unrealtimed comparison made every
+  // bin-link invocation a silent no-op (exit 0, no output), which the
+  // clean-install smoke caught in phase 4. Spawning node with the symlink as
+  // the script reproduces that mismatch without needing the exec bit npm
+  // sets at install time.
+  it.skipIf(!distCliBuilt())(
+    'answers --version when invoked through a bin-style symlink',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'fabric-binlink-'));
+      try {
+        const link = join(dir, 'fabric');
+        symlinkSync(join(repoRoot, 'dist', 'cli.js'), link);
+        const res = spawnSync(process.execPath, [link, '--version'], {
+          encoding: 'utf8',
+          timeout: 30_000,
+        });
+        expect(res.status).toBe(0);
+        expect(res.stdout.trim()).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
     60_000
   );
