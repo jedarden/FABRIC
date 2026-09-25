@@ -51,6 +51,30 @@ covered automatically the moment it is registered — there is no list to
 update. The table below is descriptive documentation only; the router is the
 source of truth.
 
+## OTLP/gRPC receiver (`--otlp-grpc`)
+
+The gRPC transport carries the same policy, expressed in gRPC terms
+(`src/otlpGrpcReceiver.ts`). When a token is configured, every Export call —
+`LogsService/Export`, `TraceService/Export`, `MetricsService/Export` — must
+present `authorization: Bearer <FABRIC_AUTH_TOKEN>` **metadata**; anything
+else is rejected with gRPC status `UNAUTHENTICATED` (16) before any record is
+decoded or ingested, so an unauthorized call has no side effects. NEEDLE's
+`telemetry.otlp_sink.headers` already sends this header for OTLP/HTTP and the
+same header works as gRPC metadata.
+
+Two scope notes:
+
+- The token is wired for `fabric web` only — it is the one command with an
+  auth model (`--auth-token` / `FABRIC_AUTH_TOKEN`). The `tui` and `tail`/
+  `logs` commands have no token concept, and their `--otlp-grpc` receiver —
+  like their standalone OTLP/HTTP listener — stays open.
+- With no token configured the gRPC receiver accepts unauthenticated calls,
+  exactly mirroring unset-token mode on the HTTP side.
+
+The contract is pinned end-to-end by `src/otlpGrpcE2E.integration.test.ts`:
+missing metadata, wrong token, and correct token per service, plus
+rejection-before-ingestion and open-receiver back-compat.
+
 ## Token configuration
 
 | Source | How |

@@ -450,7 +450,10 @@ program
       let otlpReceiver: import('./otlpGrpcReceiver.js').OtlpGrpcReceiver | undefined;
       if (options.otlpGrpc) {
         const { OtlpGrpcReceiver } = await import('./otlpGrpcReceiver.js');
-        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc, deduplicator });
+        // Same auth as the OTLP/HTTP listener: when a token is configured,
+        // Export calls must present it as Bearer metadata or they are
+        // rejected with UNAUTHENTICATED before any record is ingested.
+        otlpReceiver = new OtlpGrpcReceiver({ address: options.otlpGrpc, deduplicator, authToken });
         otlpReceiver.on('event', (event) => {
           // Apply filters before processing event
           if (filter.worker && event.worker !== filter.worker) return;

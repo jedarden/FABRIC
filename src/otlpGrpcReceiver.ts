@@ -107,17 +107,29 @@ export interface OtlpGrpcReceiverOptions {
 
   /** Shared deduplicator for cross-source dedup (JSONL + OTLP). */
   deduplicator?: EventDeduplicator;
+
+  /**
+   * Optional bearer token for the Export RPCs. When set, every call must
+   * carry `authorization: Bearer <token>` metadata and is otherwise rejected
+   * with UNAUTHENTICATED — the gRPC counterpart of the web server's POST
+   * auth middleware, which already guards the OTLP/HTTP receiver. NEEDLE's
+   * `telemetry.otlp_sink.headers` already sends this header. Unset = open
+   * receiver (previous behavior; tui/logs have no auth model).
+   */
+  authToken?: string;
 }
 
 export class OtlpGrpcReceiver extends EventEmitter {
   private address: string;
   private deduplicator?: EventDeduplicator;
+  private authToken?: string;
   private server: grpc.Server | null = null;
 
   constructor(options: OtlpGrpcReceiverOptions = {}) {
     super();
     this.address = options.address || ':4317';
     this.deduplicator = options.deduplicator;
+    this.authToken = options.authToken;
   }
 
   /**
@@ -151,6 +163,11 @@ export class OtlpGrpcReceiver extends EventEmitter {
     // ── Handlers ──
 
     const handleLogs: grpc.handleUnaryCall<any, any> = (call, callback) => {
+      const denied = this.authRejection(call);
+      if (denied) {
+        callback(denied, null);
+        return;
+      }
       try {
         const req = call.request;
         for (const rl of req.resourceLogs ?? []) {
@@ -170,6 +187,11 @@ export class OtlpGrpcReceiver extends EventEmitter {
     };
 
     const handleTraces: grpc.handleUnaryCall<any, any> = (call, callback) => {
+      const denied = this.authRejection(call);
+      if (denied) {
+        callback(denied, null);
+        return;
+      }
       try {
         const req = call.request;
         for (const rs of req.resourceSpans ?? []) {
@@ -192,6 +214,11 @@ export class OtlpGrpcReceiver extends EventEmitter {
     };
 
     const handleMetrics: grpc.handleUnaryCall<any, any> = (call, callback) => {
+      const denied = this.authRejection(call);
+      if (denied) {
+        callback(denied, null);
+        return;
+      }
       try {
         const req = call.request;
         for (const rm of req.resourceMetrics ?? []) {
@@ -253,6 +280,25 @@ export class OtlpGrpcReceiver extends EventEmitter {
   }
 
   // ── Private helpers ──
+
+  /**
+   * Mirror of the web server's POST auth middleware for the gRPC transport:
+   * when a token is configured, Export calls must present it as
+   * `authorization: Bearer <token>` metadata. Returns the rejection error,
+   * or null when the call may proceed (no token configured, or token
+   * matches — metadata keys are lowercased by grpc-js, so the lookup is
+   * case-insensitive on the wire).
+   */
+  private authRejection(call: grpc.ServerUnaryCall<any, any>): grpc.ServiceError | null {
+    if (!this.authToken) return null;
+    const values: (string | Buffer)[] = call.metadata?.get('authorization') ?? [];
+    const ok = values.some((v) => typeof v === 'string' && v === `Bearer ${this.authToken}`);
+    if (ok) return null;
+    const err = new Error('Missing or invalid authorization metadata') as grpc.ServiceError;
+    err.code = grpc.status.UNAUTHENTICATED;
+    err.details = 'Missing or invalid authorization metadata';
+    return err;
+  }
 
   private pushNormalized(record: unknown, source: NormalizerSource): void {
     const event = normalizeToLogEvent(record, source, this.deduplicator);
@@ -325,8 +371,9 @@ export function extractDataPoints(
 export async function startOtlpGrpcReceiver(
   address: string,
   onEvent: (event: LogEvent) => void,
+  authToken?: string,
 ): Promise<OtlpGrpcReceiver> {
-  const receiver = new OtlpGrpcReceiver({ address });
+  const receiver = new OtlpGrpcReceiver({ address, authToken });
   receiver.on('event', onEvent);
   await receiver.start();
   return receiver;
