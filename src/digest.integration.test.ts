@@ -15,7 +15,11 @@ import { describe, test, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execSync, spawnSync, ExecSyncOptionsWithStringEncoding } from 'node:child_process';
+import { exec, execSync, spawnSync, ExecSyncOptionsWithStringEncoding } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createServer } from 'node:http';
+
+const execAsync = promisify(exec);
 import { createTempLogFile } from './testHelpers.js';
 
 /** Helper to run command and capture both stdout and stderr */
@@ -543,6 +547,33 @@ describe('digest command (integration)', () => {
       return { ...env, ...extra };
     }
 
+    /**
+     * Async variant of runDigestWithEnv. The fake-provider tests need this:
+     * spawnSync would block this process's event loop, so the in-process fake
+     * Messages API could never accept a connection and every request would
+     * time out. exec keeps the loop free to service the fake server.
+     */
+    async function runDigestWithEnvAsync(extraArgs: string, env: NodeJS.ProcessEnv): Promise<{
+      status: number;
+      stdout: string;
+      stderr: string;
+    }> {
+      try {
+        const { stdout, stderr } = await execAsync(
+          `node ${DIST_CLI} digest --source ${FIXTURES_DIR} ${extraArgs}`,
+          { cwd: process.cwd(), encoding: 'utf-8' as const, env, timeout: 30000 },
+        );
+        return { status: 0, stdout, stderr };
+      } catch (err: any) {
+        // Non-zero exit: exec rejects with code/stdout/stderr attached.
+        return {
+          status: typeof err.code === 'number' ? err.code : 1,
+          stdout: err.stdout ?? '',
+          stderr: err.stderr ?? '',
+        };
+      }
+    }
+
     test('--ai without an API key falls back to the deterministic digest and exits 0', () => {
       const { status, stdout, stderr } = runDigestWithEnv('--ai', envWithoutAiKeys());
 
@@ -583,6 +614,129 @@ describe('digest command (integration)', () => {
       expect(stderr).toContain('--ai-model has no effect without --ai');
       expect(stdout).toContain('# Session Digest');
       expect(stdout).not.toContain('## AI Narrative');
+    }, 30000);
+
+    /**
+     * Minimal fake Anthropic Messages API on an ephemeral loopback port. The
+     * CLI reaches it through ANTHROPIC_BASE_URL (the same override the
+     * unreachable-provider test uses), so the --ai success path is exercised
+     * end-to-end — CLI → SDK → provider → output — without a real key.
+     */
+    function startFakeMessagesApi(): Promise<{
+      baseUrl: string;
+      requests: Array<{ path: string | undefined; body: any; apiKey: string | undefined }>;
+      close: () => Promise<void>;
+    }> {
+      const requests: Array<{ path: string | undefined; body: any; apiKey: string | undefined }> = [];
+      return new Promise((resolve) => {
+        const server = createServer((req, res) => {
+          let raw = '';
+          req.on('data', (chunk: Buffer) => { raw += chunk.toString('utf-8'); });
+          req.on('end', () => {
+            let body: any = null;
+            try { body = JSON.parse(raw); } catch { /* non-JSON body: recorded as null */ }
+            requests.push({ path: req.url, body, apiKey: req.headers['x-api-key'] as string | undefined });
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({
+              id: 'msg_digest_integration_test',
+              type: 'message',
+              role: 'assistant',
+              model: (body && typeof body.model === 'string' && body.model) || 'claude-opus-5',
+              content: [{
+                type: 'text',
+                text: [
+                  '## Overview',
+                  '',
+                  'The fleet completed fixture work without incident.',
+                  '',
+                  '## Highlights',
+                  '',
+                  '- Fixtures processed deterministically.',
+                  '',
+                  '## Issues & Observations',
+                  '',
+                  '- None.',
+                ].join('\n'),
+              }],
+              stop_reason: 'end_turn',
+              stop_sequence: null,
+              usage: { input_tokens: 10, output_tokens: 20 },
+            }));
+          });
+        });
+        server.listen(0, '127.0.0.1', () => {
+          const addr = server.address();
+          const port = addr && typeof addr === 'object' ? addr.port : 0;
+          resolve({
+            baseUrl: `http://127.0.0.1:${port}`,
+            requests,
+            close: () =>
+              new Promise<void>((res) => {
+                server.closeAllConnections?.();
+                server.close(() => res());
+              }),
+          });
+        });
+      });
+    }
+
+    test('--ai success path appends the AI narrative section and exits 0', async () => {
+      const fake = await startFakeMessagesApi();
+      try {
+        const { status, stdout, stderr } = await runDigestWithEnvAsync('--ai', envWithoutAiKeys({
+          FABRIC_DIGEST_AI_API_KEY: 'sk-ant-integration-test-sentinel',
+          FABRIC_DIGEST_AI_MAX_RETRIES: '0',
+          FABRIC_DIGEST_AI_TIMEOUT_MS: '15000',
+          ANTHROPIC_BASE_URL: fake.baseUrl,
+        }));
+
+        expect(status).toBe(0);
+        expect(stderr).toContain('AI narrative added');
+
+        // The AI section is appended after the intact deterministic digest.
+        expect(stdout).toContain('# Session Digest');
+        expect(stdout).toContain('## Summary');
+        expect(stdout).toContain('## AI Narrative');
+        expect(stdout).toContain('The fleet completed fixture work without incident.');
+
+        // The provider saw exactly one bounded Messages-API request carrying
+        // the configured (sentinel) key, the default model, and the digest
+        // prompt — never raw logs.
+        expect(fake.requests).toHaveLength(1);
+        const request = fake.requests[0];
+        expect(request.apiKey).toBe('sk-ant-integration-test-sentinel');
+        expect(request.body?.model).toBe('claude-opus-5');
+        expect(request.body?.max_tokens).toBe(4096);
+        expect(String(request.body?.messages?.[0]?.content)).toContain('Session data');
+      } finally {
+        await fake.close();
+      }
+    }, 30000);
+
+    test('--ai-model overrides FABRIC_DIGEST_AI_MODEL on the wire', async () => {
+      const fake = await startFakeMessagesApi();
+      try {
+        const { status, stdout, stderr } = await runDigestWithEnvAsync(
+          '--ai --ai-model cli-override-model',
+          envWithoutAiKeys({
+            FABRIC_DIGEST_AI_API_KEY: 'sk-ant-integration-test-sentinel',
+            FABRIC_DIGEST_AI_MODEL: 'env-default-model',
+            FABRIC_DIGEST_AI_MAX_RETRIES: '0',
+            FABRIC_DIGEST_AI_TIMEOUT_MS: '15000',
+            ANTHROPIC_BASE_URL: fake.baseUrl,
+          }),
+        );
+
+        expect(status).toBe(0);
+        expect(stdout).toContain('## AI Narrative');
+        expect(stderr).toContain('AI narrative added (model: cli-override-model)');
+
+        // The CLI flag wins over the env default in the actual provider request.
+        expect(fake.requests).toHaveLength(1);
+        expect(fake.requests[0].body?.model).toBe('cli-override-model');
+      } finally {
+        await fake.close();
+      }
     }, 30000);
   });
 });
