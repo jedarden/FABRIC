@@ -122,12 +122,60 @@ Beyond simple log display, FABRIC provides:
 | **File Heatmap** | See where all the action is at a glance |
 | **Conversation Transcript** | See the full Claude conversation, not just tool calls |
 | **Semantic Narrative** | Natural language summary of what workers are doing |
-| **AI Session Digest** | Auto-generated session summaries for stakeholders (`fabric digest --ai`) |
+| **AI Session Digest** | Opt-in AI narrative for the session digest (`fabric digest --ai`) — one Anthropic API call; see below for data handling |
 | **File Context Panel** | See file contents alongside activity stream |
 | **Git Integration** | Live git status, diff preview, conflict detection |
 | **Worker Analytics** | Compare worker performance over time |
 | **Recovery Playbook** | Suggestions based on similar past errors |
 | **Focus Mode** | Pin workers/tasks, hide everything else |
+
+### AI Session Digest (`fabric digest --ai`) — opt-in, data handling
+
+`fabric digest` alone is fully deterministic: it reads local NEEDLE logs and
+renders Markdown tables, with **no network call**. The opt-in `--ai` flag adds
+a stakeholder-facing narrative section by making one call to the **Anthropic
+Messages API** (official `@anthropic-ai/sdk`), default model
+**`claude-opus-5`** — override with `--ai-model` or `FABRIC_DIGEST_AI_MODEL`.
+Nothing leaves the machine unless you pass `--ai`.
+
+**What is sent externally:** only the digest's already-extracted summary data
+— the session window and aggregate counts, per-worker summaries (top 20),
+completed bead IDs with worker and duration (top 20), most-modified file paths
+with counts and tools (top 15), and recent error messages flattened to one
+line each (top 10). Raw log lines, file contents, and environment variables
+are never sent.
+
+**Prompt bounds:** those caps (20 workers / 20 beads / 15 files / 10 errors)
+keep the single request small and its cost predictable. Overflow is described
+to the model only as an "… and N more" line; the aggregate stats always
+reflect the full session.
+
+**Configuration** (environment variables):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FABRIC_DIGEST_AI_API_KEY` | — | API key (preferred); falls back to `ANTHROPIC_API_KEY` |
+| `FABRIC_DIGEST_AI_MODEL` | `claude-opus-5` | Model id (`--ai-model` wins) |
+| `FABRIC_DIGEST_AI_MAX_TOKENS` | `4096` | Response token cap |
+| `FABRIC_DIGEST_AI_TIMEOUT_MS` | `60000` | Request timeout |
+| `FABRIC_DIGEST_AI_MAX_RETRIES` | `1` | Transport retries |
+
+Invalid numeric values silently fall back to the defaults.
+
+**Timeout, refusal, and error fallback:** the AI layer never throws and never
+loses your digest. A missing key; an auth, rate-limit, or network failure; an
+elapsed `FABRIC_DIGEST_AI_TIMEOUT_MS` timeout; a malformed or empty response;
+or a model refusal (`stop_reason=refusal`) each print the reason to **stderr**
+and emit the deterministic digest unchanged. The command still exits **0**.
+
+**Secret-safe:** the API key is used only to authenticate the request — it is
+never logged, never rendered into the digest output, and never included in
+the prompt. Provider errors are reported by property (HTTP status, message),
+not by echoing request material.
+
+The TUI and web digest views stay deterministic by design; the AI narrative
+is a CLI export feature. Full option and fallback reference:
+[`docs/cli.md`](docs/cli.md#fabric-digest).
 
 ## Relationship to NEEDLE
 

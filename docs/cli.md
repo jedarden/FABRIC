@@ -547,8 +547,21 @@ and renders them as Markdown tables. No network call is made.
 `--ai` adds an **AI Narrative** section on top: the deterministic digest's
 already-extracted data is sent to the Anthropic Messages API (via the official
 `@anthropic-ai/sdk`), which writes the stakeholder-facing overview, highlights,
-and observations. The model sees only the extracted summary data — never raw
-log files and never your API key.
+and observations.
+
+**What is sent to the provider** — extracted summary data only:
+
+- session id, time window, and aggregate counts (plus the token/cost estimate
+  when present)
+- per-worker summaries — top 20 by activity
+- completed bead ids with worker and duration — top 20
+- most-modified file paths with counts and tools — top 15
+- recent error messages, flattened to one line each — top 10
+
+Raw log lines, file contents, and environment variables are never sent, and
+the API key never enters the prompt or the logs. Lists beyond a cap are
+represented only by an "… and N more" overflow line; the aggregate stats
+always reflect the full session.
 
 **Configuration** (environment variables):
 
@@ -557,7 +570,7 @@ log files and never your API key.
 | `FABRIC_DIGEST_AI_API_KEY` | — | API key (preferred). Falls back to `ANTHROPIC_API_KEY` |
 | `FABRIC_DIGEST_AI_MODEL` | `claude-opus-5` | Model id |
 | `FABRIC_DIGEST_AI_MAX_TOKENS` | `4096` | Response token cap |
-| `FABRIC_DIGEST_AI_TIMEOUT_MS` | `60000` | Request timeout |
+| `FABRIC_DIGEST_AI_TIMEOUT_MS` | `60000` | Request timeout; when it elapses the fallback fires |
 | `FABRIC_DIGEST_AI_MAX_RETRIES` | `1` | Transport retries |
 
 **Fallback behavior:** the deterministic digest is always produced and is the
@@ -566,6 +579,8 @@ provider call fails (auth error, rate limit, timeout, malformed response, or a
 model refusal), FABRIC prints the reason to **stderr** and emits the
 deterministic digest unchanged. The command still exits **0** — an AI outage
 never loses the digest. The API key is never logged or rendered into output.
+Invalid numeric values for the tuning variables silently fall back to the
+defaults, and `--ai-model` without `--ai` warns on stderr and is ignored.
 
 **Cost note:** `--ai` makes one API request per digest run, charged to the
 account owning the API key. Prompt lists are capped (20 workers / 20 beads /
