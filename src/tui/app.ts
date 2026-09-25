@@ -1947,8 +1947,10 @@ File Context Panel (Split View):
   Tab     - Switch focus between panels
 
 Heatmap View:
+  j/k     - Navigate files (g/G jump first/last)
   s       - Cycle sort mode
   c       - Toggle collisions only
+  a       - Toggle anomalies only
   Esc     - Return to default view
 
 Dependency DAG View:
