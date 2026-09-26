@@ -578,14 +578,58 @@ always reflect the full session.
 | `FABRIC_DIGEST_AI_TIMEOUT_MS` | `60000` | Request timeout; when it elapses the fallback fires |
 | `FABRIC_DIGEST_AI_MAX_RETRIES` | `1` | Transport retries |
 
+**Configuration precedence** — every setting has a single resolution chain;
+the first non-empty value wins:
+
+| Setting | Resolution order |
+|---------|------------------|
+| API key | `FABRIC_DIGEST_AI_API_KEY` → `ANTHROPIC_API_KEY` → none (fallback fires) |
+| Model | `--ai-model <model>` → `FABRIC_DIGEST_AI_MODEL` → `claude-opus-5` |
+| Max response tokens | `FABRIC_DIGEST_AI_MAX_TOKENS` (must be > 0) → `4096` |
+| Request timeout | `FABRIC_DIGEST_AI_TIMEOUT_MS` (must be > 0) → `60000` |
+| Transport retries | `FABRIC_DIGEST_AI_MAX_RETRIES` (≥ 0) → `1` |
+| API endpoint | `ANTHROPIC_BASE_URL` (standard SDK override, e.g. for a gateway) → Anthropic default |
+
+An empty value counts as unset: an empty `FABRIC_DIGEST_AI_API_KEY` still
+falls through to `ANTHROPIC_API_KEY`, and an empty `--ai-model` still picks up
+`FABRIC_DIGEST_AI_MODEL`. Invalid (non-numeric or out-of-range) tuning values
+silently fall back to their defaults. `--ai-model` without `--ai` has no
+effect — a warning is printed and the run stays deterministic.
+
 **Fallback behavior:** the deterministic digest is always produced and is the
 backbone of the output. If `--ai` is set but no API key is configured, or the
 provider call fails (auth error, rate limit, timeout, malformed response, or a
 model refusal), FABRIC prints the reason to **stderr** and emits the
 deterministic digest unchanged. The command still exits **0** — an AI outage
 never loses the digest. The API key is never logged or rendered into output.
-Invalid numeric values for the tuning variables silently fall back to the
-defaults, and `--ai-model` without `--ai` warns on stderr and is ignored.
+
+**Stderr messages** — progress and every fallback reason go to stderr, never
+stdout, so the Markdown digest on stdout stays clean:
+
+| Message | Meaning |
+|---------|---------|
+| `AI digest unavailable: no API key found (set FABRIC_DIGEST_AI_API_KEY or ANTHROPIC_API_KEY) — using deterministic digest` | `--ai` set but no key resolved |
+| `Requesting AI narrative (model: <model>)...` | the provider call is starting |
+| `AI narrative added (model: <model>)` | success; `## AI Narrative` appended |
+| `AI digest failed (<reason>) — using deterministic digest` | any fallback; digest emitted unchanged |
+| `--ai-model has no effect without --ai; ignoring` | `--ai-model` passed without `--ai` |
+
+The `<reason>` in a fallback line is one of:
+
+| `<reason>` | Trigger |
+|------------|---------|
+| `provider request failed: <sdk message>` | auth error, rate limit, network failure, or an elapsed `FABRIC_DIGEST_AI_TIMEOUT_MS` |
+| `model declined the request (stop_reason=refusal)` | the model refused the prompt |
+| `response contained no text content` | HTTP 200 whose `content` is missing or empty |
+
+**Exit codes:**
+
+| Code | When |
+|------|------|
+| `0` | A digest was produced — without `--ai`, with the AI narrative appended, or through any AI fallback above |
+| `1` | The `--source` path does not exist, or digest generation itself failed (including an unwritable `--output` path) |
+
+An AI problem can never produce a non-zero exit or a lost digest.
 
 **Cost note:** `--ai` makes one API request per digest run, charged to the
 account owning the API key. Prompt lists are capped (20 workers / 20 beads /

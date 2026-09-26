@@ -46,6 +46,7 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 - `renderAiNarrativeSection()` - Format the narrative as a `## AI Narrative` markdown section
 
 **Fallback:** missing key, provider error, timeout, malformed response, or refusal each degrade to the deterministic digest (stderr warning, exit 0).  
+**User-facing contract:** configuration precedence, data egress, prompt bounds, exact stderr messages, and exit codes are documented in [`docs/cli.md`](cli.md#fabric-digest) (`AI narrative (--ai)` section).  
 **Lines:** ~280 lines  
 **Dependencies:** `@anthropic-ai/sdk`, `types.ts`  
 **Tested in:** `src/digestAi.test.ts` (config resolution, prompt bounds, stub-client success/refusal/error paths, timeout fallback — immediate typed SDK error and in-flight deadline — and malformed-response fallback for content missing/null/non-array/null-block/whitespace-only shapes, section rendering) and `src/digest.integration.test.ts` (CLI-level `--ai` behavior: missing-key fallback, unreachable-provider fallback, provider-hangs-until-timeout fallback, malformed 200 response without `content` fallback — all exit 0 with the deterministic digest intact — plus the success path over a fake Messages API and `--ai-model` without `--ai` ignored with a warning)
@@ -154,7 +155,7 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 - Backward compatibility - Legacy `-f/--file` option
 - Default behavior - No args defaults to `~/.needle/logs/`
 - Output to file - `-o/--output` option
-- AI narrative layer (`--ai`) - Missing-key fallback (exit 0, stderr warning, deterministic digest unchanged), unreachable-provider fallback (sentinel key + closed local `ANTHROPIC_BASE_URL` port → exit 0, no `## AI Narrative` section), timeout fallback (silent hanging provider + 1s `FABRIC_DIGEST_AI_TIMEOUT_MS` → exit 0, "timed out" warning), malformed-response fallback (HTTP 200 message without `content` → exit 0, "response contained no text content" warning), `--ai-model` without `--ai` ignored with warning
+- AI narrative layer (`--ai`) - Missing-key fallback (exit 0, stderr warning, deterministic digest unchanged), unreachable-provider fallback (sentinel key + closed local `ANTHROPIC_BASE_URL` port → exit 0, no `## AI Narrative` section), timeout fallback (silent hanging provider + 1s `FABRIC_DIGEST_AI_TIMEOUT_MS` → exit 0, "timed out" warning), malformed-response fallback (HTTP 200 message without `content` → exit 0, "response contained no text content" warning), refusal fallback (HTTP 200 message with `stop_reason=refusal` → exit 0, "model declined the request (stop_reason=refusal)" warning), success path over a fake Messages API (`## AI Narrative` appended, exactly one bounded request carrying the sentinel key), `--ai-model` CLI-over-env precedence verified on the wire, `--ai-model` without `--ai` ignored with warning
 
 **Test Count:** 20+ tests  
 **Coverage Target:** End-to-end CLI behavior with real filesystem operations
@@ -232,6 +233,9 @@ The `fabric digest` command generates session summaries from NEEDLE worker log f
 - ✅ `--ai` provider-failure fallback (exit 0, no AI Narrative section)
 - ✅ `--ai` timeout fallback — provider accepts the request then hangs (exit 0, "timed out" warning)
 - ✅ `--ai` malformed-response fallback — 200 body without `content` (exit 0, "no text content" warning)
+- ✅ `--ai` refusal fallback — 200 body with `stop_reason=refusal` (exit 0, "model declined the request" warning)
+- ✅ `--ai` success path — fake Messages API, `## AI Narrative` appended, single bounded request (exit 0)
+- ✅ `--ai-model` precedence — CLI flag overrides `FABRIC_DIGEST_AI_MODEL` on the wire
 - ✅ `--ai-model` without `--ai` ignored with a warning
 
 ## Gaps and Recommendations

@@ -830,5 +830,42 @@ describe('digest command (integration)', () => {
         await fake.close();
       }
     }, 30000);
+
+    test('--ai with a provider refusal (stop_reason=refusal) degrades to the deterministic digest and exits 0', async () => {
+      // A well-formed 200 response whose stop_reason is 'refusal': the model
+      // saw the prompt and declined. The stop_reason check must fire before
+      // any content parsing, so a refusal is a fallback like any other AI
+      // failure — reason on stderr, deterministic digest intact, exit 0.
+      const fake = await startFakeMessagesApi({
+        id: 'msg_refusal',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-opus-5',
+        content: [],
+        stop_reason: 'refusal',
+        stop_sequence: null,
+        usage: { input_tokens: 10, output_tokens: 0 },
+      });
+      try {
+        const { status, stdout, stderr } = await runDigestWithEnvAsync('--ai', envWithoutAiKeys({
+          FABRIC_DIGEST_AI_API_KEY: 'sk-ant-integration-test-sentinel',
+          FABRIC_DIGEST_AI_MAX_RETRIES: '0',
+          FABRIC_DIGEST_AI_TIMEOUT_MS: '15000',
+          ANTHROPIC_BASE_URL: fake.baseUrl,
+        }));
+
+        expect(status).toBe(0);
+        expect(stderr).toMatch(/AI digest failed/);
+        expect(stderr).toContain('model declined the request (stop_reason=refusal)');
+        expect(stderr).toContain('using deterministic digest');
+
+        // The deterministic digest is intact; no AI section was appended.
+        expect(stdout).toContain('# Session Digest');
+        expect(stdout).toContain('## Summary');
+        expect(stdout).not.toContain('## AI Narrative');
+      } finally {
+        await fake.close();
+      }
+    }, 30000);
   });
 });
