@@ -187,8 +187,20 @@ describe('TUI view model documentation check', () => {
     expect(hSection, 'an "### H versus h" section exists').toBeTruthy();
     expect(hSection![0]).toContain('`H`');
     expect(hSection![0]).toContain('`h`');
-    // The lowercase key is shadowed inside worker analytics (comparison navigation).
+    // The section explains the former worker-analytics collision and its removal.
     expect(hSection![0].toLowerCase()).toContain('analytics');
+    expect(hSection![0].toLowerCase()).toContain('no local');
+
+    // fabric-ea8565c8 regression: no view may bind a panel-local 'h' — the
+    // screen-level ['H', 'h'] toggle is the only h handler anywhere, so 'h'
+    // means "heatmap" in every view state. Worker analytics used to bind 'h'
+    // to move the comparison selection, and blessed fired both handlers.
+    const panel = readRepo('src/tui/components/WorkerAnalyticsPanel.ts');
+    const keyArrays = [...panel.matchAll(/\.key\(\[([^\]]*)\]/g)].map((m) =>
+      m[1].split(',').map((k) => k.trim().replace(/^['"]|['"]$/g, ''))
+    );
+    const offenders = keyArrays.filter((keys) => keys.includes('h'));
+    expect(offenders, 'WorkerAnalyticsPanel binds no panel-local h').toEqual([]);
   });
 
   it('the in-app help overlay lists the heatmap view keys', () => {

@@ -520,6 +520,19 @@ describe('WorkerAnalyticsPanel', () => {
       expect((panel as any).selectedIndex).toBe(2);
       expect((panel as any).secondSelectedIndex).toBe(0);
     });
+
+    it('re-selects worker 1 via the left-arrow binding (no h alias)', () => {
+      const compare = (panel as any).analyticsManager.compareWorkers as Mock;
+      const callsBefore = compare.mock.calls.length;
+
+      const leftCall = mockListInstance.key.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call?.[0]) && (call[0] as string[]).includes('left')
+      );
+      expect(leftCall, 'a list binding for left is registered').toBeTruthy();
+      (leftCall![1] as () => void)();
+
+      expect(compare.mock.calls.length).toBe(callsBefore + 1);
+    });
   });
 
   describe('getSelected', () => {
@@ -588,18 +601,34 @@ describe('WorkerAnalyticsPanel', () => {
       )).toBe(true);
     });
 
-    it('should bind left/h keys', () => {
+    it('should bind left key only', () => {
       const keyCalls = mockListInstance.key.mock.calls;
       expect(keyCalls.some((call: unknown[]) =>
-        Array.isArray(call?.[0]) && (call[0].includes('left') || call[0].includes('h'))
+        Array.isArray(call?.[0]) && (call[0] as string[]).includes('left')
       )).toBe(true);
     });
 
-    it('should bind right/l keys', () => {
+    it('should bind right key only', () => {
       const keyCalls = mockListInstance.key.mock.calls;
       expect(keyCalls.some((call: unknown[]) =>
-        Array.isArray(call?.[0]) && (call[0].includes('right') || call[0].includes('l'))
+        Array.isArray(call?.[0]) && (call[0] as string[]).includes('right')
       )).toBe(true);
+    });
+
+    it('never binds h or l (fabric-ea8565c8: h collided with the global heatmap toggle)', () => {
+      // The panel used to bind ['left', 'h'] to move the comparison selection
+      // while app.ts binds ['H', 'h'] to the heatmap toggle. Blessed
+      // dispatches a key to every matching handler, so pressing h in the
+      // analytics view moved the selection AND switched views. Comparison
+      // selection is arrow-keys-only now; lowercase h means "heatmap" in
+      // every view state.
+      const boundKeys = mockListInstance.key.mock.calls
+        .map((call: unknown[]) => (Array.isArray(call?.[0]) ? (call[0] as string[]) : []))
+        .flat();
+      expect(boundKeys).not.toContain('h');
+      expect(boundKeys).not.toContain('l');
+      expect(boundKeys).toContain('left');
+      expect(boundKeys).toContain('right');
     });
 
     it('should bind enter/space keys', () => {

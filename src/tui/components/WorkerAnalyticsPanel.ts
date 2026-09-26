@@ -246,7 +246,11 @@ export class WorkerAnalyticsPanel {
       }
     });
 
-    this.list.key(['left', 'h'], () => {
+    // Arrow keys only: no local 'h'/'l' aliases. The screen binds ['H', 'h']
+    // to the heatmap toggle, and blessed delivers a key to every matching
+    // handler, so a panel-local 'h' would move the comparison selection AND
+    // switch views (fabric-ea8565c8). 'h' means "heatmap" everywhere.
+    this.list.key(['left'], () => {
       if (this.viewMode === 'comparison') {
         // Move to first worker selection
         this.selectedIndexChanged(this.selectedIndex);
@@ -254,7 +258,7 @@ export class WorkerAnalyticsPanel {
       }
     });
 
-    this.list.key(['right', 'l'], () => {
+    this.list.key(['right'], () => {
       if (this.viewMode === 'comparison') {
         // Move to second worker selection
         this.secondSelectedIndexChanged(this.secondSelectedIndex);

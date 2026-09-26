@@ -204,8 +204,10 @@ refresh · `c` clear history.
 `Space` toggle detail · `f` full narrative · `r` refresh.
 
 **Worker analytics** (`A`): `↑`/`↓`/`j`/`k` navigate workers · `←`/`→`
-(`h`/`l`) pick comparison workers · `Enter` / `Space` toggle detail · `a`
-aggregated view · `c` comparison mode · `s` cycle sort mode · `r` refresh.
+pick comparison workers (arrow keys only — the former `h`/`l` aliases were
+removed so lowercase `h` stays the heatmap toggle; see *Binding conflicts*)
+· `Enter` / `Space` toggle detail · `a` aggregated view · `c` comparison
+mode · `s` cycle sort mode · `r` refresh.
 
 **Conversation transcript** (`T`): `/` search · `n`/`N` next/previous match ·
 `t` toggle nearest tool call · `c` collapse all tool calls · `e` expand all ·
@@ -244,7 +246,6 @@ both fire — the local action runs and the global toggle switches views:
 |-----|---------------|------------------------------|
 | `r` | Re-renders the screen (never switches views) | Reset in replay, ready-tasks sub-view in DAG, refresh in git, narrative, analytics, xref, budget — every local `r` action is itself a refresh, so the combined effect is a data refresh plus a re-render |
 | `g` / `G` | Toggles session digest | Jump to top/bottom in worker grid, heatmap, DAG |
-| `h` | Enters the heatmap | Move comparison selection in worker analytics |
 | `d` | Enters the DAG | Diff sub-view in git integration |
 | `e` / `E` | Enters error groups | Export in digest (`e`) and replay (`e` file, `E` base64), expand-all in transcript |
 | `c` | Enters collision alerts | Collisions-only filter in heatmap, comparison mode in analytics, collapse-all in transcript, clear history in git |
@@ -253,13 +254,16 @@ both fire — the local action runs and the global toggle switches views:
 
 The `r` / `R` pair is deconflicted: `r` re-renders, `R` toggles session replay,
 and the DAG view's force refresh moved from `R` to `C-r` so it cannot collide
-with the replay toggle.
+with the replay toggle. Lowercase `h` is fully deconflicted too: `H`/`h`
+toggle the heatmap and no view binds a local `h` — worker analytics used to
+move its comparison selection with `h`, and both handlers fired; that alias
+was removed and comparison selection is arrow-keys-only now.
 
-In practice: `d`/`e`/`c`/`h` inside the git/digest/transcript/heatmap/analytics
+In practice: `d`/`e`/`c` inside the git/digest/transcript/heatmap/analytics
 views will also switch you away — expect the view change and re-enter with the
 view's uppercase key. Keys unique to a single view (`s`, `a`, `f`, `t`, `b`,
 `n`, `l`, `m`, `x`, `i`, `1`–`5`, `Home`/`End`) and the deconflicted
-`r` / `R` / `C-r` bindings have no view-switching collision.
+`h` / `r` / `R` / `C-r` bindings have no view-switching collision.
 
 ---
 

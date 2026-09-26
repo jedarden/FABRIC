@@ -513,7 +513,10 @@ export class FabricTuiApp {
       }
     });
 
-    // Toggle file heatmap view
+    // Toggle file heatmap view. Both cases bind the same toggle, and no view
+    // binds a panel-local 'h' (the worker-analytics comparison alias was
+    // removed for exactly this reason — blessed fires every matching
+    // handler), so 'h' means "heatmap" in every view state.
     this.screen.key(['H', 'h'], () => {
       this.toggleHeatmapView();
     });
@@ -1997,6 +2000,7 @@ Semantic Narrative:
 Worker Analytics:
   A       - Toggle worker analytics view
   ↑/↓ or j/k - Navigate workers
+  ←/→     - Pick comparison worker (comparison mode)
   Enter   - Toggle detail view
   a       - Toggle aggregated view
   s       - Cycle sort mode

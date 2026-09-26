@@ -30,12 +30,15 @@ the binding is registered as `this.screen.key(['H', 'h'], …)`, so the choice
 of case is purely cosmetic. `H` is the form used in the footer and help text
 because every view also reserves its uppercase key as a global toggle.
 
-One collision remains by design: inside the **worker analytics** view
-(`src/tui/components/WorkerAnalyticsPanel.ts`), lowercase `h` is *also* bound
-locally to move the comparison selection left. Blessed delivers the key to
-both handlers, so pressing `h` there moves the selection **and** switches to
-the heatmap — re-enter analytics with `A` if that happens. This mirrors the
-per-view collision table in `docs/cli.md`.
+There is **no local `h` action anywhere**: lowercase `h` means "heatmap" in
+all thirteen view states. Worker analytics used to bind `h` locally to move
+the comparison selection left, and because blessed delivers a key to every
+matching handler, pressing `h` there moved the selection *and* switched to
+the heatmap. That alias was removed (fabric-ea8565c8): comparison selection
+in worker analytics is arrow-keys-only now (`←` worker 1, `→` worker 2 —
+see `docs/cli.md`, § *Binding conflicts*), and the WorkerAnalyticsPanel
+key-binding tests plus `tests/docs/tui-view-model-doc.test.ts` pin the
+deconfliction.
 
 ### 3. Data Aggregation
 **Location:** `src/tui/app.ts` (`setViewMode()`, `handleEvent()`, `render()`)
