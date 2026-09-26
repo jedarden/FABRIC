@@ -4,13 +4,18 @@
  * Pins the view state machine documented in docs/cli.md ("Keyboard
  * Shortcuts"): exactly one view is active at a time — the default view plus
  * twelve overlay views; view-entry keys work from any view and every view
- * key is a toggle; Escape closes the worker detail overlay first and
- * otherwise steps back to the default view; the `?` help overlay floats
- * above the active view without changing it and only `?` opens or closes
- * it; Ctrl+K toggles the command palette; and the help text's key claims
- * match the keys actually bound at the screen level (including its
- * documented omissions: no transcript/xref toggles, `/` and `f` listed as
- * view-scoped actions that are not bound globally).
+ * key is a toggle; mutual exclusion holds for *every ordered pair* of
+ * views, not just the forward chain; Escape closes the worker detail
+ * overlay first and otherwise steps back to the default view from every
+ * view; the `?` help overlay floats above any active view without changing
+ * it, survives Escape, and only `?` opens or closes it; `r` re-renders in
+ * place everywhere while `R` is the only replay toggle; Ctrl+K toggles the
+ * command palette above any view and Escape with the palette open still
+ * steps back the view; view entry closes the file-context split and the
+ * default view never restores it; and the help text's key claims match the
+ * keys actually bound at the screen level (including its documented
+ * omissions: no transcript/xref toggles, `/` and `f` listed as view-scoped
+ * actions that are not bound globally).
  *
  * The blessed module and the panel components are replaced with stateful
  * fakes: panel visibility, header/footer content, help-overlay lifecycle
@@ -24,6 +29,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const h = vi.hoisted(() => {
   const state = {
     keyBindings: [] as Array<{ names: string[]; handler: () => void }>,
+    renderCalls: 0,
     boxes: [] as Array<Record<string, any>>,
     components: {} as Record<string, any>,
     selectedWorker: null as unknown,
@@ -93,7 +99,9 @@ const h = vi.hoisted(() => {
 
   function makeScreen() {
     return {
-      render: () => {},
+      render: () => {
+        state.renderCalls += 1;
+      },
       destroy: () => {},
       append: () => {},
       key: (names: string[], handler: () => void) => {
@@ -358,7 +366,10 @@ function buildApp(options: TuiOptions = {}): FabricTuiApp {
   h.state.selectedWorker = null;
   h.state.workerDetailWorker = null;
   h.state.workerDetailEvents = null;
-  return new FabricTuiApp(new InMemoryEventStore(), options);
+  const app = new FabricTuiApp(new InMemoryEventStore(), options);
+  // Constructor setup renders happen before the assertions start counting.
+  h.state.renderCalls = 0;
+  return app;
 }
 
 /** Press a key the way blessed does: dispatch to every handler bound to it. */
@@ -407,28 +418,30 @@ function findView(name: string): ViewSpec {
  * Assert the full mutually-exclusive view state: the named view's header is
  * up, exactly its panel is visible, every other overlay panel plus the
  * default panels and the file-context split are hidden, and the footer
- * offers the Escape step-back.
+ * offers the Escape step-back. `context` (e.g. "digest → heatmap") is
+ * appended to failure messages by the pairwise sweep.
  */
-function expectViewActive(view: ViewSpec | null): void {
+function expectViewActive(view: ViewSpec | null, context = ''): void {
+  const why = context ? ` [${context}]` : '';
   const c = h.state.components;
   if (view === null) {
-    expect(headerBox().content).toBe(DEFAULT_HEADER);
-    expect(c.workerGrid.visible).toBe(true);
-    expect(c.activityStream.visible).toBe(true);
-    expect(c.fileContextPanel.visible).toBe(false);
+    expect(headerBox().content, `header${why}`).toBe(DEFAULT_HEADER);
+    expect(c.workerGrid.visible, `workerGrid${why}`).toBe(true);
+    expect(c.activityStream.visible, `activityStream${why}`).toBe(true);
+    expect(c.fileContextPanel.visible, `fileContextPanel${why}`).toBe(false);
     for (const v of VIEWS) {
-      expect(c[v.panel].visible).toBe(false);
+      expect(c[v.panel].visible, `panel ${v.panel} in default view${why}`).toBe(false);
     }
     return;
   }
-  expect(headerBox().content).toBe(view.header);
+  expect(headerBox().content, `header${why}`).toBe(view.header);
   for (const v of VIEWS) {
-    expect(c[v.panel].visible, `panel ${v.panel} while in ${view.name}`).toBe(v.panel === view.panel);
+    expect(c[v.panel].visible, `panel ${v.panel} while in ${view.name}${why}`).toBe(v.panel === view.panel);
   }
-  expect(c.workerGrid.visible).toBe(false);
-  expect(c.activityStream.visible).toBe(false);
-  expect(c.fileContextPanel.visible).toBe(false);
-  expect(footerBox().content).toContain('[Esc]');
+  expect(c.workerGrid.visible, `workerGrid while in ${view.name}${why}`).toBe(false);
+  expect(c.activityStream.visible, `activityStream while in ${view.name}${why}`).toBe(false);
+  expect(c.fileContextPanel.visible, `fileContextPanel while in ${view.name}${why}`).toBe(false);
+  expect(footerBox().content, `footer${why}`).toContain('[Esc]');
 }
 
 const WORKER: WorkerInfo = {
@@ -499,6 +512,24 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       }
     });
 
+    it.each(VIEWS)(
+      'leaving $name for every other view keeps exactly one active (all ordered pairs)',
+      fromView => {
+        for (const toView of VIEWS) {
+          if (toView.name === fromView.name) continue;
+          buildApp();
+          press(fromView.keys[0]);
+          press(toView.keys[0]);
+          // docs/cli.md: "Views are mutually exclusive. Pressing another
+          // view's key while a view is open switches directly to that
+          // view." The chained sweep above only walks the views forward;
+          // this walks every ordered pair, so a branch that fails to hide
+          // a view it never overlapped with cannot pass.
+          expectViewActive(toView, `${fromView.name} → ${toView.name}`);
+        }
+      }
+    );
+
     it('every view key is a toggle: pressing it again returns to the default view', () => {
       for (const view of VIEWS) {
         press(view.keys[0]);
@@ -523,6 +554,31 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       press('R');
       expectViewActive(null);
     });
+
+    it.each(VIEWS)('$name: r re-renders the screen in place and never switches views', view => {
+      press(view.keys[0]);
+      const rendersBefore = h.state.renderCalls;
+      press('r');
+      // The global r is "re-render the screen" in every view — its
+      // view-local refresh actions fire alongside it (docs/cli.md).
+      expect(h.state.renderCalls).toBe(rendersBefore + 1);
+      expectViewActive(view);
+    });
+
+    it.each(VIEWS.filter(v => v.name !== 'replay'))(
+      'R reaches session replay from $name and r inside replay only re-renders',
+      view => {
+        press(view.keys[0]);
+        press('R');
+        expectViewActive(findView('replay'));
+
+        press('r');
+        expectViewActive(findView('replay'));
+
+        press('escape');
+        expectViewActive(null);
+      }
+    );
   });
 
   describe('Escape', () => {
@@ -540,8 +596,8 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       expectViewActive(null);
     });
 
-    it('never dismisses the help overlay — only ? closes it', () => {
-      press('H');
+    it.each(VIEWS)('never dismisses the help overlay opened above $name — only ? closes it', view => {
+      press(view.keys[0]);
       press('?');
       const overlay = helpOverlays()[0];
       expect(overlay).toBeDefined();
@@ -572,16 +628,16 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       expect(h.state.components.workerDetail.visible).toBe(false);
     });
 
-    it('Escape closes the detail overlay before stepping back a view', () => {
+    it.each(VIEWS)('$name: Escape closes the detail overlay before stepping back the view', view => {
       h.state.selectedWorker = WORKER;
-      press('H');
+      press(view.keys[0]);
       press('enter');
       expect(h.state.components.workerDetail.visible).toBe(true);
 
       press('escape');
       // First Escape closes the detail and leaves the view untouched.
       expect(h.state.components.workerDetail.visible).toBe(false);
-      expectViewActive(findView('heatmap'));
+      expectViewActive(view);
 
       // Second Escape steps back to the default view.
       press('escape');
@@ -607,29 +663,44 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       expect(palette.visible).toBe(false);
     });
 
-    it('the palette floats above the active view without changing it', () => {
+    it.each(VIEWS)('$name: the palette floats above the view and C-k never changes it', view => {
       const palette = h.state.components.commandPalette;
-      press('H');
+      press(view.keys[0]);
       press('C-k');
       expect(palette.visible).toBe(true);
-      expectViewActive(findView('heatmap'));
+      expectViewActive(view);
       press('C-k');
       expect(palette.visible).toBe(false);
-      expectViewActive(findView('heatmap'));
+      expectViewActive(view);
     });
 
-    it('Escape while the palette is open still steps back the active view', () => {
+    it.each(VIEWS)('$name: Escape while the palette is open still steps back the view', view => {
       // docs/cli.md: closing the palette with Escape also fires the global
-      // Escape action, so the active view steps back at the same time.
-      press('G');
+      // Escape action, so the active view steps back at the same time. (The
+      // palette's own close is the component's binding on its input element
+      // — below the screen level this file pins, so only the step-back is
+      // asserted here.)
+      const palette = h.state.components.commandPalette;
+      press(view.keys[0]);
       press('C-k');
-      expect(h.state.components.commandPalette.visible).toBe(true);
+      expect(palette.visible).toBe(true);
       press('escape');
       expectViewActive(null);
     });
   });
 
   describe('help overlay (?)', () => {
+    it.each(VIEWS)('? opens and closes above $name without changing the active view', view => {
+      press(view.keys[0]);
+      press('?');
+      expect(helpOverlays()).toHaveLength(1);
+      expectViewActive(view);
+
+      press('?');
+      expect(helpOverlays().filter(o => !o.destroyed)).toHaveLength(0);
+      expectViewActive(view);
+    });
+
     it('? creates a single overlay without changing the active view', () => {
       press('?');
       expect(helpOverlays()).toHaveLength(1);
@@ -667,6 +738,48 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       press('?');
       expect(helpOverlays()).toHaveLength(1);
       expect(h.state.components.workerDetail.visible).toBe(true);
+    });
+  });
+
+  describe('file-context split vs views (docs/cli.md entry/exit semantics)', () => {
+    it('Ctrl+F opens and closes the split in the default view', () => {
+      const c = h.state.components;
+      press('C-f');
+      expect(c.fileContextPanel.visible).toBe(true);
+      // The split accompanies the default panels; it is not a view.
+      expect(c.workerGrid.visible).toBe(true);
+      expect(c.activityStream.visible).toBe(true);
+      expect(headerBox().content).toBe(DEFAULT_HEADER);
+
+      press('C-f');
+      expect(c.fileContextPanel.visible).toBe(false);
+    });
+
+    it.each(VIEWS)('entering $name closes an open split; default does not restore it', view => {
+      const c = h.state.components;
+      press('C-f');
+      expect(c.fileContextPanel.visible).toBe(true);
+
+      // Entry "closes the file-context split if it is open"…
+      press(view.keys[0]);
+      expect(c.fileContextPanel.visible).toBe(false);
+      expectViewActive(view);
+
+      // …and returning to the default view does NOT restore it — it is
+      // reopened explicitly with Ctrl+F.
+      press('escape');
+      expectViewActive(null);
+      expect(c.fileContextPanel.visible).toBe(false);
+      press('C-f');
+      expect(c.fileContextPanel.visible).toBe(true);
+    });
+
+    it.each(VIEWS)('Ctrl+F is a no-op while $name is active', view => {
+      press(view.keys[0]);
+      press('C-f');
+      // Default-view-only key: no split may open over an active view.
+      expect(h.state.components.fileContextPanel.visible).toBe(false);
+      expectViewActive(view);
     });
   });
 
