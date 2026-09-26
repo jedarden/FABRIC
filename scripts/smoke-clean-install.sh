@@ -17,6 +17,10 @@
 #   Phase 5  runtime smoke       clean environment (sandboxed $HOME, no ~/.needle):
 #                                fabric logs   single-file parse, directory hot-add,
 #                                              graceful SIGINT
+#                                fabric tail   the same coverage under the primary
+#                                              spelling (docs/cli.md: "logs is an
+#                                              alias for tail"); --help equivalence
+#                                              checked in phase 4
 #                                fabric web    /api/health, SPA assets served from
 #                                              the installed package, graceful SIGINT
 #                                fabric tui    pty startup, graceful SIGINT
@@ -194,12 +198,25 @@ if ! printf '%s' "$VERSION_OUT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
 fi
 
 HELP_OUT="$("$BIN" --help)"
-for cmd in tui web tail; do
+for cmd in tui web tail logs; do
   if ! printf '%s' "$HELP_OUT" | grep -q "$cmd"; then
     fail "fabric --help does not list the '$cmd' command"
   fi
 done
-pass "bin link works; --version=$VERSION_OUT; --help lists tui/web/tail"
+
+# docs/cli.md documents `fabric tail` / `fabric logs` as equivalent — "logs is
+# an alias for tail". Both spellings must resolve on the installed package and
+# render identical help.
+TAIL_HELP="$("$BIN" tail --help)"
+LOGS_HELP="$("$BIN" logs --help)"
+if [ -z "$TAIL_HELP" ]; then fail "fabric tail --help produced no output"; fi
+if [ "$TAIL_HELP" != "$LOGS_HELP" ]; then
+  fail "fabric tail --help and fabric logs --help differ (alias not equivalent)"
+fi
+for opt in '--source' '--no-follow' '--event-type' '--json'; do
+  printf '%s' "$TAIL_HELP" | grep -q -- "$opt" || fail "fabric tail --help does not document $opt"
+done
+pass "bin link works; --version=$VERSION_OUT; --help lists tui/web/tail|logs; tail/logs help identical"
 
 # --- Phase 5: runtime smoke in a clean environment -----------------------------
 
@@ -222,7 +239,19 @@ grep -q 'FABRIC Tail' "$OUT_A" || fail "fabric logs: startup banner missing"
 grep -q 'alpha' "$OUT_A" || fail "fabric logs: no parsed events from existing file content"
 pass "fabric logs (single file): startup, parsed events, clean exit"
 
-# 5b. fabric logs — directory mode, hot-added file, graceful SIGINT
+# 5b. fabric tail — the same fixture ingestion under the documented primary
+# spelling (docs/cli.md: "logs is an alias for tail")
+OUT_TAIL_FILE="$OUT_DIR/tail-single.log"
+if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" tail \
+      -f "$LOGS/alpha-d6288428.jsonl" --no-follow -n 100 >"$OUT_TAIL_FILE" 2>&1; then
+  tail -20 "$OUT_TAIL_FILE" >&2 || true
+  fail "fabric tail (single file) exited nonzero"
+fi
+grep -q 'FABRIC Tail' "$OUT_TAIL_FILE" || fail "fabric tail: startup banner missing"
+grep -q 'alpha' "$OUT_TAIL_FILE" || fail "fabric tail: no parsed events from existing file content"
+pass "fabric tail (single file): startup, parsed events, clean exit"
+
+# 5c. fabric logs — directory mode, hot-added file, graceful SIGINT
 OUT_B="$OUT_DIR/logs-dir.log"
 env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" logs --source "$LOGS" >"$OUT_B" 2>&1 &
 LPID=$!
@@ -255,7 +284,43 @@ kill -INT "$LPID"
 wait "$LPID" || fail "fabric logs (directory): nonzero exit after SIGINT"
 pass "fabric logs (directory): hot-add pickup + graceful SIGINT exit"
 
-# 5c. fabric web — health, SPA assets from the installed package, graceful SIGINT
+# 5d. fabric tail — the directory-mode coverage under the primary spelling:
+# hot-added file pickup + graceful SIGINT, mirroring 5c. Uses a distinct
+# hot-add worker id so the event written for 5c (already on disk when this run
+# starts, ingested as existing content) cannot satisfy the hot-add assertion.
+OUT_TAIL_DIR="$OUT_DIR/tail-dir.log"
+env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" tail --source "$LOGS" >"$OUT_TAIL_DIR" 2>&1 &
+TPID=$!
+BANNER=0
+for _ in $(seq 1 20); do
+  if grep -q 'FABRIC Tail' "$OUT_TAIL_DIR" 2>/dev/null; then BANNER=1; break; fi
+  sleep 0.5
+done
+if [ "$BANNER" -ne 1 ]; then
+  tail -20 "$OUT_TAIL_DIR" >&2 || true
+  kill "$TPID" 2>/dev/null || true
+  fail "fabric tail (directory): startup banner never appeared"
+fi
+
+printf '{"timestamp":"2026-09-16T00:00:01.000Z","event_type":"worker.started","worker_id":"smoke-hotadd-tail-2222bbbb","session_id":"smoke-2","sequence":1,"data":{}}\n' \
+  > "$LOGS/smoke-hotadd-tail-2222bbbb.jsonl"
+
+HOTADD=0
+for _ in $(seq 1 20); do
+  if grep -q 'smoke-hotadd-tail-2222bbbb' "$OUT_TAIL_DIR" 2>/dev/null; then HOTADD=1; break; fi
+  sleep 0.5
+done
+if [ "$HOTADD" -ne 1 ]; then
+  tail -20 "$OUT_TAIL_DIR" >&2 || true
+  kill "$TPID" 2>/dev/null || true
+  fail "fabric tail (directory): hot-added file event never surfaced"
+fi
+
+kill -INT "$TPID"
+wait "$TPID" || fail "fabric tail (directory): nonzero exit after SIGINT"
+pass "fabric tail (directory): hot-add pickup + graceful SIGINT exit"
+
+# 5e. fabric web — health, SPA assets from the installed package, graceful SIGINT
 PORT=""
 for _ in $(seq 1 5); do
   CAND=$((20000 + RANDOM % 20000))
@@ -292,7 +357,7 @@ if [ -d "$SMOKE_HOME/.needle" ]; then
 fi
 pass "fabric web: /api/health, SPA assets served, graceful SIGINT exit"
 
-# 5d. fabric tui — pty startup + graceful SIGINT.
+# 5f. fabric tui — pty startup + graceful SIGINT.
 # `script` allocates the pty blessed needs; `timeout` runs inside it so SIGINT
 # reaches node directly; --preserve-status propagates the CLI's real exit code.
 OUT_D="$OUT_DIR/tui.log"
@@ -309,7 +374,7 @@ if ! grep -a -q 'FABRIC' "$OUT_D"; then fail "fabric tui: no UI rendered in pty 
 if grep -a -q 'Failed to start TUI' "$OUT_D"; then fail "fabric tui: reported startup failure"; fi
 pass "fabric tui: pty startup + graceful SIGINT exit"
 
-# 5e. fabric replay — pty startup on the fixture logs + graceful SIGINT.
+# 5g. fabric replay — pty startup on the fixture logs + graceful SIGINT.
 # Like tui, replay is a blessed screen; blessed's own SIGINT handler exits 0.
 OUT_E="$OUT_DIR/replay.log"
 REPLAY_CMD="env HOME=$SMOKE_HOME NO_COLOR=1 timeout --preserve-status -s INT 6 node $FABRIC_CLI replay --source $LOGS"
@@ -327,7 +392,7 @@ fi
 if grep -a -q 'Failed to start replay' "$OUT_E"; then fail "fabric replay: reported startup failure"; fi
 pass "fabric replay: pty startup over fixture logs + graceful SIGINT exit"
 
-# 5f. fabric prune — dry-run reports without touching, real run archives an
+# 5h. fabric prune — dry-run reports without touching, real run archives an
 # aged fixture copy. Everything happens under $WORK (scratch dir + sandboxed
 # HOME), never the real ~/.needle/logs.
 PRUNE_LOGS="$WORK/prune-logs"
@@ -362,7 +427,7 @@ if [ -z "$ARCHIVE_TAR" ] || [ ! -f "$ARCHIVE_TAR" ]; then fail "fabric prune: no
 tar -tzf "$ARCHIVE_TAR" | grep -q 'smoke-aged-1111aaaa.jsonl' || fail "fabric prune: archive tarball missing the aged file"
 pass "fabric prune (real run): aged fixture archived into $(basename "$ARCHIVE_TAR")"
 
-# 5g. fabric digest — deterministic digest over the fixture logs, both the
+# 5i. fabric digest — deterministic digest over the fixture logs, both the
 # directory source (stdout) and the single-file --output workflow.
 OUT_G="$OUT_DIR/digest-dir.log"
 if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" digest \
@@ -387,7 +452,7 @@ grep -q '# Session Digest' "$OUT_G2" || fail "fabric digest: --output file lacks
 grep -q 'Digest written to' "$OUT_DIR/digest-file.log" || fail "fabric digest: --output path not reported"
 pass "fabric digest (--output): digest written to $OUT_G2"
 
-# 5h. fabric config — show, theme set + readback (persisted under the sandboxed
+# 5j. fabric config — show, theme set + readback (persisted under the sandboxed
 # HOME), invalid-theme contract, presets listing, clear.
 OUT_H="$OUT_DIR/config-show.log"
 if ! env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" config >"$OUT_H" 2>&1; then
@@ -439,4 +504,4 @@ pass "fabric config clear --all: persisted config removed"
 # --- Summary -------------------------------------------------------------------
 
 phase "summary"
-log "source build, packaged tarball, clean npm install, and startup smoke for logs/web/tui/replay/prune/digest/config all verified"
+log "source build, packaged tarball, clean npm install, and startup smoke for logs/tail/web/tui/replay/prune/digest/config all verified"

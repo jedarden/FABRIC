@@ -77,7 +77,9 @@ of `HEAD`, an empty install directory, and a sandboxed `$HOME` with no
 3. **Runtime smoke** — every command `fabric --help` documents, exercised
    against the repo's JSONL fixtures inside a sandboxed `$HOME` (nothing
    touches a real `~/.needle/logs`):
-   - `fabric logs` — single-file parse, directory hot-add, graceful SIGINT
+   - `fabric logs` and `fabric tail` — both documented spellings: single-file
+     parse, directory hot-add, graceful SIGINT, and identical `--help` output
+     (the CLI reference documents `logs` as an alias of `tail`)
    - `fabric web` — `/api/health`, SPA assets served from the installed
      package, graceful SIGINT
    - `fabric tui` — startup on a pty via `script`, graceful SIGINT
