@@ -1241,10 +1241,29 @@ export class FabricTuiApp {
   private setViewMode(mode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics' | 'transcript' | 'xref' | 'budget'): void {
     this.viewMode = mode;
 
-    // Hide file context panel when switching views (except default)
+    // Views are mutually exclusive (docs/cli.md "Views — entry and exit").
+    // Hide every view panel up front — including overlay views the
+    // per-branch hide lists below never covered, which left two panels
+    // visible when switching from a later view to an earlier one (e.g.
+    // digest → heatmap kept the digest panel up). Hiding an already-hidden
+    // panel is a no-op, so the branch-local lists stay harmless.
     if (mode !== 'default') {
+      this.workerGrid.getElement().hide();
+      this.activityStream.getElement().hide();
       this.fileContextPanel.hide();
       this.fileContextVisible = false;
+      this.fileHeatmap.getElement().hide();
+      this.dependencyDag.getElement().hide();
+      this.sessionReplay.hide();
+      this.errorGroupPanel.hide();
+      this.sessionDigest.hide();
+      this.collisionAlert.hide();
+      this.gitIntegration.hide();
+      this.semanticNarrativePanel.hide();
+      this.workerAnalyticsPanel.hide();
+      this.conversationTranscript.hide();
+      this.crossReferencePanel.hide();
+      this.budgetAlertPanel.hide();
     }
 
     if (mode === 'heatmap') {
