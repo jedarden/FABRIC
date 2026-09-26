@@ -794,6 +794,45 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       expectViewActive(findView(claim.view));
     });
 
+    it('keeps r and R deconflicted in the help text itself — R is the only replay line', () => {
+      // Regression guard for the r/R shortcut conflict (docs/cli.md
+      // "Binding conflicts"): the bindings are pinned elsewhere; this pins
+      // the text users actually read. If the overlay ever relabels
+      // lowercase r as a replay action, this fails before the docs drift.
+      const content = openHelpContent();
+
+      // Single-letter key lines only — section headers and compound keys
+      // (j/k, C-r, Shift+Tab, Esc, Space) do not match this shape.
+      const keyLines = (key: string): string[] =>
+        content
+          .split('\n')
+          .map(line => line.match(/^\s*([A-Za-z])\s+- (.+?)\s*$/))
+          .filter((m): m is RegExpMatchArray => m !== null && m[1] === key)
+          .map(m => m[2]);
+
+      // The replay toggle appears exactly once, under uppercase R.
+      expect(keyLines('R')).toEqual(['Toggle session replay']);
+
+      // Every lowercase-r line is the screen-level re-render or a
+      // context-local refresh/reset/ready action — never a replay toggle
+      // ("r always re-renders and never switches views").
+      expect(keyLines('r').sort()).toEqual(
+        [
+          'Refresh', // Actions (screen-level re-render)
+          'Ready tasks', // Dependency DAG View
+          'Reset to beginning', // Session Replay overlay
+          'Refresh narrative', // Semantic Narrative
+          'Refresh metrics', // Worker Analytics
+          'Refresh cost data', // Budget Dashboard
+        ].sort()
+      );
+      expect(keyLines('r').join('\n')).not.toMatch(/replay/i);
+
+      // The DAG force refresh is documented on C-r precisely because the
+      // replay toggle owns R.
+      expect(content).toMatch(/^\s*C-r\s+- Force refresh\s*$/m);
+    });
+
     it('lists / and f as scoped actions but binds neither at screen level', () => {
       const content = openHelpContent();
       expect(content).toMatch(/^\s*\/\s+- Search\s*$/m);
