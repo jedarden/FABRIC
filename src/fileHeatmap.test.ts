@@ -196,6 +196,73 @@ describe('File Heatmap', () => {
     });
   });
 
+  describe('heatmap stats aggregates (deterministic values)', () => {
+    it('names the directory with the most modifications as mostActiveDirectory', () => {
+      const now = Date.now();
+      // /src accumulates 4 modifications across two files, /lib only 1
+      store.add(createFileEvent('/src/a.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/a.ts', 'w-aaa', 'Edit', now + 1000));
+      store.add(createFileEvent('/src/b.ts', 'w-aaa', 'Edit', now + 2000));
+      store.add(createFileEvent('/src/b.ts', 'w-aaa', 'Edit', now + 3000));
+      store.add(createFileEvent('/lib/c.ts', 'w-aaa', 'Edit', now + 4000));
+
+      expect(store.getFileHeatmapStats().mostActiveDirectory).toBe('/src');
+    });
+
+    it('falls back to "/" for the most active directory when no files exist', () => {
+      expect(store.getFileHeatmapStats().mostActiveDirectory).toBe('/');
+    });
+
+    it('counts files with currently-active workers in activeFiles', () => {
+      const now = Date.now();
+      // Two workers on one file (spaced beyond the collision window) plus a
+      // single-worker file: both entries have activeWorkers > 0.
+      store.add(createFileEvent('/src/shared.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/shared.ts', 'w-bbb', 'Edit', now + 10000));
+      store.add(createFileEvent('/src/solo.ts', 'w-ccc', 'Edit', now + 20000));
+
+      const stats = store.getFileHeatmapStats();
+      expect(stats.activeFiles).toBe(2);
+    });
+
+    it('reports zero active files for an empty store', () => {
+      expect(store.getFileHeatmapStats().activeFiles).toBe(0);
+    });
+
+    it('grows aggregate totals as new files and events arrive', () => {
+      store.add(createFileEvent('/src/a.ts', 'w-aaa', 'Edit'));
+      let stats = store.getFileHeatmapStats();
+      expect(stats.totalFiles).toBe(1);
+      expect(stats.totalModifications).toBe(1);
+
+      store.add(createFileEvent('/src/a.ts', 'w-aaa', 'Edit'));
+      store.add(createFileEvent('/src/b.ts', 'w-bbb', 'Edit'));
+      stats = store.getFileHeatmapStats();
+      expect(stats.totalFiles).toBe(2);
+      expect(stats.totalModifications).toBe(3);
+    });
+  });
+
+  describe('avgModificationInterval', () => {
+    it('averages the gaps between modification timestamps', () => {
+      const now = Date.now();
+      const path = '/src/interval.ts';
+      store.add(createFileEvent(path, 'w-aaa', 'Edit', now));
+      store.add(createFileEvent(path, 'w-aaa', 'Edit', now + 1000));
+      store.add(createFileEvent(path, 'w-aaa', 'Edit', now + 3000)); // gaps: 1000 + 2000
+
+      const entry = store.getFileHeatmap().find(e => e.path === path);
+      expect(entry?.avgModificationInterval).toBe(1500);
+    });
+
+    it('is zero for a file modified only once', () => {
+      store.add(createFileEvent('/src/once.ts', 'w-aaa', 'Edit'));
+
+      const entry = store.getFileHeatmap().find(e => e.path === '/src/once.ts');
+      expect(entry?.avgModificationInterval).toBe(0);
+    });
+  });
+
   describe('getWorkerFiles', () => {
     it('should return files modified by specific worker', () => {
       const now = Date.now();
