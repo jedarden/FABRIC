@@ -133,16 +133,19 @@ vi.mock('./components/CommandPalette.js', () => {
 vi.mock('./components/FileHeatmap.js', () => {
   return {
     FileHeatmap: class {
-      updateData = vi.fn();
-      focus = vi.fn();
-      getElement = vi.fn(() => ({
+      // Stable element identity so tests can assert show/hide calls
+      element = {
         hide: vi.fn(),
         show: vi.fn(),
         screen: { render: vi.fn() },
-      }));
+      };
+      updateData = vi.fn();
+      focus = vi.fn();
+      getElement = vi.fn(() => this.element);
       getSelected = vi.fn(() => null);
       getSortMode = vi.fn(() => 'modifications');
       getCollisionFilter = vi.fn(() => false);
+      getAnomalyFilter = vi.fn(() => false);
     },
   };
 });
@@ -851,6 +854,115 @@ describe('FabricTuiApp', () => {
 
       const mockScreen = getMockScreen();
       expect(mockScreen.render).toHaveBeenCalled();
+    });
+  });
+
+  describe('heatmap view behavior', () => {
+    const pressViewKey = (key: string): void => {
+      const mockScreen = getMockScreen();
+      const call = mockScreen.key.mock.calls.find(
+        (c: unknown[]) => Array.isArray(c?.[0]) && c[0].includes(key)
+      );
+      expect(call).toBeDefined();
+      (call?.[1] as () => void)();
+    };
+
+    const heatmapMock = () => (app as unknown as { fileHeatmap: any }).fileHeatmap;
+
+    const fileEvent = (path: string, worker = 'w-heat') =>
+      createMockEvent({
+        worker,
+        path,
+        tool: 'Edit',
+        msg: `Modifying ${path}`,
+      });
+
+    beforeEach(() => {
+      app = new FabricTuiApp(store);
+    });
+
+    it('wires the store heatmap getters when entering the view', () => {
+      store.add(fileEvent('/src/alpha.ts'));
+
+      pressViewKey('H');
+
+      const hm = heatmapMock();
+      expect(hm.updateData).toHaveBeenCalled();
+
+      const [getHeatmap, getStats, getAnomalies] = hm.updateData.mock.calls[0];
+      const entries = getHeatmap({ sortBy: 'modifications' });
+      expect(entries).toHaveLength(1);
+      expect(entries[0].path).toBe('/src/alpha.ts');
+
+      const stats = getStats();
+      expect(stats.totalFiles).toBe(1);
+      expect(stats.totalModifications).toBe(1);
+
+      expect(Array.isArray(getAnomalies({}))).toBe(true);
+    });
+
+    it('focuses the heatmap when the view opens', () => {
+      pressViewKey('H');
+
+      expect(heatmapMock().focus).toHaveBeenCalled();
+    });
+
+    it('shows the heatmap element on open and hides it on close', () => {
+      const el = heatmapMock().getElement();
+      el.show.mockClear();
+      el.hide.mockClear();
+
+      pressViewKey('H');
+      expect(el.show).toHaveBeenCalled();
+
+      pressViewKey('H');
+      expect(el.hide).toHaveBeenCalled();
+    });
+
+    it('refreshes heatmap data when new events arrive while the view is open', () => {
+      pressViewKey('H');
+
+      const hm = heatmapMock();
+      const callsBefore = hm.updateData.mock.calls.length;
+      expect(callsBefore).toBeGreaterThan(0);
+
+      // The tailer feeds the store; the app refreshes the visible view
+      store.add(fileEvent('/src/live-update.ts'));
+      app.addEvent(fileEvent('/src/live-update.ts'));
+
+      expect(hm.updateData.mock.calls.length).toBe(callsBefore + 1);
+      const [getHeatmap] = hm.updateData.mock.calls[hm.updateData.mock.calls.length - 1];
+      const entries = getHeatmap({});
+      expect(entries.some((e: { path: string }) => e.path === '/src/live-update.ts')).toBe(true);
+    });
+
+    it('does not refresh while hidden but picks up new events on re-entry', () => {
+      pressViewKey('H'); // open
+      pressViewKey('H'); // close
+
+      const hm = heatmapMock();
+      hm.updateData.mockClear();
+
+      store.add(fileEvent('/src/while-hidden.ts'));
+      app.addEvent(fileEvent('/src/while-hidden.ts'));
+      expect(hm.updateData).not.toHaveBeenCalled();
+
+      pressViewKey('H'); // reopen
+      expect(hm.updateData).toHaveBeenCalledTimes(1);
+      const [getHeatmap] = hm.updateData.mock.calls[0];
+      const entries = getHeatmap({});
+      expect(entries.some((e: { path: string }) => e.path === '/src/while-hidden.ts')).toBe(true);
+    });
+
+    it('re-reads heatmap data when render() runs while the view is open', () => {
+      pressViewKey('H');
+
+      const hm = heatmapMock();
+      hm.updateData.mockClear();
+
+      app.render();
+
+      expect(hm.updateData).toHaveBeenCalledTimes(1);
     });
   });
 });

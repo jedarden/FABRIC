@@ -259,4 +259,209 @@ describe('File Heatmap', () => {
       expect(def456?.percentage).toBe(25);
     });
   });
+
+  describe('heat level boundaries', () => {
+    // Documented levels: cold 1-2, warm 3-5, hot 6-10, critical 11+
+    it.each([
+      [1, 'cold'],
+      [2, 'cold'],
+      [3, 'warm'],
+      [5, 'warm'],
+      [6, 'hot'],
+      [10, 'hot'],
+      [11, 'critical'],
+      [15, 'critical'],
+    ])('classifies %d modifications as %s', (mods, expected) => {
+      const now = Date.now();
+      const path = `/src/heat-${mods}.ts`;
+      for (let i = 0; i < mods; i++) {
+        store.add(createFileEvent(path, 'w-abc123', 'Edit', now + i * 1000));
+      }
+
+      const entry = store.getFileHeatmap().find(e => e.path === path);
+      expect(entry).toBeDefined();
+      expect(entry!.heatLevel).toBe(expected);
+    });
+  });
+
+  describe('sort modes', () => {
+    let now: number;
+
+    beforeEach(() => {
+      now = Date.now();
+      // Multi-worker file: 3 workers spaced beyond the 5s collision window
+      store.add(createFileEvent('/src/multi.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/multi.ts', 'w-bbb', 'Edit', now + 10000));
+      store.add(createFileEvent('/src/multi.ts', 'w-ccc', 'Edit', now + 20000));
+      // Single-worker hot file: 10 modifications
+      for (let i = 0; i < 10; i++) {
+        store.add(createFileEvent('/src/hot.ts', 'w-aaa', 'Edit', now + 30000 + i * 1000));
+      }
+      // Collided file: two workers within the 5s collision window
+      store.add(createFileEvent('/src/collided.ts', 'w-aaa', 'Edit', now + 60000));
+      store.add(createFileEvent('/src/collided.ts', 'w-bbb', 'Edit', now + 61000));
+    });
+
+    it('sorts by modification count by default', () => {
+      const heatmap = store.getFileHeatmap();
+      expect(heatmap[0].path).toBe('/src/hot.ts');
+    });
+
+    it('sorts by most recently modified', () => {
+      const heatmap = store.getFileHeatmap({ sortBy: 'recent' });
+      expect(heatmap[0].path).toBe('/src/collided.ts');
+    });
+
+    it('sorts by worker count', () => {
+      const heatmap = store.getFileHeatmap({ sortBy: 'workers' });
+      expect(heatmap[0].path).toBe('/src/multi.ts');
+      expect(heatmap[0].workers).toHaveLength(3);
+    });
+
+    it('sorts collided files first by collision priority', () => {
+      const heatmap = store.getFileHeatmap({ sortBy: 'collisions' });
+      expect(heatmap[0].path).toBe('/src/collided.ts');
+      expect(heatmap[0].hasCollision).toBe(true);
+      // Non-collided files follow, ordered by modification count
+      expect(heatmap[1].path).toBe('/src/hot.ts');
+      expect(heatmap[2].path).toBe('/src/multi.ts');
+    });
+  });
+
+  describe('collision detection and filtering', () => {
+    it('flags files touched by multiple workers within the collision window', () => {
+      const now = Date.now();
+      store.add(createFileEvent('/src/shared.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/shared.ts', 'w-bbb', 'Edit', now + 1000));
+      store.add(createFileEvent('/src/quiet.ts', 'w-aaa', 'Edit', now + 2000));
+
+      const heatmap = store.getFileHeatmap();
+      const shared = heatmap.find(e => e.path === '/src/shared.ts');
+      const quiet = heatmap.find(e => e.path === '/src/quiet.ts');
+
+      expect(shared?.hasCollision).toBe(true);
+      expect(quiet?.hasCollision).toBe(false);
+    });
+
+    it('counts active workers on a collided file', () => {
+      const now = Date.now();
+      store.add(createFileEvent('/src/shared.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/shared.ts', 'w-bbb', 'Edit', now + 1000));
+
+      const shared = store.getFileHeatmap().find(e => e.path === '/src/shared.ts');
+      expect(shared?.activeWorkers).toBe(2);
+    });
+
+    it('collisionsOnly filter returns only collided files', () => {
+      const now = Date.now();
+      store.add(createFileEvent('/src/shared.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/shared.ts', 'w-bbb', 'Edit', now + 1000));
+      store.add(createFileEvent('/src/quiet.ts', 'w-aaa', 'Edit', now + 2000));
+
+      const heatmap = store.getFileHeatmap({ collisionsOnly: true });
+      expect(heatmap).toHaveLength(1);
+      expect(heatmap[0].path).toBe('/src/shared.ts');
+
+      const stats = store.getFileHeatmapStats();
+      expect(stats.collisionFiles).toBe(1);
+    });
+
+    it('does not flag workers editing the same file outside the window', () => {
+      const now = Date.now();
+      store.add(createFileEvent('/src/serial.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/serial.ts', 'w-bbb', 'Edit', now + 10000));
+
+      const serial = store.getFileHeatmap().find(e => e.path === '/src/serial.ts');
+      expect(serial?.hasCollision).toBe(false);
+      expect(serial?.workers).toHaveLength(2);
+    });
+  });
+
+  describe('live updates as events arrive', () => {
+    it('picks up a newly-touched file in a subsequent query', () => {
+      store.add(createFileEvent('/src/first.ts', 'w-aaa', 'Edit'));
+      expect(store.getFileHeatmap().map(e => e.path)).toEqual(['/src/first.ts']);
+
+      store.add(createFileEvent('/src/second.ts', 'w-bbb', 'Edit'));
+      const heatmap = store.getFileHeatmap();
+      expect(heatmap).toHaveLength(2);
+      expect(heatmap.map(e => e.path)).toContain('/src/second.ts');
+    });
+
+    it('increments counts and upgrades heat level as more events arrive', () => {
+      const path = '/src/growing.ts';
+      const now = Date.now();
+
+      store.add(createFileEvent(path, 'w-aaa', 'Edit', now));
+      let entry = store.getFileHeatmap().find(e => e.path === path);
+      expect(entry?.modifications).toBe(1);
+      expect(entry?.heatLevel).toBe('cold');
+
+      for (let i = 1; i <= 5; i++) {
+        store.add(createFileEvent(path, 'w-aaa', 'Edit', now + i * 1000));
+      }
+      entry = store.getFileHeatmap().find(e => e.path === path);
+      expect(entry?.modifications).toBe(6);
+      expect(entry?.heatLevel).toBe('hot');
+    });
+
+    it('moves a file to the front of the recent sort after a new event', () => {
+      const now = Date.now();
+      store.add(createFileEvent('/src/older.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/newer.ts', 'w-aaa', 'Edit', now + 60000));
+
+      expect(store.getFileHeatmap({ sortBy: 'recent' })[0].path).toBe('/src/newer.ts');
+
+      store.add(createFileEvent('/src/older.ts', 'w-aaa', 'Edit', now + 120000));
+      expect(store.getFileHeatmap({ sortBy: 'recent' })[0].path).toBe('/src/older.ts');
+    });
+
+    it('attributes a new worker joining a file in a later event', () => {
+      const now = Date.now();
+      const path = '/src/joined.ts';
+      store.add(createFileEvent(path, 'w-aaa', 'Edit', now));
+      store.add(createFileEvent(path, 'w-aaa', 'Edit', now + 1000));
+
+      let entry = store.getFileHeatmap()[0];
+      expect(entry.workers).toHaveLength(1);
+      expect(entry.workers[0]).toMatchObject({ workerId: 'w-aaa', modifications: 2, percentage: 100 });
+
+      // Second worker joins outside the 5s collision window
+      store.add(createFileEvent(path, 'w-bbb', 'Edit', now + 7000));
+
+      entry = store.getFileHeatmap()[0];
+      expect(entry.modifications).toBe(3);
+      expect(entry.workers).toHaveLength(2);
+      expect(entry.workers.find(w => w.workerId === 'w-bbb')).toMatchObject({
+        modifications: 1,
+        percentage: 33,
+      });
+    });
+  });
+
+  describe('getFileAnomalies', () => {
+    it('returns no anomalies for an empty store', () => {
+      expect(store.getFileAnomalies()).toEqual([]);
+    });
+
+    it('flags unexpected config file activity', () => {
+      store.add(createFileEvent('/app/config/settings.yaml', 'w-aaa', 'Edit'));
+
+      const anomalies = store.getFileAnomalies();
+      expect(
+        anomalies.some(a => a.path === '/app/config/settings.yaml' && a.type === 'config_modification')
+      ).toBe(true);
+    });
+
+    it('grows as new suspicious events arrive', () => {
+      expect(store.getFileAnomalies()).toHaveLength(0);
+
+      store.add(createFileEvent('/project/.env', 'w-aaa', 'Edit'));
+      store.add(createFileEvent('/project/deploy.sh', 'w-aaa', 'Edit'));
+
+      const anomalies = store.getFileAnomalies();
+      expect(anomalies.some(a => a.path === '/project/.env')).toBe(true);
+      expect(anomalies.some(a => a.path === '/project/deploy.sh')).toBe(false);
+    });
+  });
 });

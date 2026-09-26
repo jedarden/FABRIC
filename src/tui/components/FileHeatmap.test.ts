@@ -33,7 +33,7 @@ vi.mock('blessed', () => {
 
 // Import after mocking
 import { FileHeatmap } from './FileHeatmap.js';
-import { FileHeatmapEntry, FileHeatmapStats, HeatmapOptions, HeatLevel } from '../../types.js';
+import { FileHeatmapEntry, FileHeatmapStats, HeatmapOptions, HeatLevel, FileAnomaly } from '../../types.js';
 
 // Helper to create mock FileHeatmapEntry
 function createMockEntry(overrides: Partial<FileHeatmapEntry> = {}): FileHeatmapEntry {
@@ -787,6 +787,216 @@ describe('FileHeatmap', () => {
 
       const content = mockBoxInstance.setContent.mock.calls[0][0];
       expect(content).toContain('  0'); // Padded to 3 chars
+    });
+  });
+
+  // Helper shared by the behavior suites below: invoke a bound key handler
+  const getKeyHandler = (k: string): (() => void) | undefined => {
+    const call = mockBoxInstance.key.mock.calls.find(
+      (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes(k)
+    );
+    return call?.[1] as () => void;
+  };
+
+  describe('anomaly filter (a key)', () => {
+    it('should bind a key to toggle anomaly view', () => {
+      expect(mockBoxInstance.key).toHaveBeenCalledWith(['a'], expect.any(Function));
+    });
+
+    it('should start with anomaly filter disabled', () => {
+      expect(fileHeatmap.getAnomalyFilter()).toBe(false);
+    });
+
+    it('should toggle anomaly filter when a key is pressed', () => {
+      const aHandler = getKeyHandler('a');
+
+      aHandler?.();
+      expect(fileHeatmap.getAnomalyFilter()).toBe(true);
+
+      aHandler?.();
+      expect(fileHeatmap.getAnomalyFilter()).toBe(false);
+    });
+
+    it('should show [ANOMALIES] label when anomaly filter is enabled', () => {
+      const aHandler = getKeyHandler('a');
+
+      aHandler?.();
+      fileHeatmap.updateData(() => [], createMockStats);
+
+      expect(mockBoxInstance.setLabel).toHaveBeenCalledWith(' File Heatmap [ANOMALIES] ');
+    });
+
+    it('should allow only one of collisions/anomalies mode at a time', () => {
+      const aHandler = getKeyHandler('a');
+      const cHandler = getKeyHandler('c');
+
+      // Enabling anomalies resets collision mode
+      cHandler?.();
+      expect(fileHeatmap.getCollisionFilter()).toBe(true);
+      aHandler?.();
+      expect(fileHeatmap.getAnomalyFilter()).toBe(true);
+      expect(fileHeatmap.getCollisionFilter()).toBe(false);
+
+      // And enabling collisions resets anomaly mode
+      cHandler?.();
+      expect(fileHeatmap.getCollisionFilter()).toBe(true);
+      expect(fileHeatmap.getAnomalyFilter()).toBe(false);
+    });
+  });
+
+  describe('anomaly view rendering', () => {
+    const makeAnomaly = (overrides: Partial<FileAnomaly> = {}): FileAnomaly => ({
+      path: 'src/config/settings.yaml',
+      type: 'config_modification',
+      severity: 'warning',
+      message: 'Configuration file modified outside of config-related task',
+      detectedAt: Date.now(),
+      details: {},
+      ...overrides,
+    });
+
+    it('should show the anomaly summary section when anomalies exist', () => {
+      const anomalies = [makeAnomaly()];
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats, () => anomalies);
+
+      const content = mockBoxInstance.setContent.mock.calls[0][0];
+      expect(content).toContain('Unexpected Activity');
+      expect(content).toContain('settings.yaml');
+    });
+
+    it('should not show the anomaly summary when no anomalies are provided', () => {
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats, () => []);
+
+      const content = mockBoxInstance.setContent.mock.calls[0][0];
+      expect(content).not.toContain('Unexpected Activity');
+    });
+
+    it('should list anomalies in anomalies-only mode', () => {
+      getKeyHandler('a')?.();
+
+      const anomalies = [
+        makeAnomaly({ path: 'src/config/settings.yaml' }),
+        makeAnomaly({ path: 'deploy/.env', type: 'sensitive_file', severity: 'critical' }),
+      ];
+      fileHeatmap.updateData(() => [], createMockStats, () => anomalies);
+
+      // The [a] handler renders once before updateData lands; check the latest render
+      const calls = mockBoxInstance.setContent.mock.calls;
+      const content = calls[calls.length - 1][0];
+      expect(content).toContain('Unexpected Activity');
+      expect(content).toContain('CONFIG');
+      expect(content).toContain('SENSITIVE');
+      // The file list is replaced by the anomaly list in this mode
+      expect(content).not.toContain('No file modifications detected');
+    });
+
+    it('should show a clear message when anomalies-only mode has no anomalies', () => {
+      getKeyHandler('a')?.();
+      fileHeatmap.updateData(() => [], createMockStats, () => []);
+
+      const content = mockBoxInstance.setContent.mock.calls[0][0];
+      expect(content).toContain('No anomalies detected');
+      expect(content).toContain('Press [a] to return to file view');
+    });
+
+    it('should navigate anomalies in anomalies-only mode', () => {
+      getKeyHandler('a')?.();
+
+      const anomalies = [
+        makeAnomaly({ path: 'a.yaml' }),
+        makeAnomaly({ path: 'b.yaml' }),
+      ];
+      fileHeatmap.updateData(() => [], createMockStats, () => anomalies);
+
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('a.yaml');
+
+      fileHeatmap.selectNext();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('b.yaml');
+
+      fileHeatmap.selectPrevious();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('a.yaml');
+    });
+
+    it('should cap the summary section to three anomalies with an overflow hint', () => {
+      const anomalies = [
+        makeAnomaly({ path: '1.yaml' }),
+        makeAnomaly({ path: '2.yaml' }),
+        makeAnomaly({ path: '3.yaml' }),
+        makeAnomaly({ path: '4.yaml' }),
+        makeAnomaly({ path: '5.yaml' }),
+      ];
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats, () => anomalies);
+
+      const content = mockBoxInstance.setContent.mock.calls[0][0];
+      expect(content).toContain('+2 more (press [a] to view)');
+    });
+  });
+
+  describe('data getter wiring (sort/filter options)', () => {
+    it('should request entries sorted by the current sort mode', () => {
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      expect(getHeatmap).toHaveBeenCalledWith(
+        expect.objectContaining({ sortBy: 'modifications' })
+      );
+
+      getKeyHandler('s')?.();
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sortBy: 'recent' })
+      );
+    });
+
+    it('should request collision-filtered entries when collisions-only is on', () => {
+      getKeyHandler('c')?.();
+
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ collisionsOnly: true })
+      );
+    });
+
+    it('should pass the directory filter to the getter', () => {
+      fileHeatmap.setFilter('src/auth');
+
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ directoryFilter: 'src/auth' })
+      );
+    });
+
+    it('should pass an undefined directory filter when none is set', () => {
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ directoryFilter: undefined })
+      );
+    });
+
+    it('should fetch anomalies when an anomaly getter is provided', () => {
+      const getAnomalies = vi.fn(() => []);
+      fileHeatmap.updateData(() => [], createMockStats, getAnomalies);
+
+      expect(getAnomalies).toHaveBeenCalled();
+    });
+  });
+
+  describe('sort mode header display', () => {
+    it('should show the active sort mode in the stats header', () => {
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats);
+
+      const calls = mockBoxInstance.setContent.mock.calls;
+      expect(calls[0][0]).toContain('Sort: modifications');
+
+      getKeyHandler('s')?.();
+      const content = calls[calls.length - 1][0];
+      expect(content).toContain('Sort: recent');
     });
   });
 });
