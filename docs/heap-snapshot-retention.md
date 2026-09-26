@@ -104,7 +104,9 @@ OOM-kill detection edge) is pinned in `src/systemCgroupMonitor.test.ts`.
 **Authentication:** every memory-mutating `POST` below — `heap-snapshot`,
 `capture`, `baseline`, and `trend/save` — requires
 `Authorization: Bearer $FABRIC_AUTH_TOKEN` (same as every POST endpoint in
-FABRIC; see `docs/api-auth.md`). All `GET`s here are open and read-only.
+FABRIC; see `docs/api-auth.md`). All `GET`s here are open and read-only — the
+memory profiler's one-time in-memory initialization on a first stats read
+(`docs/memory-api.md`) is the sole, memory-only exception.
 
 > Complete request/response schemas, error tables, enablement behavior, and
 > retention overrides for every `/api/memory/*` endpoint:

@@ -223,7 +223,7 @@ needle run ...                                    # workers POST to /api/events 
 
 #### Authentication
 
-**Every POST endpoint** requires a `Bearer` token when the server is started with an auth token — not just event ingestion: retention pruning, theme, the memory-mutation routes (`/api/memory/capture`, `/api/memory/baseline`, `/api/memory/heap-snapshot`, `/api/memory/trend/save`), cost-alert acknowledgement, and the OTLP/HTTP receiver. GET endpoints are open (read-only, no secret data). A missing `Authorization` header answers `401`; a wrong token answers `403`. Full policy, status codes, and route inventory: `docs/api-auth.md`.
+**Every POST endpoint** requires a `Bearer` token when the server is started with an auth token — not just event ingestion: retention pruning, theme, the memory-mutation routes (`/api/memory/capture`, `/api/memory/baseline`, `/api/memory/heap-snapshot`, `/api/memory/trend/save`), cost-alert acknowledgement, and the OTLP/HTTP receiver. GET endpoints are open (read-only, no secret data) — a GET is never auth-challenged and is free of durable side effects (no disk write, no event ingested, no baseline moved); the sole exception is the memory profiler's documented one-time in-memory initialization on a first stats read (`docs/memory-api.md`). A missing `Authorization` header answers `401`; a wrong token answers `403`. Full policy, status codes, and route inventory: `docs/api-auth.md`.
 
 ```bash
 # Start with auth token (env var or flag)

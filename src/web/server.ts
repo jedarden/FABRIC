@@ -145,6 +145,14 @@ export interface WebServer extends EventEmitter {
    * start() has registered the routes.
    */
   getPostRoutePatterns(): string[];
+  /**
+   * GET twin of getPostRoutePatterns: every path pattern the app registers a
+   * GET handler for — the open-read inventory the GET auth and side-effect
+   * contract tests sweep (docs/api-auth.md). Same discovery rules, same
+   * sorting; the OTLP/HTTP receiver registers no GET routes, so its /v1/*
+   * paths only appear in the POST inventory.
+   */
+  getGetRoutePatterns(): string[];
   broadcast(event: LogEvent): void;
   broadcastCollisions(): void;
   recordEvent(host?: string, workerId?: string): void;
@@ -167,6 +175,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   const clients: Set<WebSocket> = new Set();
   let memoryUpdateInterval: NodeJS.Timeout | null = null;
   let logsDirSizeInterval: NodeJS.Timeout | null = null;
+  let memoryCheckInterval: NodeJS.Timeout | null = null;
   let startPromise: Promise<void> | null = null;
 
   function start(): Promise<void> {
@@ -179,7 +188,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
     // ── Auth policy (docs/api-auth.md): every POST route requires a valid
     // Bearer token when authToken is configured; GET routes are open
-    // (read-only, no secret data). This single global middleware IS the
+    // (read-only, no secret data — no auth challenge even for a wrong
+    // token, and free of durable side effects: no disk write, no event
+    // ingested, no baseline moved; the memory profiler's documented
+    // in-memory initialization on a first stats read is the sole exception).
+    // This single global middleware IS the
     // enforcement point — it is registered before every route, including the
     // OTLP/HTTP receiver, and both HTTP listeners wrap this same app, so no
     // route can opt out and none needs its own auth check. Missing header →
@@ -188,7 +201,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // effects. New POST routes are protected automatically; the
     // route-discovery contract tests in server.authRoutes.test.ts sweep
     // getPostRoutePatterns() — the live router inventory — on both listeners
-    // to pin this invariant.
+    // to pin this invariant, and server.getRoutes.test.ts pins the GET half
+    // (unauthenticated access on both listeners plus the read side-effect
+    // contract) via getGetRoutePatterns().
     const authMiddleware = (req: Request, res: Response, next: () => void) => {
       if (!authToken) {
         next();
@@ -2119,7 +2134,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // Memory pressure monitoring: log warnings when approaching heap limit
     let lastMemoryLog = 0;
     let lastPressureSnapshot = 0;
-    const memoryCheckInterval = setInterval(async () => {
+    memoryCheckInterval = setInterval(async () => {
       const mem = process.memoryUsage();
       const v8 = await getV8();
       const heapLimitBytes = v8?.getHeapStatistics?.().heap_size_limit ?? 1024 * 1024 * 1024; // 1GB default
@@ -2172,6 +2187,15 @@ export function createWebServer(options: WebServerOptions): WebServer {
       logsDirSizeInterval = null;
     }
 
+    // Stop the 30-second memory/pressure check. It captures into the shared
+    // profiler singleton on every tick, so leaving it armed after stop()
+    // keeps mutating profiler state (and the event loop) for a server that
+    // no longer exists.
+    if (memoryCheckInterval) {
+      clearInterval(memoryCheckInterval);
+      memoryCheckInterval = null;
+    }
+
     // Close all WebSocket connections
     for (const client of clients) {
       client.close();
@@ -2209,14 +2233,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
   }
 
   // ── Route discovery ───────────────────────────────────────────
-  // Walks the live Express router stack so POST auth coverage can be
-  // derived from what is actually registered instead of a hand-maintained
+  // Walks the live Express router stack so auth coverage (POST and GET) can
+  // be derived from what is actually registered instead of a hand-maintained
   // inventory (docs/api-auth.md). Recurses into mounted sub-routers — the
   // OTLP/HTTP receiver is a Router mounted on the app, and its /v1/* routes
   // must be swept like any native app.post. The typings' ILayer/IRoute don't
   // expose the runtime `route.methods` / `handle.stack` shapes, hence the
   // structural cast.
-  function getPostRoutePatterns(): string[] {
+  function collectRoutePatterns(method: 'get' | 'post'): string[] {
     const patterns = new Set<string>();
     const walk = (stack: unknown[], prefix: string): void => {
       for (const entry of stack) {
@@ -2225,7 +2249,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
           handle?: { stack?: unknown };
           path?: unknown;
         };
-        if (layer.route && typeof layer.route.path === 'string' && layer.route.methods?.post) {
+        if (layer.route && typeof layer.route.path === 'string' && layer.route.methods?.[method]) {
           patterns.add(prefix + layer.route.path);
           continue;
         }
@@ -2240,6 +2264,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
     const stack = (app as { router?: { stack?: unknown } } | undefined)?.router?.stack;
     if (Array.isArray(stack)) walk(stack, '');
     return [...patterns].sort();
+  }
+
+  function getPostRoutePatterns(): string[] {
+    return collectRoutePatterns('post');
+  }
+
+  function getGetRoutePatterns(): string[] {
+    return collectRoutePatterns('get');
   }
 
   function broadcast(event: LogEvent): void {
@@ -2302,7 +2334,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     metrics.tailerFilesWatched = count;
   }
 
-  return Object.assign(emitter, { start, stop, getPort, getOtlpPort, getPostRoutePatterns, broadcast, broadcastCollisions, recordEvent, setTailerFilesWatched });
+  return Object.assign(emitter, { start, stop, getPort, getOtlpPort, getPostRoutePatterns, getGetRoutePatterns, broadcast, broadcastCollisions, recordEvent, setTailerFilesWatched });
 }
 
 export default createWebServer;

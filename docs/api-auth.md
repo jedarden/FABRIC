@@ -9,12 +9,22 @@ validation, batching, and limits reference is `docs/events-api.md`.
 One rule, applied uniformly — there are no per-route exceptions:
 
 > **Every `POST` endpoint requires `Authorization: Bearer <FABRIC_AUTH_TOKEN>`
-> when a token is configured. Every `GET` endpoint is open — read-only, no
-> secret data.**
+> when a token is configured. Every `GET` endpoint is open — no auth
+> challenge, no secret data, no durable side effect: a GET never writes to
+> disk, never ingests an event, and never moves the memory baseline.**
 
 This includes every memory-mutation route. `POST /api/memory/trend/save` is
 authenticated exactly like `POST /api/memory/heap-snapshot`; nothing about the
 memory endpoints is special.
+
+**The one documented exception to "read-only"** is the memory profiler's lazy
+in-memory initialization (`docs/memory-api.md`): the first request that reads
+profiler stats — `GET /api/memory/stats`, and `GET /api/health`, which feeds
+from it — captures one snapshot into the profiler's in-memory ring when the
+ring is empty, so the response always has data. It is memory-only (no file is
+written, the baseline is untouched) and happens once, not per read;
+`GET /api/memory/snapshots` performs no capture at all. Pinned by
+`src/web/server.getRoutes.test.ts`.
 
 ## Enforcement
 
@@ -50,8 +60,19 @@ token), valid-token pass-through, **unset-token mode** (no token configured
 recorded). The `Auth policy consistency` describe in `src/web/server.test.ts`
 re-sweeps the discovered routes for 401/403. If you add a POST route it is
 covered automatically the moment it is registered — there is no list to
-update. The table below is descriptive documentation only; the router is the
-source of truth.
+update.
+
+The GET half of the policy is pinned the same way:
+`WebServer.getGetRoutePatterns()` walks the same router, and
+`src/web/server.getRoutes.test.ts` sweeps every discovered GET route on
+**both HTTP listeners** — with no header and with a wrong token, neither of
+which may ever meet the 401/403 gate — plus the read side-effect contract
+across the full sweep (no events ingested, no baseline moved, no file
+written), the GET fall-through on the receiver's POST-only `/v1/*` routes
+(a 404 from the SPA fallback, never an auth challenge), and the documented
+in-memory initialization itself. If you add a GET route it is covered
+automatically the moment it is registered. The table below is descriptive
+documentation only; the router is the source of truth.
 
 ## OTLP/gRPC receiver (`--otlp-grpc`)
 
@@ -120,7 +141,9 @@ Every `POST` route `src/web/server.ts` currently registers — derived from
 | `POST /api/cost/alerts/:id/acknowledge` | Marks a cost alert acknowledged |
 | `POST /v1/logs`, `POST /v1/traces`, `POST /v1/metrics` | OTLP/HTTP ingestion |
 
-All other routes are `GET` and intentionally open. The memory endpoints are
+All other routes are `GET` and intentionally open — no auth challenge, no
+durable side effect (the profiler's in-memory initialization documented at
+the top of this file is the sole exception). The memory endpoints are
 also documented, with their auth, in `docs/heap-snapshot-retention.md`.
 
 Retention controls are append-only and stored outside the raw log directory.

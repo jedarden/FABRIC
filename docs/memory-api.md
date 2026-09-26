@@ -35,10 +35,15 @@ Enforced by the single global middleware in `src/web/server.ts` (full policy:
   (`--auth-token` / `FABRIC_AUTH_TOKEN`). Missing header → `401`; wrong
   token → `403`. Rejection happens before body parsing, so an unauthorized
   request has no side effects (no snapshot is written, no baseline changes).
-- **Every GET** in this family is open (read-only, no secret data). Note #1
-  and #6 have a benign read-path side effect documented below (an in-memory
-  capture when the ring is empty) — they never touch disk and never mutate
-  the baseline.
+- **Every GET** in this family is open — never an auth challenge — and free
+  of durable side effects: no file is written, the baseline is never
+  mutated, nothing is ingested. The one benign read-path side effect belongs
+  to **#1 alone** (an in-memory capture when the ring is empty, so the
+  response always has data; `GET /api/health` shares it, since it reads #1's
+  stats). **#6 performs no capture** — an empty ring answers `count: 0` —
+  though a first call does instantiate the profiler singleton, which creates
+  the (empty) snapshot directory if missing. Contract pinned by
+  `src/web/server.getRoutes.test.ts`.
 - If the server runs **without** a configured token, POSTs are open and the
   process logs a startup warning. `production` deployments should always set
   `FABRIC_AUTH_TOKEN`.
@@ -100,7 +105,10 @@ Current memory usage with trend summary over the in-memory ring.
   split in half and the two half-averages of `heapUsed` are compared: change
   > +5% → `rising`, < −5% → `falling`, else `stable`.
 - Side effect: if the ring is empty (fresh process, first call), one snapshot
-  is captured first so the response always has data.
+  is captured first so the response always has data. Memory-only — no file
+  is written, the baseline is untouched, and it happens once (subsequent
+  reads never grow the ring). `GET /api/health` triggers the same
+  initialization because it feeds from this endpoint's profiler.
 
 ## 2. `POST /api/memory/capture`
 
@@ -245,6 +253,10 @@ Default `10`; a non-numeric value also yields `10`.
 requested `count` early in the process life, and is capped by the ring limit
 (100). Each entry carries only `timestamp`/`rss`/`heapUsed`/`heapTotal` —
 `external`/`arrayBuffers` are omitted here (present in #1's `current`).
+
+Side effect: none — the ring is only read, never captured into. An empty
+ring (fresh process, before #1 or #2 has ever run) answers
+`{"count": 0, "snapshots": []}`.
 
 ## 7. `GET /api/memory/diff-analysis`
 

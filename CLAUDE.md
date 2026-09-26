@@ -41,7 +41,7 @@ operator runs the serve command above.
 ## Auth Model
 
 - `FABRIC_AUTH_TOKEN` in `~/.config/fabric/secrets.env` protects all POST endpoints
-- GET endpoints (dashboard UI, workers, events read) are open — read-only, no secret data
+- GET endpoints (dashboard UI, workers, events read) are open — read-only, no secret data; the sole side effect anywhere on the GET surface is the memory profiler's documented one-time in-memory initialization (docs/memory-api.md) — no disk write, no baseline change, no event ingestion
 - Tailscale provides network-level access control (tailnet membership required)
 
 ## NEEDLE OTLP Wiring
