@@ -39,6 +39,34 @@ The retention policy is applied automatically after each snapshot write:
 3. **Size-based cleanup:** When total on-disk snapshot size exceeds 10 GiB, prune oldest-first until under the cap (override the cap with `FABRIC_SNAPSHOT_MAX_TOTAL_BYTES`; the just-written snapshot is never pruned by this pass)
 4. **Execution:** `applyRetentionPolicy()` runs after `writeHeapSnapshot()`
 
+### Verified test coverage
+
+Every limit and cleanup rule above is pinned by deterministic tests in
+[`src/memoryProfiler.test.ts`](../src/memoryProfiler.test.ts)
+(`describe('Retention Policy')`, run with `npx vitest run`). The retention tests
+seed the snapshot directory with sparse placeholder files (controlled size and
+mtime), so the matrix proves the policy without paying for real heap-sized
+writes:
+
+| Documented behavior | Test |
+|---|---|
+| Limits are exactly 50 files / 30 days / 10 GiB / 100 in memory | `should pin the documented retention limits: 50 files, 30 days, 10 GiB, 100 in memory` |
+| Retention runs after every snapshot write | `should apply retention policy after writing snapshot` |
+| 50-file cap prunes the oldest first (by mtime, not filename) | `should enforce the 50-file on-disk limit, pruning the oldest first` |
+| 30-day age cap deletes old files and keeps newer ones | `should delete snapshots older than 30 days while keeping newer ones` |
+| Count and age passes combine in one retention run | `should apply the count and age passes together in one retention run` |
+| Total-size cap enforced with no override (the default 10 GiB itself), pruning only until under it | `should enforce the default 10 GiB cap with no override, pruning only until under it` |
+| Size-cap pruning is oldest-first | `should prune oldest snapshots when total size cap is exceeded` |
+| The just-written snapshot is never pruned, even when it alone exceeds the cap | `should never prune the just-written snapshot even when it alone exceeds the size cap` |
+| `FABRIC_SNAPSHOT_MAX_TOTAL_BYTES` override applies at retention time | `should apply a valid FABRIC_SNAPSHOT_MAX_TOTAL_BYTES cap at retention time` |
+| Invalid override (unparseable, `0`, negative) falls back to the 10 GiB default — never a disabled cap | `should fall back to the 10 GiB default cap when FABRIC_SNAPSHOT_MAX_TOTAL_BYTES is invalid`, `should treat an invalid FABRIC_SNAPSHOT_MAX_TOTAL_BYTES as the 10 GiB default, not as a disabled cap` |
+| Cleanup considers only `*.heapsnapshot` entries (co-located reports untouched) | `should count and prune only .heapsnapshot files, leaving other directory entries alone` |
+
+The HTTP-facing pieces of the same policy (trigger validation, `400 Invalid
+trigger`) are pinned in `src/web/server.heap.test.ts`; the uniform POST auth
+policy in `src/web/server.authRoutes.test.ts`. The complete `/api/memory/*`
+reference lives in [docs/memory-api.md](memory-api.md).
+
 ## API Access
 
 **Authentication:** every memory-mutating `POST` below — `heap-snapshot`,
