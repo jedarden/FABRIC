@@ -88,7 +88,7 @@ Checked in order; the first failure answers and the handler stops:
 
 | Status | Body | Cause |
 |---|---|---|
-| `400` | `{"error": "Invalid request body", "message": "Expected JSON object"}` | Body missing or not a JSON object (no/unknown `Content-Type`, JSON `null`) |
+| `400` | `{"error": "Invalid request body", "message": "Expected JSON object"}` | The handler saw no JSON object: `Content-Type` missing/unknown (nothing parsed) or a non-object body that still parses (array — which then fails the `ts` check next). JSON `null` and bare primitives are answered `400` earlier by body-parser (strict mode rejects them as malformed) |
 | `400` | `{"error": "Missing required field", "message": "Field \"ts\" is required"}` | `ts` absent or falsy (an array body fails here) |
 | `400` | `{"error": "Missing required field", "message": "Field \"event\" is required"}` | `event` absent or falsy |
 | `400` | `{"error": "Invalid event format", "message": "Failed to parse event object"}` | Body has `ts` + `event` but matches no accepted wire shape (e.g. numeric `ts` with object `worker`, or an invalid `level` in the flat shape) |
@@ -137,7 +137,7 @@ single route.
 
 | Status | Body | Cause |
 |---|---|---|
-| `400` | `{"error": "Invalid request body", "message": "Expected JSON array of events"}` | Body is not an array (an object body, a bare number, `null`) |
+| `400` | `{"error": "Invalid request body", "message": "Expected JSON array of events"}` | Body is not an array — an object body, or a missing/unknown `Content-Type` (nothing parsed). Bare numbers and `null` are answered `400` earlier by body-parser (strict mode rejects them as malformed) |
 | `400` | `{"error": "Empty batch", "message": "Batch must contain at least one event"}` | `[]` |
 | `400` | `{"error": "Batch too large", "message": "Batch exceeds maximum size of 100 events (received N)"}` | More than `MAX_BATCH_SIZE` (100) events |
 
