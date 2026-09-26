@@ -435,8 +435,8 @@ pass "fabric web (unset token): GETs open, POSTs accepted on both listeners, han
 # environment: the systemd deployment shape), the docs/api-auth.md matrix
 # exercised with curl against BOTH listeners of the installed server:
 #
-#   GET                          open (200), /v1/* SPA fall-through 404 — never
-#                                a 401/403 challenge, even with a wrong token
+#   GET                          open (200), /v1/* SPA fall-through — never a
+#                                401/403 challenge, even with a wrong token
 #   POST missing token           401 {"error":"Missing authorization"}
 #   POST wrong token             403 {"error":"Forbidden"}
 #   POST valid token             passes the gate; the handler runs
@@ -485,8 +485,13 @@ for LISTENER in "$PORT" "$OTLP_PORT"; do
   [ "$CODE" = "200" ] || fail "fabric web (auth): GET /api/health on $LISTENER answered $CODE (want 200)"
   CODE="$(http_code -H "$WRONG_AUTH" "http://127.0.0.1:$LISTENER/api/summary")"
   [ "$CODE" = "200" ] || fail "fabric web (auth): GET /api/summary with a wrong token on $LISTENER answered $CODE (want 200)"
+  # GET on the receiver's POST-only /v1/* falls through to the SPA fallback —
+  # with the installed package's built frontend that is the index page (200);
+  # the invariant under test is that it is never an auth challenge.
   CODE="$(http_code "http://127.0.0.1:$LISTENER/v1/logs")"
-  [ "$CODE" = "404" ] || fail "fabric web (auth): GET /v1/logs on $LISTENER answered $CODE (want 404 SPA fall-through)"
+  if [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
+    fail "fabric web (auth): GET /v1/logs on $LISTENER answered $CODE (must never be an auth challenge)"
+  fi
 done
 
 MALFORMED='{this-is-not-json'
