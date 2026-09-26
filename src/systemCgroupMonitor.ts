@@ -31,6 +31,9 @@ export interface OomState {
   memoryCurrentAtOom: number | null; // memory.current at time of OOM detection
 }
 
+/** OOM risk levels derived from cgroup usage (80/90/95/98% of the limit). */
+export type OomRiskLevel = 'none' | 'low' | 'medium' | 'high' | 'critical';
+
 export interface SystemMemoryStatus {
   totalMemory: number | null;
   availableMemory: number | null;
@@ -43,7 +46,7 @@ export interface SystemMemoryStatus {
   fabricRss: number;
   cgroupUsagePercent: number | null;
   underPressure: boolean;
-  oomRisk: 'none' | 'low' | 'medium' | 'high' | 'critical';
+  oomRisk: OomRiskLevel;
   oomKill: number;
   oom: number;
   oomState: OomState;

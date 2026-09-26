@@ -30,6 +30,27 @@ const { SNAPSHOT_DIR } = vi.hoisted(() => {
   return { SNAPSHOT_DIR: dir };
 });
 
+// The server's 30s monitor tick reads the cgroup monitor's oom-risk
+// classification (docs/heap-snapshot-retention.md, "Automatic triggers and
+// cooldowns"). Real /sys/fs/cgroup state is whatever the host happens to be
+// under, so the classification is pinned to a controllable level here:
+// 'none' by default keeps every pre-existing test in this file oom-disarmed;
+// the oom-risk seam describes set the level explicitly. Only the
+// classification is overridden — every other export (history, oom state,
+// sampler plumbing) stays the real module.
+const oomRiskState = vi.hoisted(() => ({
+  risk: 'none' as 'none' | 'low' | 'medium' | 'high' | 'critical',
+}));
+vi.mock('../systemCgroupMonitor.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../systemCgroupMonitor.js')>();
+  return {
+    ...actual,
+    getSystemMemoryStatus: (() => ({
+      oomRisk: oomRiskState.risk,
+    })) as unknown as typeof actual.getSystemMemoryStatus,
+  };
+});
+
 /** Placeholder .heapsnapshot with controlled size and mtime — the analysis
  *  endpoints only stat these files, never parse them. */
 function writeFakeSnapshot(filename: string, sizeBytes: number, ageMs: number): string {
@@ -237,6 +258,25 @@ describe('Memory & Heap Snapshot API', () => {
       });
 
       expect(response.status).toBe(400);
+    });
+
+    it('should return 500 when the snapshot write fails', async () => {
+      // Failure behavior: a rejected write (disk full, EACCES) surfaces as a
+      // structured 500 — never a crash, never a 200 with no file.
+      const profiler = getMemoryProfiler();
+      const writeSpy = vi.spyOn(profiler, 'writeHeapSnapshot')
+        .mockRejectedValue(new Error('simulated ENOSPC'));
+      try {
+        const response = await fetchApi('/api/memory/heap-snapshot', authJson({ trigger: 'manual' }));
+
+        expect(response.status).toBe(500);
+        const data = await response.json() as any;
+        expect(data.error).toBe('Failed to write heap snapshot');
+        expect(data.message).toBe('simulated ENOSPC');
+        expect(fs.readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.heapsnapshot'))).toHaveLength(0);
+      } finally {
+        writeSpy.mockRestore();
+      }
     });
   });
 
@@ -664,6 +704,64 @@ describe('Memory-pressure capture (server monitor seam)', () => {
     await vi.advanceTimersByTimeAsync(31 * 60_000);
     expect(writeSpy).not.toHaveBeenCalled();
   });
+
+  it('pressure that clears and returns inside the cooldown still waits for the original cooldown', async () => {
+    // Repeated-pressure behavior: the cooldown is wall-clock from the last
+    // capture, not per-pressure-episode — a second episode must not reset or
+    // bypass it. Otherwise a flapping heap (90% → 40% → 90% every few
+    // minutes) would capture at every upward crossing.
+    getMemoryProfiler().writeSnapshots = true;
+
+    await vi.advanceTimersByTimeAsync(30_000); // t=30s: capture #1, stamp set
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    // Pressure clears for 10 minutes: checks run, none below threshold writes.
+    memoryUsageSpy.mockImplementation(() => ({
+      ...realUsage,
+      heapUsed: Math.floor(heapLimitBytes * 0.4),
+    }));
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    // Pressure returns at ~t=10m30s: only ~10.5 minutes since the stamp —
+    // inside the cooldown, so an episode restart must NOT capture here.
+    memoryUsageSpy.mockImplementation(() => ({
+      ...realUsage,
+      heapUsed: Math.floor(heapLimitBytes * 0.9),
+    }));
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    // Past 30 minutes since the stamp, the re-armed policy captures again.
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(writeSpy).toHaveBeenNthCalledWith(2, 'memory-pressure');
+  });
+
+  it('a failed pressure write is caught, logged, and still holds the cooldown', async () => {
+    // Failure behavior: the rejection must not crash the monitor tick, must
+    // be logged, and must not enable a tight retry loop — the stamp was set
+    // at decision time, so a failing write waits out the full cooldown like
+    // a successful one (each attempt is heap-sized and stop-the-world; a
+    // tight retry under ENOSPC would compound the incident).
+    getMemoryProfiler().writeSnapshots = true;
+    writeSpy.mockRejectedValue(new Error('ENOSPC: no space left on device'));
+
+    await vi.advanceTimersByTimeAsync(30_000); // decision #1: write fails
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to write heap snapshot: Error: ENOSPC: no space left on device'
+    );
+
+    // Two more checks inside the cooldown: no retry.
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    // Past the cooldown the monitor attempts again (the failure may have
+    // been transient — the next tick is the retry, not this one).
+    await vi.advanceTimersByTimeAsync(28 * 60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
@@ -767,6 +865,306 @@ describe('Memory-pressure capture invokes retention (server monitor seam)', () =
     expect(fs.readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.heapsnapshot'))).toHaveLength(50);
     // The poll matches a bare filename inside SNAPSHOT_DIR; resolve it
     // before an existence check.
+    const capturedPath = path.join(SNAPSHOT_DIR, filepath!);
+    expect(fs.existsSync(capturedPath)).toBe(true);
+    expect(fs.existsSync(fakes[0])).toBe(false); // oldest seed pruned by the automatic write
+    for (let i = 1; i < fakes.length; i++) {
+      expect(fs.existsSync(fakes[i])).toBe(true);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// OOM-risk capture (server monitor seam)
+// ─────────────────────────────────────────────────────────────────────
+// The third automatic trigger (docs/heap-snapshot-retention.md, Trigger
+// Reasons: "oom-risk — Out-of-memory risk detected"). Same seam pattern as
+// the memory-pressure describes above: fake timers drive the real 30s
+// monitor tick, writeHeapSnapshot is spied so no test pays a real
+// stop-the-world write, and the cgroup classification comes from the
+// file-level oomRiskState mock rather than whatever the host is under. The
+// heap-usage mock is held BELOW the pressure threshold so the oom-risk
+// trigger is exercised in isolation from the pressure one.
+
+describe('OOM-risk capture (server monitor seam)', () => {
+  let store: InMemoryEventStore;
+  let server: WebServer;
+  let writeSpy: MockInstance;
+  let memoryUsageSpy: MockInstance;
+  let consoleErrorSpy: MockInstance;
+  let consoleWarnSpy: MockInstance;
+  let realUsage: NodeJS.MemoryUsage;
+  let heapLimitBytes: number;
+
+  beforeAll(async () => {
+    realUsage = process.memoryUsage();
+    heapLimitBytes = (await import('v8')).getHeapStatistics().heap_size_limit;
+  });
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    oomRiskState.risk = 'none';
+
+    const profiler = getMemoryProfiler();
+    // 40% of the heap limit: deliberately below the 80% pressure threshold
+    // so any writeSpy call below can only come from the oom-risk trigger.
+    memoryUsageSpy = vi.spyOn(process, 'memoryUsage').mockImplementation(() => ({
+      ...realUsage,
+      heapUsed: Math.floor(heapLimitBytes * 0.4),
+    }));
+    writeSpy = vi.spyOn(profiler, 'writeHeapSnapshot')
+      .mockResolvedValue(path.join(SNAPSHOT_DIR, 'spied-oom-risk.heapsnapshot'));
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    store = new InMemoryEventStore();
+    resetCrossReferenceManager();
+    server = createWebServer({
+      port: 0,
+      logPath: '/tmp/test-logs',
+      store,
+      authToken: 'oom-risk-seam-token',
+    });
+    await new Promise<void>((resolve) => {
+      server.on('start', () => resolve());
+      server.start();
+    });
+  });
+
+  afterEach(async () => {
+    // Real timers before stop(): same reason as the pressure seam — the
+    // monitor's interval lives in the fake clock, and dropping it guarantees
+    // no further checks fire into a stopped server.
+    vi.useRealTimers();
+    await new Promise<void>((resolve) => {
+      server.on('stop', () => resolve());
+      server.stop();
+    });
+    getMemoryProfiler().writeSnapshots = false;
+    oomRiskState.risk = 'none';
+    memoryUsageSpy.mockRestore();
+    writeSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    store.clear();
+    resetCrossReferenceManager();
+  });
+
+  it('captures an oom-risk snapshot on the first high-risk check when snapshots are enabled', async () => {
+    getMemoryProfiler().writeSnapshots = true;
+    oomRiskState.risk = 'high';
+
+    await vi.advanceTimersByTimeAsync(30_000); // first monitor check
+
+    // The trigger name comes from the monitor seam, not the policy: this is
+    // the only caller that names captures 'oom-risk' on its own.
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(writeSpy).toHaveBeenCalledWith('oom-risk');
+  });
+
+  it('captures at critical risk too, on the same enablement', async () => {
+    getMemoryProfiler().writeSnapshots = true;
+    oomRiskState.risk = 'critical';
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(writeSpy).toHaveBeenCalledWith('oom-risk');
+  });
+
+  it('never captures at medium risk even when sustained — only >= 95% arms the trigger', async () => {
+    // Boundary end-to-end: the cgroup monitor classifies 90% of the limit as
+    // medium; the policy arms only at high/critical (>= 95%).
+    getMemoryProfiler().writeSnapshots = true;
+    oomRiskState.risk = 'medium';
+
+    await vi.advanceTimersByTimeAsync(31 * 60_000);
+
+    expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it('never captures at critical risk when snapshot writing is disabled', async () => {
+    // Enablement: the same --heap-snapshots / NODE_ENV=production gate as
+    // the pressure trigger. Risk classification alone must not write.
+    getMemoryProfiler().writeSnapshots = false;
+    oomRiskState.risk = 'critical';
+
+    await vi.advanceTimersByTimeAsync(31 * 60_000);
+
+    expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it('holds the documented 30-minute cooldown while critical risk persists, then re-captures', async () => {
+    getMemoryProfiler().writeSnapshots = true;
+    oomRiskState.risk = 'critical';
+
+    await vi.advanceTimersByTimeAsync(30_000); // capture #1
+    await vi.advanceTimersByTimeAsync(29 * 60_000); // 58 checks, all cooling down
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000); // cooldown elapsed
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(writeSpy).toHaveBeenNthCalledWith(2, 'oom-risk');
+  });
+
+  it('a pressure capture does not consume the oom-risk cooldown (independent stamps)', async () => {
+    // Both signals fire on the same check (heap at 90% AND cgroup at high
+    // risk): two captures with distinct triggers. Afterwards the pressure
+    // side clears while risk persists — the oom-risk re-arm must run on its
+    // own stamp, not wait on the pressure capture's.
+    getMemoryProfiler().writeSnapshots = true;
+    oomRiskState.risk = 'high';
+    // Raise the heap above the pressure threshold (beforeEach holds it at
+    // 40% so the other tests isolate the oom-risk trigger).
+    memoryUsageSpy.mockImplementation(() => ({
+      ...realUsage,
+      heapUsed: Math.floor(heapLimitBytes * 0.9),
+    }));
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(writeSpy).toHaveBeenNthCalledWith(1, 'memory-pressure');
+    expect(writeSpy).toHaveBeenNthCalledWith(2, 'oom-risk');
+
+    // Pressure clears (heap back to 40%); risk stays high.
+    memoryUsageSpy.mockImplementation(() => ({
+      ...realUsage,
+      heapUsed: Math.floor(heapLimitBytes * 0.4),
+    }));
+
+    // Nothing fires while both stamps are inside their cooldowns.
+    await vi.advanceTimersByTimeAsync(29 * 60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+
+    // Past the oom-risk cooldown exactly one new capture — the oom-risk one:
+    // the pressure stamp (same moment) would still allow its own re-arm, but
+    // pressure is gone, proving the oom-risk stamp gates independently.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(writeSpy).toHaveBeenCalledTimes(3);
+    expect(writeSpy).toHaveBeenNthCalledWith(3, 'oom-risk');
+  });
+
+  it('a failed oom-risk write is caught, logged, and still holds the cooldown', async () => {
+    // Failure behavior mirrors the pressure trigger: no crash, the rejection
+    // is logged, and the decision-time stamp prevents a tight retry loop
+    // under a persistent failure (e.g. ENOSPC) — the retry waits for the
+    // cooldown like any successful capture would.
+    getMemoryProfiler().writeSnapshots = true;
+    oomRiskState.risk = 'critical';
+    writeSpy.mockRejectedValue(new Error('ENOSPC: no space left on device'));
+
+    await vi.advanceTimersByTimeAsync(30_000); // decision #1: write fails
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to write heap snapshot: Error: ENOSPC: no space left on device'
+    );
+
+    await vi.advanceTimersByTimeAsync(2 * 60_000); // checks inside cooldown: no retry
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(28 * 60_000); // cooldown elapsed: retried
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// OOM-risk capture invokes retention (server monitor seam)
+// ─────────────────────────────────────────────────────────────────────
+// Retention interaction for the third automatic trigger, same shape as the
+// memory-pressure retention describe: the real 'oom-risk' write runs
+// end-to-end (high-risk check → policy → full heap write → retention in
+// that same write) against a directory seeded at the 50-file cap.
+
+describe('OOM-risk capture invokes retention (server monitor seam)', () => {
+  let store: InMemoryEventStore;
+  let server: WebServer;
+  let memoryUsageSpy: MockInstance;
+  let consoleErrorSpy: MockInstance;
+  let consoleWarnSpy: MockInstance;
+  let realUsage: NodeJS.MemoryUsage;
+  let heapLimitBytes: number;
+
+  beforeAll(async () => {
+    realUsage = process.memoryUsage();
+    heapLimitBytes = (await import('v8')).getHeapStatistics().heap_size_limit;
+  });
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    for (const file of fs.readdirSync(SNAPSHOT_DIR)) {
+      fs.rmSync(path.join(SNAPSHOT_DIR, file), { recursive: true, force: true });
+    }
+    oomRiskState.risk = 'none';
+
+    memoryUsageSpy = vi.spyOn(process, 'memoryUsage').mockImplementation(() => ({
+      ...realUsage,
+      heapUsed: Math.floor(heapLimitBytes * 0.4), // below the pressure threshold
+    }));
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    store = new InMemoryEventStore();
+    resetCrossReferenceManager();
+    server = createWebServer({
+      port: 0,
+      logPath: '/tmp/test-logs',
+      store,
+      authToken: 'oom-risk-retention-token',
+    });
+    await new Promise<void>((resolve) => {
+      server.on('start', () => resolve());
+      server.start();
+    });
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await new Promise<void>((resolve) => {
+      server.on('stop', () => resolve());
+      server.stop();
+    });
+    getMemoryProfiler().writeSnapshots = false;
+    oomRiskState.risk = 'none';
+    memoryUsageSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    store.clear();
+    resetCrossReferenceManager();
+  });
+
+  afterAll(() => {
+    fs.rmSync(SNAPSHOT_DIR, { recursive: true, force: true });
+  });
+
+  it('the monitor oom-risk write prunes past the 50-file cap', { timeout: 60_000 }, async () => {
+    // Seed exactly at the documented cap before the monitor fires (ages
+    // 1..50 minutes, oldest first).
+    const fakes: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      fakes.push(writeFakeSnapshot(`heap-${25_000_000 + i}-test.heapsnapshot`, 1024, (50 - i) * 60_000));
+    }
+    getMemoryProfiler().writeSnapshots = true;
+    oomRiskState.risk = 'critical';
+
+    // First check at 30s; the real write serializes the heap asynchronously
+    // afterwards — advance the fake clock while polling for the on-disk
+    // file (same pattern as the pressure retention test above). The
+    // decision-time cooldown stamp keeps the checks fired during the poll
+    // from capturing again.
+    await vi.advanceTimersByTimeAsync(30_000);
+    let filepath: string | undefined;
+    for (let i = 0; i < 300 && filepath === undefined; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+      filepath = fs.readdirSync(SNAPSHOT_DIR).find(f => /^heap-\d+-oom-risk\.heapsnapshot$/.test(f));
+    }
+
+    expect(filepath).toBeDefined();
+
+    // Retention ran inside that same write: the directory is back at the
+    // 50-file cap and the oldest seed was pruned first.
+    expect(fs.readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.heapsnapshot'))).toHaveLength(50);
     const capturedPath = path.join(SNAPSHOT_DIR, filepath!);
     expect(fs.existsSync(capturedPath)).toBe(true);
     expect(fs.existsSync(fakes[0])).toBe(false); // oldest seed pruned by the automatic write

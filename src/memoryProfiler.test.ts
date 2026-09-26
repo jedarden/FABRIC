@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi, type MockInstance } from 'vitest';
-import { getMemoryProfiler, shouldCapturePressureSnapshot, isSnapshotTrigger, SNAPSHOT_TRIGGERS, MEMORY_PRESSURE_THRESHOLD_PERCENT, PRESSURE_SNAPSHOT_COOLDOWN_MS, MAX_DISK_SNAPSHOTS, MAX_SNAPSHOT_AGE_DAYS, DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES, MAX_IN_MEMORY_SNAPSHOTS, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
+import { getMemoryProfiler, shouldCapturePressureSnapshot, shouldCaptureOomRiskSnapshot, isSnapshotTrigger, SNAPSHOT_TRIGGERS, MEMORY_PRESSURE_THRESHOLD_PERCENT, PRESSURE_SNAPSHOT_COOLDOWN_MS, OOM_RISK_TRIGGER_LEVELS, OOM_RISK_SNAPSHOT_COOLDOWN_MS, MAX_DISK_SNAPSHOTS, MAX_SNAPSHOT_AGE_DAYS, DEFAULT_MAX_TOTAL_SNAPSHOT_BYTES, MAX_IN_MEMORY_SNAPSHOTS, type SnapshotTrigger, type MemorySnapshot } from './memoryProfiler.js';
 import { getHeapSnapshots, compareSnapshots } from './heapDiff.js';
 import { existsSync, unlinkSync, readdirSync, readFileSync, mkdirSync, rmSync, writeFileSync, truncateSync, utimesSync } from 'fs';
 import { join } from 'path';
@@ -574,6 +574,57 @@ describe('Memory Profiler', () => {
     });
   });
 
+  describe('OOM-risk Snapshot Policy', () => {
+    it('pins the documented trigger levels and 30-minute default cooldown', () => {
+      // docs/heap-snapshot-retention.md: oom-risk fires "when OOM risk is
+      // high" — the cgroup monitor's classification is high at >= 95% and
+      // critical at >= 98% of the cgroup limit, so exactly those two levels
+      // arm the trigger. The monitor calls the policy without a cooldown
+      // argument, so the default constant itself must carry the documented
+      // 30 minutes.
+      expect(OOM_RISK_TRIGGER_LEVELS).toEqual(['high', 'critical']);
+      expect(OOM_RISK_SNAPSHOT_COOLDOWN_MS).toBe(30 * 60 * 1000);
+    });
+
+    it('captures at high and critical risk when snapshots are enabled', () => {
+      const now = Date.now();
+      expect(shouldCaptureOomRiskSnapshot('high', true, 0, now)).toBe(true);
+      expect(shouldCaptureOomRiskSnapshot('critical', true, 0, now)).toBe(true);
+    });
+
+    it('does not capture at none, low, or medium — only >= 95% arms the trigger', () => {
+      // Boundary: the cgroup monitor classifies 90% as medium and 95% as
+      // high, so 'medium' (however sustained) must not capture. 'none' also
+      // covers a cgroup with no limit set (percent-of-limit undefined there).
+      const now = Date.now();
+      expect(shouldCaptureOomRiskSnapshot('none', true, 0, now)).toBe(false);
+      expect(shouldCaptureOomRiskSnapshot('low', true, 0, now)).toBe(false);
+      expect(shouldCaptureOomRiskSnapshot('medium', true, 0, now)).toBe(false);
+    });
+
+    it('does not capture when snapshots are disabled, even at critical risk', () => {
+      const now = Date.now();
+      expect(shouldCaptureOomRiskSnapshot('critical', false, 0, now)).toBe(false);
+    });
+
+    it('respects its own cooldown between oom-risk snapshots', () => {
+      const now = Date.now();
+      const cooldown = 30 * 60 * 1000;
+      // 10 minutes after the last oom-risk snapshot: still cooling down
+      expect(shouldCaptureOomRiskSnapshot('critical', true, now - 10 * 60 * 1000, now, cooldown)).toBe(false);
+      // Exactly at the cooldown: re-arms (sustained risk re-triggers)
+      expect(shouldCaptureOomRiskSnapshot('critical', true, now - cooldown, now, cooldown)).toBe(true);
+      // One millisecond short: still blocked
+      expect(shouldCaptureOomRiskSnapshot('critical', true, now - (cooldown - 1), now, cooldown)).toBe(false);
+    });
+
+    it('honors a custom cooldown override', () => {
+      const now = Date.now();
+      expect(shouldCaptureOomRiskSnapshot('high', true, now - 5 * 60 * 1000, now, 5 * 60 * 1000)).toBe(true);
+      expect(shouldCaptureOomRiskSnapshot('high', true, now - 5 * 60 * 1000 + 1, now, 5 * 60 * 1000)).toBe(false);
+    });
+  });
+
   describe('Trigger Validation', () => {
     it('should pin the documented trigger set', () => {
       // docs/heap-snapshot-retention.md, Trigger Reasons table: exactly these
@@ -778,6 +829,37 @@ describe('Memory Profiler', () => {
       await vi.advanceTimersByTimeAsync(5_000);
       expect(captureSpy).toHaveBeenCalledTimes(1);
       captureSpy.mockRestore();
+    });
+
+    it('keeps the cadence when a scheduled write fails', async () => {
+      // Failure behavior: a rejected write (disk full, ENOSPC) is caught and
+      // logged by the scheduler — it must neither crash the process nor stop
+      // the interval; the next tick attempts again.
+      const writeSpy = vi.spyOn(profiler, 'writeHeapSnapshot')
+        .mockResolvedValueOnce(join(SNAPSHOT_DIR, 'periodic-ok.heapsnapshot'))
+        .mockRejectedValueOnce(new Error('ENOSPC: no space left on device'))
+        .mockResolvedValue(join(SNAPSHOT_DIR, 'periodic-recovered.heapsnapshot'));
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        profiler.writeSnapshots = true;
+        profiler.autoSnapshot = true;
+        profiler.startPeriodicCapture();
+
+        await vi.advanceTimersByTimeAsync(1_000); // tick 1: write succeeds
+        await vi.advanceTimersByTimeAsync(1_000); // tick 2: write fails
+        await vi.advanceTimersByTimeAsync(1_000); // tick 3: scheduler still alive
+
+        expect(writeSpy).toHaveBeenCalledTimes(3);
+        // The rejection was logged, not thrown: the scheduler's catch is the
+        // only thing standing between a failed write and a dead cadence.
+        expect(errSpy).toHaveBeenCalledWith(
+          'Failed to write heap snapshot: Error: ENOSPC: no space left on device'
+        );
+      } finally {
+        writeSpy.mockRestore();
+        errSpy.mockRestore();
+      }
     });
   });
 

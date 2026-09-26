@@ -27,7 +27,7 @@ FABRIC automatically captures and retains V8 heap snapshots for memory leak dete
 | `manual` | User-initiated snapshot | Via API endpoint `POST /api/memory/heap-snapshot` |
 | `memory-pressure` | High heap usage threshold | When heap usage exceeds 80% of limit (checked every 30s; at most one capture per 30-minute cooldown while pressure persists). Requires snapshots enabled (`--heap-snapshots` or `NODE_ENV=production`) |
 | `periodic` | Scheduled automatic capture | Every 30 minutes (configurable via `--snapshot-interval`) |
-| `oom-risk` | Out-of-memory risk detected | When OOM risk is high (risk reported by `GET /api/alerts/oom`; see the note in "Automatic triggers and cooldowns" below) |
+| `oom-risk` | Out-of-memory risk detected | When the cgroup monitor's risk is `high` or `critical` (>= 95% / >= 98% of the cgroup limit; checked every 30s, own 30-minute cooldown). Requires snapshots enabled |
 | `test` | Test/verification capture | During automated testing |
 
 ## Automatic Cleanup
@@ -69,35 +69,65 @@ reference lives in [docs/memory-api.md](memory-api.md).
 
 ### Automatic triggers and cooldowns
 
-The trigger machinery itself is pinned by deterministic tests (fake timers,
-spied writes, and pressure simulated by mocking `process.memoryUsage()` — no
-test allocates real heap pressure or runs the real 30-minute cadence):
+Three triggers capture automatically; all three write through the same
+`writeHeapSnapshot()`, so the retention policy runs after every one of them.
+`manual`/`test` captures are never automatic.
+
+| | `periodic` | `memory-pressure` | `oom-risk` |
+|---|---|---|---|
+| Signal | wall clock | `heapUsed` vs V8 `heap_size_limit` (process heap) | cgroup `memory.current` vs `memory.max` (system-wide) |
+| Checked | every `--snapshot-interval` (default 30 min) | every 30 s by the server's monitor tick | every 30 s by the same monitor tick |
+| Arming condition | always (when enabled) | usage > 80% of the heap limit | risk `high` or `critical` (>= 95% / >= 98% of the cgroup limit) |
+| Minimum spacing | the configured interval | 30-minute cooldown | 30-minute cooldown — its own stamp, independent of the pressure cooldown |
+| Repeated signal | steady cadence | cooldown is wall-clock from the last capture: pressure that clears and returns inside the cooldown still waits; sustained pressure re-captures every 30 min | same wall-clock semantics while risk persists |
+| Write failure | caught and logged; the cadence continues and the next tick retries | caught and logged; the decision-time cooldown stamp prevents a tight retry loop — the retry waits out the full cooldown | identical to pressure |
+| Cooldown bookkeeping | the scheduler itself | `lastPressureSnapshot` in server.ts | `lastOomRiskSnapshot` in server.ts — the stamps are independent, so one trigger firing never consumes the other's re-arm |
+
+Enablement: `--heap-snapshots` (default `true` in production via
+`NODE_ENV=production`) gates all three automatic paths; an explicit API
+capture is its own enablement. A cgroup without a `memory.max` limit
+classifies as `none`, so the oom-risk trigger never arms where risk cannot
+be computed.
+
+The trigger machinery is pinned by deterministic tests (fake timers, spied
+writes, pressure simulated by mocking `process.memoryUsage()`, and the
+cgroup classification mocked to a controllable level — no test allocates
+real heap pressure, runs the real 30-minute cadence, or reads live
+`/sys/fs/cgroup` state):
 
 | Documented behavior | Test |
 |---|---|
-| Every automatic capture still applies retention: a scheduled `periodic` write seeded at the 50-file cap prunes the oldest snapshot | `the scheduled periodic write prunes past the 50-file cap` (`src/memoryProfiler.test.ts`) |
-| Every automatic capture still applies retention: the monitor's `memory-pressure` write, end-to-end through the 30s server check | `the monitor memory-pressure write prunes past the 50-file cap` (`src/web/server.heap.test.ts`) |
-| Every automatic capture still applies retention: an `oom-risk` capture via the API route | `should apply retention after an oom-risk capture` (`src/web/server.heap.test.ts`) |
-| Pressure enablement: no capture under sustained pressure with snapshots disabled | `never captures under sustained pressure when snapshot writing is disabled` |
-| Periodic enablement: writes require both `--heap-snapshots` and the auto-snapshot gate | `never writes snapshots unless both enablement flags are set` |
-| Explicit API captures are their own enablement (flags gate automatic paths only) | `should write an explicit capture even when automatic enablement is off` |
-| 30-minute pressure cooldown holds end-to-end across server checks, then re-arms | `holds the documented 30-minute cooldown while pressure persists, then re-captures` |
-| Duplicate-capture prevention (scheduler): a redundant start never stacks a second interval | `ignores a redundant start so ticks stay single` |
-| Duplicate-capture prevention (pressure): checks during an in-flight write stay gated by the decision-time stamp | `does not schedule a second capture while the previous write is in flight` |
-| Configurable interval: the scheduler honors `snapshotIntervalMs`, not more often | `captures in memory on the configured interval, not more often` |
-| Default interval is the documented 30 minutes | `pins the documented 30-minute default snapshot interval` (`src/memoryProfiler.test.ts`) |
+| **Enablement — periodic:** writes require both `--heap-snapshots` and the auto-snapshot gate | `never writes snapshots unless both enablement flags are set` (`src/memoryProfiler.test.ts`) |
+| **Enablement — pressure:** no capture under sustained pressure with snapshots disabled | `never captures under sustained pressure when snapshot writing is disabled` (`src/web/server.heap.test.ts`) |
+| **Enablement — oom-risk:** no capture at critical risk with snapshots disabled | `never captures at critical risk when snapshot writing is disabled` (`src/web/server.heap.test.ts`) |
+| **Enablement — explicit API captures are their own enablement** (flags gate automatic paths only) | `should write an explicit capture even when automatic enablement is off` (`src/web/server.heap.test.ts`) |
+| **Interval — periodic:** the scheduler honors `snapshotIntervalMs`, not more often | `captures in memory on the configured interval, not more often` (`src/memoryProfiler.test.ts`) |
+| **Interval — periodic:** the default is the documented 30 minutes | `pins the documented 30-minute default snapshot interval` (`src/memoryProfiler.test.ts`) |
+| **Threshold — pressure:** 80%-of-heap-limit threshold and 30-minute default cooldown pinned, `>=` boundary included | `should pin the documented 80% threshold and 30-minute default cooldown` and `should not capture below the pressure threshold` (`src/memoryProfiler.test.ts`) |
+| **Threshold — pressure end-to-end:** the monitor captures on the first pressured check | `captures a memory-pressure snapshot on the first pressured check` (`src/web/server.heap.test.ts`) |
+| **Threshold — oom-risk:** exactly `high`/`critical` arm the trigger; `none`/`low`/`medium` never do | `pins the documented trigger levels and 30-minute default cooldown` and `does not capture at none, low, or medium — only >= 95% arms the trigger` (`src/memoryProfiler.test.ts`) |
+| **Threshold — oom-risk end-to-end:** sustained `medium` never captures through the server tick | `never captures at medium risk even when sustained — only >= 95% arms the trigger` (`src/web/server.heap.test.ts`) |
+| **Threshold — oom-risk end-to-end:** `high` and `critical` each capture on the first check | `captures an oom-risk snapshot on the first high-risk check when snapshots are enabled`, `captures at critical risk too, on the same enablement` (`src/web/server.heap.test.ts`) |
+| **Cooldown — pressure:** 30-minute cooldown holds end-to-end across server checks, then re-arms | `holds the documented 30-minute cooldown while pressure persists, then re-captures` (`src/web/server.heap.test.ts`) |
+| **Cooldown — oom-risk:** its own 30-minute cooldown holds end-to-end, then re-arms | `holds the documented 30-minute cooldown while critical risk persists, then re-captures` (`src/web/server.heap.test.ts`) |
+| **Cooldown — oom-risk (pure policy):** spacing enforced, `>=` boundary exact, custom override honored | `respects its own cooldown between oom-risk snapshots`, `honors a custom cooldown override` (`src/memoryProfiler.test.ts`) |
+| **Repeated pressure:** a second episode inside the cooldown neither resets nor bypasses it (wall-clock, not per-episode) | `pressure that clears and returns inside the cooldown still waits for the original cooldown` (`src/web/server.heap.test.ts`) |
+| **Independent stamps:** a pressure capture never consumes the oom-risk re-arm, and vice versa | `a pressure capture does not consume the oom-risk cooldown (independent stamps)` (`src/web/server.heap.test.ts`) |
+| **Failure — periodic:** a rejected write is caught and logged; the cadence continues and the next tick retries | `keeps the cadence when a scheduled write fails` (`src/memoryProfiler.test.ts`) |
+| **Failure — pressure:** a rejected write is caught, logged, and still holds the cooldown (no tight retry loop) | `a failed pressure write is caught, logged, and still holds the cooldown` (`src/web/server.heap.test.ts`) |
+| **Failure — oom-risk:** identical semantics to pressure | `a failed oom-risk write is caught, logged, and still holds the cooldown` (`src/web/server.heap.test.ts`) |
+| **Failure — explicit API capture:** a rejected write surfaces as a structured 500, never a crash or a false 200 | `should return 500 when the snapshot write fails` (`src/web/server.heap.test.ts`) |
+| **Duplicate-capture prevention (scheduler):** a redundant start never stacks a second interval | `ignores a redundant start so ticks stay single` (`src/memoryProfiler.test.ts`) |
+| **Duplicate-capture prevention (pressure):** checks during an in-flight write stay gated by the decision-time stamp | `does not schedule a second capture while the previous write is in flight` (`src/web/server.heap.test.ts`) |
+| **Retention interaction — periodic:** a scheduled write seeded at the 50-file cap prunes the oldest snapshot | `the scheduled periodic write prunes past the 50-file cap` (`src/memoryProfiler.test.ts`) |
+| **Retention interaction — pressure:** the monitor's write, end-to-end through the 30s check, prunes past the cap | `the monitor memory-pressure write prunes past the 50-file cap` (`src/web/server.heap.test.ts`) |
+| **Retention interaction — oom-risk:** the monitor's write, end-to-end through the 30s check, prunes past the cap | `the monitor oom-risk write prunes past the 50-file cap` (`src/web/server.heap.test.ts`) |
+| **Retention interaction — oom-risk via API route:** an explicit `oom-risk` capture applies retention | `should apply retention after an oom-risk capture` (`src/web/server.heap.test.ts`) |
 
-The `oomRisk` classification that feeds `GET /api/alerts/oom` (none / low /
-medium / high / critical at 80/90/95/98% of the cgroup limit, plus the
-OOM-kill detection edge) is pinned in `src/systemCgroupMonitor.test.ts`.
-
-> **Note:** the `oom-risk` row above describes when this trigger is *intended*
-> to fire, but automatic capture at high OOM risk is not wired in code today:
-> the monitor only reports the risk level (`GET /api/alerts/oom`), and
-> `oom-risk` captures are issued by POSTing `/api/memory/heap-snapshot` with
-> `{"trigger": "oom-risk"}`. Wiring the automatic path is future work; its
-> capture semantics (retention applied, trigger named on disk) are already
-> pinned by the tests above.
+The `oomRisk` classification that feeds both `GET /api/alerts/oom` and the
+automatic oom-risk trigger (none / low / medium / high / critical at
+80/90/95/98% of the cgroup limit, plus the OOM-kill detection edge) is
+pinned in `src/systemCgroupMonitor.test.ts`.
 
 ## API Access
 
@@ -199,7 +229,7 @@ curl -X POST http://localhost:3000/api/memory/trend/save \
 
 1. **Regular Reviews:** Check trend analysis weekly for memory growth patterns
 2. **Manual Captures:** Capture snapshots before/after suspected memory leaks
-3. **Trigger Monitoring:** `memory-pressure` captures fire automatically when snapshots are enabled; for `oom-risk`, poll `GET /api/alerts/oom` and POST the capture (see the note in "Automatic triggers and cooldowns")
+3. **Trigger Monitoring:** `memory-pressure` and `oom-risk` captures fire automatically when snapshots are enabled; poll `GET /api/alerts/oom` to see the risk level the oom-risk trigger acts on
 4. **Disk Space:** Monitor `~/.needle/snapshots/` size - retention policy prevents unbounded growth
 5. **Backup Important Snapshots:** Copy critical snapshots elsewhere before retention cleanup
 

@@ -23,7 +23,7 @@ import { ServerMetrics } from '../serverMetrics.js';
 import { SessionDigestGenerator, formatDigestAsMarkdown } from '../sessionDigest.js';
 import { parseGitEvents } from '../gitParser.js';
 import { generatePRPreview } from '../tui/utils/prPreview.js';
-import { getMemoryProfiler, shouldCapturePressureSnapshot, isSnapshotTrigger, SNAPSHOT_TRIGGERS, type SnapshotTrigger } from '../memoryProfiler.js';
+import { getMemoryProfiler, shouldCapturePressureSnapshot, shouldCaptureOomRiskSnapshot, isSnapshotTrigger, SNAPSHOT_TRIGGERS, type SnapshotTrigger } from '../memoryProfiler.js';
 import { getRecentHeapDiff, analyzeTrend, formatTrendAsMarkdown, saveTrendReport } from '../heapDiff.js';
 import { computeRetentionState, pruneLogs, formatPruneResult, PruneOptions, DEFAULT_RETENTION_POLICY } from '../logPruner.js';
 import {
@@ -2134,6 +2134,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // Memory pressure monitoring: log warnings when approaching heap limit
     let lastMemoryLog = 0;
     let lastPressureSnapshot = 0;
+    let lastOomRiskSnapshot = 0;
     memoryCheckInterval = setInterval(async () => {
       const mem = process.memoryUsage();
       const v8 = await getV8();
@@ -2164,6 +2165,29 @@ export function createWebServer(options: WebServerOptions): WebServer {
             .then(filepath => console.error(`Heap snapshot written: ${filepath}`))
             .catch(err => console.error(`Failed to write heap snapshot: ${err}`));
         }
+      }
+
+      // Automatic oom-risk capture: the cgroup monitor classifies system-wide
+      // risk from memory.current vs the cgroup limit (>= 95% high, >= 98%
+      // critical). At that level the OOM killer is the likely next event, so
+      // snapshot now for post-mortem analysis. Cooldown and stamp are this
+      // trigger's own — a pressure capture never consumes the oom-risk
+      // re-arm, and vice versa; the same enablement flag gates both. A
+      // cgroup without a limit classifies as 'none', so the trigger simply
+      // never arms there.
+      try {
+        const { getSystemMemoryStatus } = await import('../systemCgroupMonitor.js');
+        const { oomRisk } = getSystemMemoryStatus();
+        if (shouldCaptureOomRiskSnapshot(oomRisk, profiler.writeSnapshots, lastOomRiskSnapshot, now)) {
+          lastOomRiskSnapshot = now;
+          profiler.writeHeapSnapshot('oom-risk')
+            .then(filepath => console.error(`Heap snapshot written: ${filepath}`))
+            .catch(err => console.error(`Failed to write heap snapshot: ${err}`));
+        }
+      } catch (err) {
+        // Cgroup stats unavailable (restricted container, non-Linux): the
+        // trigger stays disarmed — never fails the monitor tick itself.
+        console.error(`Memory: oom-risk check skipped: ${err instanceof Error ? err.message : err}`);
       }
     }, 30_000);
 

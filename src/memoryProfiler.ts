@@ -8,6 +8,7 @@
 import { writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import type { OomRiskLevel } from './systemCgroupMonitor.js';
 
 /**
  * Snapshot directory for heap snapshots. Overridable so tests can isolate
@@ -44,6 +45,15 @@ export const MEMORY_PRESSURE_THRESHOLD_PERCENT = 80;
 export const PRESSURE_SNAPSHOT_COOLDOWN_MS = 30 * 60 * 1000;
 
 /**
+ * OOM risk levels (docs/heap-snapshot-retention.md, src/systemCgroupMonitor.ts)
+ * that arm the automatic oom-risk snapshot: >= 95% of the cgroup limit.
+ */
+export const OOM_RISK_TRIGGER_LEVELS: readonly OomRiskLevel[] = ['high', 'critical'];
+
+/** Minimum time between oom-risk snapshots (matches the pressure cooldown default) */
+export const OOM_RISK_SNAPSHOT_COOLDOWN_MS = 30 * 60 * 1000;
+
+/**
  * Resolve the total-size cap for on-disk snapshots from the environment.
  * Read at call time (not module load) so operators and tests can change it.
  */
@@ -75,6 +85,35 @@ export function shouldCapturePressureSnapshot(
   if (!snapshotsEnabled) return false;
   if (heapUsagePercent <= MEMORY_PRESSURE_THRESHOLD_PERCENT) return false;
   return nowMs - lastPressureSnapshotMs >= cooldownMs;
+}
+
+/**
+ * Decide whether the memory monitor should capture an 'oom-risk' heap
+ * snapshot. Pure, like shouldCapturePressureSnapshot, so the policy is
+ * unit-testable without inducing real cgroup pressure.
+ *
+ * Independent of the pressure policy in both signal and bookkeeping: this
+ * one reads the system-wide cgroup classification (usage vs cgroup limit)
+ * rather than the process heap (heapUsed vs heap_size_limit), and the
+ * cooldown stamps are kept separately by the caller so one trigger firing
+ * never consumes the other's re-arm.
+ *
+ * @param riskLevel the cgroup monitor's OOM risk classification
+ * @param snapshotsEnabled whether snapshot writing is enabled (CLI --heap-snapshots / NODE_ENV=production)
+ * @param lastOomRiskSnapshotMs epoch ms of the last oom-risk snapshot (0 = never)
+ * @param nowMs current epoch ms
+ * @param cooldownMs minimum spacing between oom-risk snapshots
+ */
+export function shouldCaptureOomRiskSnapshot(
+  riskLevel: OomRiskLevel,
+  snapshotsEnabled: boolean,
+  lastOomRiskSnapshotMs: number,
+  nowMs: number,
+  cooldownMs: number = OOM_RISK_SNAPSHOT_COOLDOWN_MS
+): boolean {
+  if (!snapshotsEnabled) return false;
+  if (!(OOM_RISK_TRIGGER_LEVELS as readonly string[]).includes(riskLevel)) return false;
+  return nowMs - lastOomRiskSnapshotMs >= cooldownMs;
 }
 
 /** Format bytes as a human-readable string. */

@@ -410,12 +410,12 @@ fabric web --heap-snapshots --snapshot-interval 30
 |---|---|---|
 | Periodic profiler capture + heap snapshot write | `--heap-snapshots` passed, or `NODE_ENV=production` (the flag defaults to that) | Every `--snapshot-interval` minutes (default 30): capture a profiler snapshot, and write a `periodic` heap snapshot |
 | Memory-pressure heap snapshot | same enablement condition | A 30-second monitor checks `heapUsed` against the V8 `heap_size_limit`; above **80%** it logs a warning and — if snapshots are enabled and the **30-minute cooldown** has elapsed — writes a `memory-pressure` snapshot. The cooldown exists because each snapshot is heap-sized and stop-the-world. |
+| OOM-risk heap snapshot | same enablement condition | The same 30-second monitor reads the cgroup risk classification (`GET /api/alerts/oom`'s source): at **high** or **critical** (>= 95% / >= 98% of the cgroup limit) and with its own **30-minute cooldown** elapsed, it writes an `oom-risk` snapshot. The cooldown stamp is independent of the pressure one. |
 | 30-second monitor itself | always (no flag) | Captures a profiler snapshot every 30 s and logs a memory line every 5 min — so #1/#6/#3 have data even without `--heap-snapshots` |
 
 Trigger values the API accepts but no automatic path currently emits:
-`oom-risk` and `test` (reserved for operators and test harnesses;
-`test`-triggered snapshots are written by the test suite, never by the
-production service).
+`test` (reserved for test harnesses; `test`-triggered snapshots are written
+by the test suite, never by the production service).
 
 The running systemd unit on codinghome (`scripts/fabric-web.service`) starts
 with `--heap-snapshots --snapshot-interval 30` and
