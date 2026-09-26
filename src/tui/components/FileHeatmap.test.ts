@@ -33,6 +33,7 @@ vi.mock('blessed', () => {
 
 // Import after mocking
 import { FileHeatmap } from './FileHeatmap.js';
+import { getHeatColor } from '../utils/colors.js';
 import { FileHeatmapEntry, FileHeatmapStats, HeatmapOptions, HeatLevel, FileAnomaly } from '../../types.js';
 
 // Helper to create mock FileHeatmapEntry
@@ -997,6 +998,388 @@ describe('FileHeatmap', () => {
       getKeyHandler('s')?.();
       const content = calls[calls.length - 1][0];
       expect(content).toContain('Sort: recent');
+    });
+  });
+
+  // --- interaction and rendering regression coverage (fabric-9cf938df) ---
+
+  // Latest content handed to the box (key handlers render mid-test, so the
+  // first call is not always the interesting one).
+  const lastRenderedContent = (): string => {
+    const calls = mockBoxInstance.setContent.mock.calls;
+    return calls[calls.length - 1][0];
+  };
+
+  // The rendered row for a given path (paths never appear in header/footer).
+  const rowForPath = (content: string, path: string): string | undefined =>
+    content.split('\n').find((line: string) => line.includes(path));
+
+  // Filled/empty cell counts of the heat bar rendered for a heat level.
+  // The color comes from getHeatColor so the assertion tracks the active
+  // theme; the level icon shares the color tag, so require at least one
+  // filled cell.
+  const heatBarCells = (content: string, level: HeatLevel): { filled: number; empty: number } => {
+    const match = content.match(new RegExp(`\\{${getHeatColor(level)}-fg\\}(█+)\\{/\\}(░*)`));
+    return { filled: match ? match[1].length : 0, empty: match ? match[2].length : 0 };
+  };
+
+  describe('heat bar rendering (exact cell counts per level)', () => {
+    it('renders 1 filled cell for cold at the 1-modification boundary', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ heatLevel: 'cold', modifications: 1 })],
+        createMockStats
+      );
+      expect(heatBarCells(lastRenderedContent(), 'cold')).toEqual({ filled: 1, empty: 9 });
+    });
+
+    it('renders 2 filled cells for cold at the 2-modification boundary', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ heatLevel: 'cold', modifications: 2 })],
+        createMockStats
+      );
+      expect(heatBarCells(lastRenderedContent(), 'cold')).toEqual({ filled: 2, empty: 8 });
+    });
+
+    it('renders 3 filled cells for warm at the 3-modification boundary', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ heatLevel: 'warm', modifications: 3 })],
+        createMockStats
+      );
+      expect(heatBarCells(lastRenderedContent(), 'warm')).toEqual({ filled: 3, empty: 7 });
+    });
+
+    it('caps warm at 4 filled cells at the top of its band', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ heatLevel: 'warm', modifications: 5 })],
+        createMockStats
+      );
+      expect(heatBarCells(lastRenderedContent(), 'warm')).toEqual({ filled: 4, empty: 6 });
+    });
+
+    it('caps hot at 7 filled cells across its whole band', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ heatLevel: 'hot', modifications: 6 })],
+        createMockStats
+      );
+      expect(heatBarCells(lastRenderedContent(), 'hot')).toEqual({ filled: 7, empty: 3 });
+
+      fileHeatmap.updateData(
+        () => [createMockEntry({ heatLevel: 'hot', modifications: 10 })],
+        createMockStats
+      );
+      expect(heatBarCells(lastRenderedContent(), 'hot')).toEqual({ filled: 7, empty: 3 });
+    });
+
+    it('caps critical at 10 filled cells with no empty cells left', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ heatLevel: 'critical', modifications: 11 })],
+        createMockStats
+      );
+      expect(heatBarCells(lastRenderedContent(), 'critical')).toEqual({ filled: 10, empty: 0 });
+
+      fileHeatmap.updateData(
+        () => [createMockEntry({ heatLevel: 'critical', modifications: 100 })],
+        createMockStats
+      );
+      expect(heatBarCells(lastRenderedContent(), 'critical')).toEqual({ filled: 10, empty: 0 });
+    });
+  });
+
+  describe('entry row rendering (level icons and collision indicators)', () => {
+    it('renders the heat icon for each level on its entry row', () => {
+      const levels: Array<[HeatLevel, string]> = [
+        ['cold', '○'],
+        ['warm', '◐'],
+        ['hot', '●'],
+        ['critical', '🔥'],
+      ];
+      for (const [level, icon] of levels) {
+        fileHeatmap.updateData(
+          () => [createMockEntry({ path: 'row-icon.ts', heatLevel: level })],
+          createMockStats
+        );
+        expect(rowForPath(lastRenderedContent(), 'row-icon.ts')).toContain(icon);
+      }
+    });
+
+    it('gives the collision warning precedence over the active-workers bolt', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ path: 'both.ts', hasCollision: true, activeWorkers: 3 })],
+        createMockStats
+      );
+      const row = rowForPath(lastRenderedContent(), 'both.ts');
+      expect(row).toContain('{red-fg}⚠{/}');
+      expect(row).not.toContain('⚡');
+    });
+
+    it('renders the potential-collision bolt in yellow for multi-worker files', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ path: 'bolt.ts', hasCollision: false, activeWorkers: 2 })],
+        createMockStats
+      );
+      expect(rowForPath(lastRenderedContent(), 'bolt.ts')).toContain('{yellow-fg}⚡{/}');
+    });
+  });
+
+  describe('worker tracking display', () => {
+    it('truncates a long single worker id to 8 characters', () => {
+      fileHeatmap.updateData(
+        () => [
+          createMockEntry({
+            path: 'single-worker.ts',
+            workers: [
+              { workerId: 'claude-code-glm-roam-21', modifications: 5, lastModified: Date.now(), percentage: 100 },
+            ],
+          }),
+        ],
+        createMockStats
+      );
+      const row = rowForPath(lastRenderedContent(), 'single-worker.ts');
+      expect(row).toContain('claude-c');
+      expect(row).not.toContain('claude-code-glm-roam-21');
+    });
+
+    it('shows 6-character prefixes for two workers without an overflow count', () => {
+      fileHeatmap.updateData(
+        () => [
+          createMockEntry({
+            path: 'two-workers.ts',
+            workers: [
+              { workerId: 'alpha-worker-one', modifications: 3, lastModified: Date.now(), percentage: 60 },
+              { workerId: 'bravo-worker-two', modifications: 2, lastModified: Date.now(), percentage: 40 },
+            ],
+          }),
+        ],
+        createMockStats
+      );
+      const row = rowForPath(lastRenderedContent(), 'two-workers.ts');
+      expect(row).toContain('alpha-, bravo-');
+      expect(row).not.toMatch(/\+\d/);
+    });
+
+    it('shows the +N overflow count for three or more workers', () => {
+      const workers = ['alpha-one', 'bravo-two', 'charlie-three'].map((workerId, i) => ({
+        workerId,
+        modifications: 3 - i,
+        lastModified: Date.now(),
+        percentage: 40 - i * 10,
+      }));
+      fileHeatmap.updateData(
+        () => [createMockEntry({ path: 'many-workers.ts', workers })],
+        createMockStats
+      );
+      expect(rowForPath(lastRenderedContent(), 'many-workers.ts')).toContain('+1');
+    });
+  });
+
+  describe('stats header mode labels', () => {
+    it('omits filter labels in the default mode', () => {
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats);
+      const content = lastRenderedContent();
+      expect(content).not.toContain('Collisions Only');
+      expect(content).not.toContain('Anomalies Only');
+    });
+
+    it('shows the collisions-only label when c is toggled on', () => {
+      getKeyHandler('c')?.();
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats);
+      expect(lastRenderedContent()).toContain('| Collisions Only');
+    });
+
+    it('shows the anomalies-only label (and not collisions) when a is toggled on', () => {
+      getKeyHandler('a')?.();
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats);
+      const content = lastRenderedContent();
+      expect(content).toContain('| Anomalies Only');
+      expect(content).not.toContain('Collisions Only');
+    });
+
+    it('shows the live anomaly count in the header', () => {
+      const anomalies: FileAnomaly[] = [
+        { path: 'a.yaml', type: 'config_modification', severity: 'warning', message: 'm', detectedAt: Date.now(), details: {} },
+        { path: 'b.yaml', type: 'sensitive_file', severity: 'critical', message: 'm', detectedAt: Date.now(), details: {} },
+      ];
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats, () => anomalies);
+      expect(lastRenderedContent()).toContain('⚠ 2 anomalies');
+    });
+  });
+
+  describe('anomaly summary suppression', () => {
+    it('hides the Unexpected Activity section while collisions-only is active', () => {
+      const anomalies: FileAnomaly[] = [
+        { path: 'a.yaml', type: 'config_modification', severity: 'warning', message: 'm', detectedAt: Date.now(), details: {} },
+      ];
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats, () => anomalies);
+      expect(lastRenderedContent()).toContain('Unexpected Activity');
+
+      getKeyHandler('c')?.();
+      const content = lastRenderedContent();
+      expect(content).not.toContain('Unexpected Activity');
+      // The file list itself remains visible in collisions-only mode
+      expect(rowForPath(content, 'src/test.ts')).toBeDefined();
+    });
+  });
+
+  describe('footer help lines', () => {
+    it('renders the sort/collisions/anomalies/scroll hints in the file view', () => {
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats);
+      expect(lastRenderedContent()).toContain('[s] Sort  [c] Collisions  [a] Anomalies  [j/k] Scroll');
+    });
+
+    it('renders the back-to-files hint in a populated anomaly view', () => {
+      getKeyHandler('a')?.();
+      const anomalies: FileAnomaly[] = [
+        { path: 'a.yaml', type: 'config_modification', severity: 'warning', message: 'm', detectedAt: Date.now(), details: {} },
+      ];
+      fileHeatmap.updateData(() => [], createMockStats, () => anomalies);
+      expect(lastRenderedContent()).toContain('[a] Back to files  [j/k] Scroll');
+    });
+  });
+
+  describe('selection marker rendering', () => {
+    const threeEntries = () => [
+      createMockEntry({ path: 'first-file.ts' }),
+      createMockEntry({ path: 'middle-file.ts' }),
+      createMockEntry({ path: 'last-file.ts' }),
+    ];
+
+    it('marks exactly the selected row', () => {
+      fileHeatmap.updateData(threeEntries, createMockStats);
+      const content = lastRenderedContent();
+      expect(rowForPath(content, 'first-file.ts')).toMatch(/^>/);
+      expect(rowForPath(content, 'middle-file.ts')).toMatch(/^ /);
+      expect(rowForPath(content, 'last-file.ts')).toMatch(/^ /);
+    });
+
+    it('moves the marker to the newly selected row on j/k', () => {
+      fileHeatmap.updateData(threeEntries, createMockStats);
+      fileHeatmap.selectNext();
+      const content = lastRenderedContent();
+      expect(rowForPath(content, 'first-file.ts')).toMatch(/^ /);
+      expect(rowForPath(content, 'middle-file.ts')).toMatch(/^>/);
+    });
+
+    it('jumps the marker to the last row on G', () => {
+      fileHeatmap.updateData(threeEntries, createMockStats);
+      getKeyHandler('G')?.();
+      const content = lastRenderedContent();
+      expect(rowForPath(content, 'last-file.ts')).toMatch(/^>/);
+      expect(rowForPath(content, 'first-file.ts')).toMatch(/^ /);
+    });
+
+    it('keeps the marker on the same position across a live refresh', () => {
+      fileHeatmap.updateData(threeEntries, createMockStats);
+      fileHeatmap.selectNext();
+
+      const refreshedEntries = [
+        createMockEntry({ path: 'fresh-a.ts' }),
+        createMockEntry({ path: 'fresh-b.ts' }),
+        createMockEntry({ path: 'fresh-c.ts' }),
+      ];
+      fileHeatmap.updateData(() => refreshedEntries, createMockStats);
+
+      expect(fileHeatmap.getSelected()?.path).toBe('fresh-b.ts');
+      expect(rowForPath(lastRenderedContent(), 'fresh-b.ts')).toMatch(/^>/);
+    });
+  });
+
+  describe('anomaly navigation wrap-around and clamping', () => {
+    const makeAnomaly = (path: string): FileAnomaly => ({
+      path,
+      type: 'config_modification',
+      severity: 'warning',
+      message: 'm',
+      detectedAt: Date.now(),
+      details: {},
+    });
+
+    const enterAnomalyModeWith = (paths: string[]): void => {
+      getKeyHandler('a')?.();
+      fileHeatmap.updateData(() => [], createMockStats, () => paths.map(makeAnomaly));
+    };
+
+    it('wraps selectNext from the last anomaly back to the first', () => {
+      enterAnomalyModeWith(['a.yaml', 'b.yaml']);
+      fileHeatmap.selectNext();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('b.yaml');
+      fileHeatmap.selectNext();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('a.yaml');
+    });
+
+    it('wraps selectPrevious from the first anomaly to the last', () => {
+      enterAnomalyModeWith(['a.yaml', 'b.yaml']);
+      fileHeatmap.selectPrevious();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('b.yaml');
+    });
+
+    it('does nothing (and does not throw) with zero anomalies', () => {
+      enterAnomalyModeWith([]);
+      expect(() => {
+        fileHeatmap.selectNext();
+        fileHeatmap.selectPrevious();
+      }).not.toThrow();
+      expect(fileHeatmap.getSelectedAnomaly()).toBeUndefined();
+    });
+
+    it('clamps the anomaly selection when the list shrinks on refresh', () => {
+      enterAnomalyModeWith(['a.yaml', 'b.yaml', 'c.yaml']);
+      fileHeatmap.selectNext();
+      fileHeatmap.selectNext();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('c.yaml');
+
+      fileHeatmap.updateData(() => [], createMockStats, () => [makeAnomaly('only.yaml')]);
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('only.yaml');
+    });
+  });
+
+  describe('clearFilter resets every filter axis', () => {
+    it('clears anomaly mode, collision mode, and the directory filter together', () => {
+      getKeyHandler('a')?.();
+      expect(fileHeatmap.getAnomalyFilter()).toBe(true);
+
+      fileHeatmap.setFilter('src/auth');
+      fileHeatmap.clearFilter();
+
+      expect(fileHeatmap.getAnomalyFilter()).toBe(false);
+      expect(fileHeatmap.getCollisionFilter()).toBe(false);
+
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ directoryFilter: undefined, collisionsOnly: false })
+      );
+    });
+
+    it('treats an explicitly empty filter as no filter', () => {
+      fileHeatmap.setFilter('src/');
+      fileHeatmap.setFilter('');
+
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ directoryFilter: undefined })
+      );
+    });
+  });
+
+  describe('data getter contract', () => {
+    it('passes the complete default option set to the heatmap getter', () => {
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      expect(getHeatmap).toHaveBeenCalledWith({
+        sortBy: 'modifications',
+        maxEntries: 100,
+        collisionsOnly: false,
+        directoryFilter: undefined,
+      });
+    });
+
+    it('calls the anomaly getter with empty options', () => {
+      const getAnomalies = vi.fn(() => []);
+      fileHeatmap.updateData(() => [], createMockStats, getAnomalies);
+
+      expect(getAnomalies).toHaveBeenCalledWith({});
     });
   });
 });
