@@ -1,6 +1,8 @@
 # FABRIC API Authorization Policy
 
 Single source of truth for which FABRIC HTTP endpoints require authentication.
+For the event-ingestion endpoints specifically, the canonical payload,
+validation, batching, and limits reference is `docs/events-api.md`.
 
 ## The policy
 
@@ -104,8 +106,8 @@ Every `POST` route `src/web/server.ts` currently registers — derived from
 
 | Route | What it mutates |
 |---|---|
-| `POST /api/events` | Ingests a NEEDLE event into the store |
-| `POST /api/events/batch` | Ingests a batch of NEEDLE events |
+| `POST /api/events` | Ingests a NEEDLE event into the store — payload, validation, batching, and limits documented in `docs/events-api.md` |
+| `POST /api/events/batch` | Ingests a batch of NEEDLE events (same contract, array body; `docs/events-api.md`) |
 | `POST /api/retention/prune` | Archives/deletes NEEDLE log files (unless `dryRun: true`) |
 | `POST /api/retention/controls` | Appends a pre-signed tombstone or legal-hold record |
 | `POST /api/retention/tombstones` | Appends a pre-signed occurrence tombstone |
