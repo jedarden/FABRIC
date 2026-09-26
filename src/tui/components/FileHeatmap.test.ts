@@ -1382,4 +1382,187 @@ describe('FileHeatmap', () => {
       expect(getAnomalies).toHaveBeenCalledWith({});
     });
   });
+
+  // --- documented in-view behavior coverage (fabric-1d31a29a) ---
+  // Pins the behaviors docs/FileHeatmap-Integration.md §4 documents beyond
+  // the H/h entry toggle that earlier suites pinned only at method or store
+  // level: navigation driven through the actual bound key handlers, the
+  // full sort/filter getter contract, and refresh-after-new-events.
+
+  describe('j/k and arrow-key navigation wiring', () => {
+    const threeEntries = () => [
+      createMockEntry({ path: 'a.ts' }),
+      createMockEntry({ path: 'b.ts' }),
+      createMockEntry({ path: 'c.ts' }),
+    ];
+
+    it('binds one shared handler per axis so arrows and vi keys agree', () => {
+      expect(getKeyHandler('down')).toBe(getKeyHandler('j'));
+      expect(getKeyHandler('up')).toBe(getKeyHandler('k'));
+      expect(getKeyHandler('down')).not.toBe(getKeyHandler('up'));
+    });
+
+    it('moves the selection forward through the bound down/j handler', () => {
+      fileHeatmap.updateData(threeEntries, createMockStats);
+      expect(fileHeatmap.getSelected()?.path).toBe('a.ts');
+
+      getKeyHandler('down')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('b.ts');
+
+      getKeyHandler('j')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('c.ts');
+    });
+
+    it('moves the selection back through the bound up/k handler', () => {
+      fileHeatmap.updateData(threeEntries, createMockStats);
+      getKeyHandler('G')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('c.ts');
+
+      getKeyHandler('up')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('b.ts');
+
+      getKeyHandler('k')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('a.ts');
+    });
+
+    it('no-ops the bound navigation handlers on an empty list', () => {
+      fileHeatmap.updateData(() => [], createMockStats);
+      expect(() => {
+        getKeyHandler('down')?.();
+        getKeyHandler('j')?.();
+        getKeyHandler('up')?.();
+        getKeyHandler('k')?.();
+      }).not.toThrow();
+      expect(fileHeatmap.getSelected()).toBeUndefined();
+    });
+
+    it('routes j/k into anomaly navigation while anomalies-only is active', () => {
+      const makeAnomaly = (path: string): FileAnomaly => ({
+        path,
+        type: 'config_modification',
+        severity: 'warning',
+        message: 'm',
+        detectedAt: Date.now(),
+        details: {},
+      });
+
+      getKeyHandler('a')?.();
+      fileHeatmap.updateData(
+        () => [],
+        createMockStats,
+        () => [makeAnomaly('a.yaml'), makeAnomaly('b.yaml')]
+      );
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('a.yaml');
+
+      getKeyHandler('j')?.();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('b.yaml');
+
+      getKeyHandler('k')?.();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('a.yaml');
+    });
+  });
+
+  describe('g/G jumps at the edges', () => {
+    it('leaves the selection undefined when g/G are pressed with no entries', () => {
+      fileHeatmap.updateData(() => [], createMockStats);
+      expect(() => {
+        getKeyHandler('g')?.();
+        getKeyHandler('G')?.();
+      }).not.toThrow();
+      expect(fileHeatmap.getSelected()).toBeUndefined();
+    });
+
+    it('keeps g and G idempotent at the ends of the list', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ path: 'a.ts' }), createMockEntry({ path: 'b.ts' })],
+        createMockStats
+      );
+
+      getKeyHandler('g')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('a.ts');
+      getKeyHandler('g')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('a.ts');
+
+      getKeyHandler('G')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('b.ts');
+      getKeyHandler('G')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('b.ts');
+    });
+  });
+
+  describe('sort mode getter contract and header labels', () => {
+    it('passes every sort mode to the getter across a full s cycle', () => {
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      const sHandler = getKeyHandler('s');
+      for (const mode of ['recent', 'workers', 'collisions', 'modifications'] as const) {
+        sHandler?.();
+        fileHeatmap.updateData(getHeatmap, createMockStats);
+        expect(getHeatmap).toHaveBeenLastCalledWith(
+          expect.objectContaining({ sortBy: mode })
+        );
+      }
+    });
+
+    it('cycles the header sort label through all four modes', () => {
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats);
+
+      const labels = ['Sort: modifications', 'Sort: recent', 'Sort: workers', 'Sort: collisions'];
+      for (const label of labels) {
+        expect(lastRenderedContent()).toContain(label);
+        getKeyHandler('s')?.();
+      }
+      expect(lastRenderedContent()).toContain('Sort: modifications');
+    });
+  });
+
+  describe('collision filter toggle directions', () => {
+    it('passes collisionsOnly true and then false across a full c cycle', () => {
+      const getHeatmap = vi.fn(() => []);
+      const cHandler = getKeyHandler('c');
+
+      cHandler?.();
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ collisionsOnly: true })
+      );
+
+      cHandler?.();
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ collisionsOnly: false })
+      );
+    });
+  });
+
+  describe('updates after new events', () => {
+    it('reflects new totals in the stats header on the next refresh', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ path: 'live.ts', modifications: 5 })],
+        () => createMockStats({ totalModifications: 5 })
+      );
+      expect(lastRenderedContent()).toContain('Mods: 5');
+
+      // More events land in the store; the next updateData carries new totals.
+      fileHeatmap.updateData(
+        () => [createMockEntry({ path: 'live.ts', modifications: 8 })],
+        () => createMockStats({ totalModifications: 8 })
+      );
+      const content = lastRenderedContent();
+      expect(content).toContain('Mods: 8');
+      expect(rowForPath(content, 'live.ts')).toContain('{bold}  8{/}');
+    });
+
+    it('renders a newly-arrived file row on the next refresh', () => {
+      fileHeatmap.updateData(() => [createMockEntry({ path: 'old.ts' })], createMockStats);
+      expect(rowForPath(lastRenderedContent(), 'new.ts')).toBeUndefined();
+
+      fileHeatmap.updateData(
+        () => [createMockEntry({ path: 'old.ts' }), createMockEntry({ path: 'new.ts' })],
+        createMockStats
+      );
+      expect(rowForPath(lastRenderedContent(), 'new.ts')).toBeDefined();
+    });
+  });
 });
