@@ -146,6 +146,61 @@ describe('Memory & Heap Snapshot API', () => {
       expect(fs.existsSync(data.filepath)).toBe(true);
     });
 
+    it('should apply retention after an oom-risk capture', { timeout: 60_000 }, async () => {
+      // docs/heap-snapshot-retention.md, Automatic Cleanup step 4: the
+      // retention policy is applied after EVERY snapshot write. The
+      // retention tests in memoryProfiler.test.ts drive 'test' writes; this
+      // drives the oom-risk capture path — the route is where an oom-risk
+      // capture enters (the monitor reports the risk level on
+      // GET /api/alerts/oom, and the capture is issued against this
+      // endpoint) — and proves its write carries the same cleanup: seeded
+      // at the 50-file cap, the oldest seed goes, the cap holds, and the
+      // oom-risk capture itself survives.
+      const fakes: string[] = [];
+      for (let i = 0; i < 50; i++) {
+        fakes.push(writeFakeSnapshot(`heap-${14_000_000 + i}-test.heapsnapshot`, 1024, (50 - i) * 60_000));
+      }
+      expect(fs.readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.heapsnapshot'))).toHaveLength(50);
+
+      const response = await fetchApi('/api/memory/heap-snapshot', authJson({ trigger: 'oom-risk' }));
+
+      expect(response.status).toBe(200);
+      const data = await response.json() as any;
+      expect(data.success).toBe(true);
+      expect(data.trigger).toBe('oom-risk');
+      expect(data.filepath).toMatch(/heap-\d+-oom-risk\.heapsnapshot$/);
+      expect(fs.readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.heapsnapshot'))).toHaveLength(50);
+      expect(fs.existsSync(data.filepath)).toBe(true);
+      expect(fs.existsSync(fakes[0])).toBe(false); // oldest seed pruned by the capture
+      for (let i = 1; i < fakes.length; i++) {
+        expect(fs.existsSync(fakes[i])).toBe(true);
+      }
+    });
+
+    it('should write an explicit capture even when automatic enablement is off', { timeout: 60_000 }, async () => {
+      // The enablement flags (--heap-snapshots / NODE_ENV=production,
+      // surfaced as writeSnapshots/autoSnapshot) gate the AUTOMATIC capture
+      // paths — periodic and memory-pressure. An explicit API request is
+      // its own enablement: the caller asked for this capture, so neither
+      // flag may gate it.
+      const profiler = getMemoryProfiler();
+      const savedWrite = profiler.writeSnapshots;
+      const savedAuto = profiler.autoSnapshot;
+      profiler.writeSnapshots = false;
+      profiler.autoSnapshot = false;
+      try {
+        const response = await fetchApi('/api/memory/heap-snapshot', authJson({ trigger: 'manual' }));
+
+        expect(response.status).toBe(200);
+        const data = await response.json() as any;
+        expect(data.trigger).toBe('manual');
+        expect(fs.existsSync(data.filepath)).toBe(true);
+      } finally {
+        profiler.writeSnapshots = savedWrite;
+        profiler.autoSnapshot = savedAuto;
+      }
+    });
+
     it('should reject an undocumented trigger value with 400', async () => {
       // The trigger becomes part of the on-disk filename, so arbitrary values
       // (including path fragments) must not reach the write path.
@@ -581,6 +636,26 @@ describe('Memory-pressure capture (server monitor seam)', () => {
     expect(writeSpy).toHaveBeenNthCalledWith(2, 'memory-pressure');
   });
 
+  it('does not schedule a second capture while the previous write is in flight', async () => {
+    // Duplicate-capture prevention: lastPressureSnapshot is stamped when
+    // the monitor DECIDES to capture, not when the write resolves — each
+    // write is heap-sized and stop-the-world, so a second queued capture
+    // behind an in-flight one would compound the stall. A write that never
+    // resolves stands in for a slow serialization: if the stamp instead
+    // waited for write completion, lastPressureSnapshot would stay 0 and
+    // the very next pressured check (now − 0 being epochs larger than the
+    // cooldown) would immediately queue another capture. All checks below
+    // stay inside the 30-minute cooldown, so the stamp alone gates them.
+    getMemoryProfiler().writeSnapshots = true;
+    writeSpy.mockImplementation(() => new Promise<string>(() => {})); // never resolves
+
+    await vi.advanceTimersByTimeAsync(30_000); // decision #1: write starts, never finishes
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(29 * 60_000); // 58 more pressured checks, still in flight
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('never captures under sustained pressure when snapshot writing is disabled', async () => {
     // The monitor's enablement gate (CLI --heap-snapshots / NODE_ENV=production).
     // Test-process default is false; pressure alone must not write.
@@ -588,5 +663,115 @@ describe('Memory-pressure capture (server monitor seam)', () => {
 
     await vi.advanceTimersByTimeAsync(31 * 60_000);
     expect(writeSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Memory-pressure capture invokes retention (server monitor seam)
+// ─────────────────────────────────────────────────────────────────────
+// The seam describe above spies writeHeapSnapshot, so it proves the
+// monitor's decision wiring but never the write itself.
+// docs/heap-snapshot-retention.md, Automatic Cleanup step 4: retention runs
+// after EVERY snapshot write. This runs the monitor's real 'memory-pressure'
+// write end-to-end — pressured check → policy → full heap write → retention
+// in that same write — against a directory seeded at the 50-file cap.
+
+describe('Memory-pressure capture invokes retention (server monitor seam)', () => {
+  let store: InMemoryEventStore;
+  let server: WebServer;
+  let memoryUsageSpy: MockInstance;
+  let consoleErrorSpy: MockInstance;
+  let consoleWarnSpy: MockInstance;
+  let realUsage: NodeJS.MemoryUsage;
+  let heapLimitBytes: number;
+
+  beforeAll(async () => {
+    // Same no-allocation pressure as the seam above: 90% of the real
+    // heap_size_limit sits above the documented 80% threshold.
+    realUsage = process.memoryUsage();
+    heapLimitBytes = (await import('v8')).getHeapStatistics().heap_size_limit;
+  });
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    for (const file of fs.readdirSync(SNAPSHOT_DIR)) {
+      fs.rmSync(path.join(SNAPSHOT_DIR, file), { recursive: true, force: true });
+    }
+
+    memoryUsageSpy = vi.spyOn(process, 'memoryUsage').mockImplementation(() => ({
+      ...realUsage,
+      heapUsed: Math.floor(heapLimitBytes * 0.9),
+    }));
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    store = new InMemoryEventStore();
+    resetCrossReferenceManager();
+    server = createWebServer({
+      port: 0,
+      logPath: '/tmp/test-logs',
+      store,
+      authToken: 'pressure-retention-token',
+    });
+    await new Promise<void>((resolve) => {
+      server.on('start', () => resolve());
+      server.start();
+    });
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await new Promise<void>((resolve) => {
+      server.on('stop', () => resolve());
+      server.stop();
+    });
+    getMemoryProfiler().writeSnapshots = false;
+    memoryUsageSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    store.clear();
+    resetCrossReferenceManager();
+  });
+
+  afterAll(() => {
+    fs.rmSync(SNAPSHOT_DIR, { recursive: true, force: true });
+  });
+
+  it('the monitor memory-pressure write prunes past the 50-file cap', { timeout: 60_000 }, async () => {
+    // Seed exactly at the documented cap before the monitor fires (ages
+    // 1..50 minutes, oldest first).
+    const fakes: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      fakes.push(writeFakeSnapshot(`heap-${15_000_000 + i}-test.heapsnapshot`, 1024, (50 - i) * 60_000));
+    }
+    getMemoryProfiler().writeSnapshots = true;
+
+    // First pressured check at 30s; the write serializes the full heap
+    // asynchronously afterwards — advance the fake clock while polling for
+    // the on-disk file (same pattern as the periodic scheduler's real-write
+    // test in memoryProfiler.test.ts). The cooldown stamped at the first
+    // decision keeps the checks fired during the poll from capturing again.
+    await vi.advanceTimersByTimeAsync(30_000);
+    let filepath: string | undefined;
+    for (let i = 0; i < 300 && filepath === undefined; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+      filepath = fs.readdirSync(SNAPSHOT_DIR).find(f => /^heap-\d+-memory-pressure\.heapsnapshot$/.test(f));
+    }
+
+    expect(filepath).toBeDefined();
+
+    // The capture landed the directory at 51 files; retention ran inside
+    // that same write and pruned the oldest seed — the automatic capture
+    // carries the cleanup with it.
+    expect(fs.readdirSync(SNAPSHOT_DIR).filter(f => f.endsWith('.heapsnapshot'))).toHaveLength(50);
+    // The poll matches a bare filename inside SNAPSHOT_DIR; resolve it
+    // before an existence check.
+    const capturedPath = path.join(SNAPSHOT_DIR, filepath!);
+    expect(fs.existsSync(capturedPath)).toBe(true);
+    expect(fs.existsSync(fakes[0])).toBe(false); // oldest seed pruned by the automatic write
+    for (let i = 1; i < fakes.length; i++) {
+      expect(fs.existsSync(fakes[i])).toBe(true);
+    }
   });
 });

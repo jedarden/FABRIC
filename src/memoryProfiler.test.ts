@@ -781,6 +781,89 @@ describe('Memory Profiler', () => {
     });
   });
 
+  describe('Periodic Capture Configuration', () => {
+    it('pins the documented 30-minute default snapshot interval', () => {
+      // docs/heap-snapshot-retention.md, Trigger Reasons: "periodic —
+      // Scheduled automatic capture, every 30 minutes, configurable via
+      // --snapshot-interval". The scheduler tests below run with
+      // snapshotIntervalMs overridden for speed, and the CLI contract tests
+      // pin the flag's own default — neither would notice the profiler-side
+      // default drifting, and it is that default a deployment without an
+      // explicit --snapshot-interval actually runs on.
+      expect(profiler.snapshotIntervalMs).toBe(30 * 60 * 1000);
+    });
+  });
+
+  describe('Automatic captures invoke retention', () => {
+    // docs/heap-snapshot-retention.md, Automatic Cleanup step 4: retention
+    // runs after writeHeapSnapshot() — for every trigger, not only the
+    // explicit ones. The Retention Policy describe drives 'test' writes
+    // directly; this drives the periodic path end-to-end (real scheduler
+    // tick → real heap write named 'periodic' → retention inside that same
+    // write) so an automatic capture can never silently lose the cleanup
+    // step. The memory-pressure and oom-risk automatic paths are pinned at
+    // their own seams in web/server.heap.test.ts.
+    const saved = { writeSnapshots: false, autoSnapshot: false, intervalMs: 0 };
+
+    beforeEach(() => {
+      saved.writeSnapshots = profiler.writeSnapshots;
+      saved.autoSnapshot = profiler.autoSnapshot;
+      saved.intervalMs = profiler.snapshotIntervalMs;
+    });
+
+    afterEach(() => {
+      profiler.stopPeriodicCapture();
+      profiler.writeSnapshots = saved.writeSnapshots;
+      profiler.autoSnapshot = saved.autoSnapshot;
+      profiler.snapshotIntervalMs = saved.intervalMs;
+    });
+
+    it('the scheduled periodic write prunes past the 50-file cap', { timeout: 60_000 }, async () => {
+      // Seed exactly at the documented cap (ages 1..50 minutes, oldest
+      // first, same sparse-placeholder pattern as the retention tests).
+      const fakes: string[] = [];
+      for (let i = 0; i < MAX_DISK_SNAPSHOTS; i++) {
+        fakes.push(writeFakeSnapshot(`heap-${12_000_000 + i}-test.heapsnapshot`, 1024, (50 - i) * 60_000));
+      }
+      expect(profiler.getSnapshotCount()).toBe(MAX_DISK_SNAPSHOTS);
+
+      profiler.writeSnapshots = true;
+      profiler.autoSnapshot = true;
+      profiler.snapshotIntervalMs = 1_000;
+      vi.useFakeTimers();
+      let filepath: string | undefined;
+      try {
+        profiler.startPeriodicCapture();
+
+        // The write serializes the full heap asynchronously after the tick;
+        // keep advancing the fake clock while polling for the file (same
+        // pattern as 'names scheduled captures with the periodic trigger on
+        // disk' above). The scheduler is stopped the moment the file
+        // appears so the poll cannot cascade further real writes.
+        for (let i = 0; i < 200 && filepath === undefined; i++) {
+          await vi.advanceTimersByTimeAsync(100);
+          filepath = readdirSync(SNAPSHOT_DIR).find(f => /^heap-\d+-periodic\.heapsnapshot$/.test(f));
+        }
+      } finally {
+        profiler.stopPeriodicCapture();
+        vi.useRealTimers();
+      }
+
+      expect(filepath).toBeDefined();
+
+      // The tick landed the directory at 51 files; retention ran inside
+      // that same write and pruned the oldest seed, leaving the cap intact
+      // with the automatic capture present. The poll matches a bare
+      // filename inside SNAPSHOT_DIR; resolve it before the existence check.
+      expect(profiler.getSnapshotCount()).toBe(MAX_DISK_SNAPSHOTS);
+      expect(existsSync(join(SNAPSHOT_DIR, filepath!))).toBe(true);
+      expect(existsSync(fakes[0])).toBe(false); // oldest seed pruned by the automatic write
+      for (let i = 1; i < fakes.length; i++) {
+        expect(existsSync(fakes[i])).toBe(true);
+      }
+    });
+  });
+
   describe('Snapshot Reading and Comparison', () => {
     it('should read snapshots from disk', { timeout: 60_000 }, async () => {
       await profiler.writeHeapSnapshot('test');
