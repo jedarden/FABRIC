@@ -55,7 +55,10 @@ token), valid-token pass-through, **unset-token mode** (no token configured
 → every POST passes on both listeners and handlers really run), and
 **malformed bodies** (a valid token + malformed JSON dies at the parse layer
 — `400` from body-parser on `/api/*`, the receiver's decode failure on
-`/v1/*` — with no handler side effect), plus rejection-before-side-effects
+`/v1/*` — with no handler side effect), **oversized bodies** (a valid token
++ an over-cap body dies at the transport limit — `413` at the 64 KiB
+`/api/*` cap and at the receiver's 5 MB `/v1/*` cap, while a just-under-cap
+body still ingests — also with no handler side effect), plus rejection-before-side-effects
 (no events or OTLP records ingested, no theme persisted, no prune attempt
 recorded). The `Auth policy consistency` describe in `src/web/server.test.ts`
 re-sweeps the discovered routes for 401/403. If you add a POST route it is

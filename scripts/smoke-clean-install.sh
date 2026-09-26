@@ -22,7 +22,13 @@
 #                                              alias for tail"); --help equivalence
 #                                              checked in phase 4
 #                                fabric web    /api/health, SPA assets served from
-#                                              the installed package, graceful SIGINT
+#                                              the installed package, graceful SIGINT,
+#                                              plus the docs/api-auth.md auth matrix
+#                                              over BOTH HTTP listeners (main +
+#                                              --otlp-http): open GETs, missing/
+#                                              wrong/valid token, malformed body,
+#                                              oversized body, unset-token mode, and
+#                                              no-side-effect rejections
 #                                fabric tui    pty startup, graceful SIGINT
 #                                fabric replay pty startup on fixture logs, graceful
 #                                              SIGINT
@@ -320,16 +326,53 @@ kill -INT "$TPID"
 wait "$TPID" || fail "fabric tail (directory): nonzero exit after SIGINT"
 pass "fabric tail (directory): hot-add pickup + graceful SIGINT exit"
 
-# 5e. fabric web — health, SPA assets from the installed package, graceful SIGINT
-PORT=""
-for _ in $(seq 1 5); do
-  CAND=$((20000 + RANDOM % 20000))
-  if ! (exec 3<>"/dev/tcp/127.0.0.1/$CAND") 2>/dev/null; then PORT="$CAND"; break; fi
-done
-if [ -z "$PORT" ]; then fail "could not find a free port for fabric web"; fi
+# 5e. fabric web — unset-token mode (no FABRIC_AUTH_TOKEN), BOTH HTTP
+# listeners (main + --otlp-http): /api/health, SPA assets from the installed
+# package, GETs open, and every POST accepted without an Authorization
+# header — including a deliberately wrong one — with handlers really
+# ingesting (docs/api-auth.md "Token configuration"), graceful SIGINT.
+
+# Pick a free TCP port: a connect probe that FAILS marks the port free.
+find_free_port() {
+  local cand
+  for _ in $(seq 1 5); do
+    cand=$((20000 + RANDOM % 20000))
+    if ! (exec 3<>"/dev/tcp/127.0.0.1/$cand") 2>/dev/null; then
+      printf '%s' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# HTTP status of a curl invocation, body discarded ("000" on a dead server).
+http_code() { curl -s -o /dev/null -w '%{http_code}' "$@" || true; }
+
+# Count stored events for one worker id (exact match; immune to whatever the
+# fixture logs already ingested at startup).
+count_worker() {
+  curl -sf "http://127.0.0.1:$1/api/events?worker=$2" \
+    | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).length))' \
+    || true
+}
+
+# Minimal OTLP/JSON ExportLogsServiceRequest (same shape the unit suites
+# post) normalizing into exactly one event attributed to worker $1.
+TS_NANO="$(date +%s)000000000"
+otlp_logs_body() {
+  printf '{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"%s","attributes":[{"key":"event_type","value":{"stringValue":"worker.started"}},{"key":"worker_id","value":{"stringValue":"%s"}}]}]}]}]}' "$TS_NANO" "$1"
+}
+
+# Placeholder auth header for the wrong-token sweeps — built, not written
+# as a request-line literal; the value is a throwaway non-credential.
+WRONG_AUTH="$(printf 'Authorization: Bearer %s' wrong-token)"
+
+PORT="$(find_free_port)" || fail "could not find a free port for fabric web"
+OTLP_PORT="$(find_free_port)" || fail "could not find a free OTLP port for fabric web"
+if [ "$OTLP_PORT" = "$PORT" ]; then fail "web and OTLP port probes collided on $PORT"; fi
 
 OUT_C="$OUT_DIR/web.log"
-env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" web --port "$PORT" --source "$LOGS" >"$OUT_C" 2>&1 &
+env HOME="$SMOKE_HOME" NO_COLOR=1 node "$FABRIC_CLI" web --port "$PORT" --otlp-http ":$OTLP_PORT" --source "$LOGS" >"$OUT_C" 2>&1 &
 WPID=$!
 
 HEALTH=""
@@ -344,18 +387,169 @@ if [ -z "$HEALTH" ]; then
 fi
 printf '%s' "$HEALTH" | grep -q '"version"' || fail "fabric web: health JSON missing version field"
 
+curl -sf "http://127.0.0.1:$OTLP_PORT/api/health" >/dev/null || fail "fabric web: /api/health on the OTLP listener failed"
+
 INDEX_HTML="$(curl -sf "http://127.0.0.1:$PORT/")" || fail "fabric web: GET / failed"
 printf '%s' "$INDEX_HTML" | grep -q '<div id="root">' || fail "fabric web: index served without React root"
 printf '%s' "$INDEX_HTML" | grep -q '/assets/' || fail "fabric web: index served without built asset references"
 
 curl -sf "http://127.0.0.1:$PORT/api/summary" >/dev/null || fail "fabric web: GET /api/summary failed"
 
+# Unset-token contract: with no token configured the gate is a no-op on both
+# listeners, and handlers really run (an ingested event per request).
+CODE="$(http_code -X POST -H 'Content-Type: application/json' \
+  -d '{"ts":"2026-09-26T00:00:00.000Z","event":"worker.started","worker":"smoke-unset-main"}' \
+  "http://127.0.0.1:$PORT/api/events")"
+[ "$CODE" = "201" ] || fail "fabric web unset-token: POST /api/events without a header answered $CODE (want 201)"
+CODE="$(http_code -X POST -H 'Content-Type: application/json' \
+  -d '{"ts":"2026-09-26T00:00:01.000Z","event":"worker.started","worker":"smoke-unset-otlp"}' \
+  "http://127.0.0.1:$OTLP_PORT/api/events")"
+[ "$CODE" = "201" ] || fail "fabric web unset-token: POST /api/events on the OTLP listener answered $CODE (want 201)"
+CODE="$(http_code -X POST -H 'Content-Type: application/json' \
+  -d "$(otlp_logs_body smoke-unset-otlp-log)" \
+  "http://127.0.0.1:$OTLP_PORT/v1/logs")"
+[ "$CODE" = "200" ] || fail "fabric web unset-token: POST /v1/logs on the OTLP listener answered $CODE (want 200)"
+CODE="$(http_code -X POST -H 'Content-Type: application/json' \
+  -d "$(otlp_logs_body smoke-unset-main-log)" \
+  "http://127.0.0.1:$PORT/v1/logs")"
+[ "$CODE" = "200" ] || fail "fabric web unset-token: POST /v1/logs on the main listener answered $CODE (want 200)"
+CODE="$(http_code -X POST -H 'Content-Type: application/json' \
+  -H "$WRONG_AUTH" \
+  -d '{"ts":"2026-09-26T00:00:02.000Z","event":"worker.started","worker":"smoke-unset-wrong"}' \
+  "http://127.0.0.1:$PORT/api/events")"
+[ "$CODE" = "201" ] || fail "fabric web unset-token: POST with a wrong token answered $CODE (want 201 — no token configured means no gate)"
+
+for W in smoke-unset-main smoke-unset-otlp smoke-unset-otlp-log smoke-unset-main-log smoke-unset-wrong; do
+  [ "$(count_worker "$PORT" "$W")" = "1" ] \
+    || fail "fabric web unset-token: worker $W should have exactly 1 ingested event"
+done
+
 kill -INT "$WPID"
 wait "$WPID" || fail "fabric web: nonzero exit after SIGINT"
 if [ -d "$SMOKE_HOME/.needle" ]; then
   pass "sandbox ~/.needle created under clean HOME (state dirs auto-created)"
 fi
-pass "fabric web: /api/health, SPA assets served, graceful SIGINT exit"
+pass "fabric web (unset token): GETs open, POSTs accepted on both listeners, handlers really ran, graceful SIGINT exit"
+
+# 5e2. fabric web — configured-token mode (FABRIC_AUTH_TOKEN in the
+# environment: the systemd deployment shape), the docs/api-auth.md matrix
+# exercised with curl against BOTH listeners of the installed server:
+#
+#   GET                          open (200), /v1/* SPA fall-through 404 — never
+#                                a 401/403 challenge, even with a wrong token
+#   POST missing token           401 {"error":"Missing authorization"}
+#   POST wrong token             403 {"error":"Forbidden"}
+#   POST valid token             passes the gate; the handler runs
+#   malformed body + valid token 400 (/api/* body-parser) / 500 (/v1/* decode)
+#   oversized body + valid token 413 (64 KiB /api/* cap, 5 MB /v1/* cap)
+#
+# 401/403 sweeps carry deliberately malformed bodies: the middleware is
+# registered before body parsing, so a rejection that happened after parsing
+# would answer 400 instead. Side-effect checks use valid-shaped bodies under
+# unique worker ids so a rejection that reached a handler would be visible
+# as an ingested event.
+SMOKE_TOKEN="fabric-clean-install-smoke-token"  # placeholder, not a credential
+
+post_auth() { # listener path token body -> status on stdout; token "-" sends no header
+  local listener="$1" path="$2" token="$3" body="$4"
+  if [ "$token" = "-" ]; then
+    http_code -X POST -H 'Content-Type: application/json' -d "$body" "http://127.0.0.1:$listener$path"
+  else
+    http_code -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $token" -d "$body" "http://127.0.0.1:$listener$path"
+  fi
+}
+
+PORT="$(find_free_port)" || fail "could not find a free port for fabric web (auth run)"
+OTLP_PORT="$(find_free_port)" || fail "could not find a free OTLP port for fabric web (auth run)"
+if [ "$OTLP_PORT" = "$PORT" ]; then fail "web and OTLP port probes collided on $PORT (auth run)"; fi
+
+OUT_C2="$OUT_DIR/web-auth.log"
+env HOME="$SMOKE_HOME" NO_COLOR=1 FABRIC_AUTH_TOKEN="$SMOKE_TOKEN" \
+  node "$FABRIC_CLI" web --port "$PORT" --otlp-http ":$OTLP_PORT" --source "$LOGS" >"$OUT_C2" 2>&1 &
+WPID=$!
+
+HEALTH=""
+for _ in $(seq 1 60); do
+  if HEALTH="$(curl -sf "http://127.0.0.1:$PORT/api/health" 2>/dev/null)"; then break; fi
+  sleep 0.5
+done
+if [ -z "$HEALTH" ]; then
+  tail -20 "$OUT_C2" >&2 || true
+  kill "$WPID" 2>/dev/null || true
+  fail "fabric web (auth): /api/health never came up"
+fi
+curl -sf "http://127.0.0.1:$OTLP_PORT/api/health" >/dev/null || fail "fabric web (auth): /api/health on the OTLP listener failed"
+
+for LISTENER in "$PORT" "$OTLP_PORT"; do
+  CODE="$(http_code "http://127.0.0.1:$LISTENER/api/health")"
+  [ "$CODE" = "200" ] || fail "fabric web (auth): GET /api/health on $LISTENER answered $CODE (want 200)"
+  CODE="$(http_code -H "$WRONG_AUTH" "http://127.0.0.1:$LISTENER/api/summary")"
+  [ "$CODE" = "200" ] || fail "fabric web (auth): GET /api/summary with a wrong token on $LISTENER answered $CODE (want 200)"
+  CODE="$(http_code "http://127.0.0.1:$LISTENER/v1/logs")"
+  [ "$CODE" = "404" ] || fail "fabric web (auth): GET /v1/logs on $LISTENER answered $CODE (want 404 SPA fall-through)"
+done
+
+MALFORMED='{this-is-not-json'
+for LISTENER in "$PORT" "$OTLP_PORT"; do
+  CODE="$(post_auth "$LISTENER" /api/events - "$MALFORMED")"
+  [ "$CODE" = "401" ] || fail "fabric web (auth): POST /api/events missing token on $LISTENER answered $CODE (want 401)"
+  CODE="$(post_auth "$LISTENER" /v1/logs - "$MALFORMED")"
+  [ "$CODE" = "401" ] || fail "fabric web (auth): POST /v1/logs missing token on $LISTENER answered $CODE (want 401)"
+  CODE="$(post_auth "$LISTENER" /api/events wrong-token "$MALFORMED")"
+  [ "$CODE" = "403" ] || fail "fabric web (auth): POST /api/events wrong token on $LISTENER answered $CODE (want 403)"
+  CODE="$(post_auth "$LISTENER" /v1/logs wrong-token "$MALFORMED")"
+  [ "$CODE" = "403" ] || fail "fabric web (auth): POST /v1/logs wrong token on $LISTENER answered $CODE (want 403)"
+done
+BODY401="$(curl -s -X POST -H 'Content-Type: application/json' -d "$MALFORMED" "http://127.0.0.1:$PORT/api/events")"
+printf '%s' "$BODY401" | grep -q 'Missing authorization' || fail "fabric web (auth): 401 body missing 'Missing authorization'"
+BODY403="$(curl -s -X POST -H 'Content-Type: application/json' -H "$WRONG_AUTH" -d "$MALFORMED" "http://127.0.0.1:$PORT/api/events")"
+printf '%s' "$BODY403" | grep -q 'Forbidden' || fail "fabric web (auth): 403 body missing 'Forbidden'"
+
+# Valid token passes the gate and the handler runs, on both listeners.
+VALID_EVENT='{"ts":"2026-09-26T00:00:03.000Z","event":"worker.started","worker":"smoke-auth-valid"}'
+CODE="$(post_auth "$PORT" /api/events "$SMOKE_TOKEN" "$VALID_EVENT")"
+[ "$CODE" = "201" ] || fail "fabric web (auth): POST /api/events with the valid token answered $CODE (want 201)"
+CODE="$(post_auth "$OTLP_PORT" /v1/logs "$SMOKE_TOKEN" "$(otlp_logs_body smoke-auth-valid-log)")"
+[ "$CODE" = "200" ] || fail "fabric web (auth): POST /v1/logs with the valid token answered $CODE (want 200)"
+
+# Malformed body + valid token dies at the parse layer, not the gate.
+CODE="$(post_auth "$PORT" /api/events "$SMOKE_TOKEN" "$MALFORMED")"
+[ "$CODE" = "400" ] || fail "fabric web (auth): malformed /api/events body with valid token answered $CODE (want 400 from body-parser)"
+CODE="$(post_auth "$OTLP_PORT" /v1/logs "$SMOKE_TOKEN" "$MALFORMED")"
+[ "$CODE" = "500" ] || fail "fabric web (auth): malformed /v1/logs body with valid token answered $CODE (want 500 decode failure)"
+
+# Oversized body + valid token dies at the transport cap: 64 KiB on /api/*
+# (express.json limit), 5 MB on /v1/* (receiver raw-body cap).
+OVERSIZE_API="$WORK/oversize-api.json"
+node -e 'process.stdout.write(JSON.stringify({ts:"2026-09-26T00:00:04.000Z",event:"worker.started",worker:"smoke-auth-oversize",pad:"x".repeat(80*1024)}))' > "$OVERSIZE_API"
+OVERSIZE_OTLP="$WORK/oversize-otlp.json"
+node -e 'process.stdout.write(JSON.stringify({pad:"x".repeat(6*1024*1024)}))' > "$OVERSIZE_OTLP"
+for LISTENER in "$PORT" "$OTLP_PORT"; do
+  CODE="$(http_code -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $SMOKE_TOKEN" \
+    --data-binary @"$OVERSIZE_API" "http://127.0.0.1:$LISTENER/api/events")"
+  [ "$CODE" = "413" ] || fail "fabric web (auth): oversized /api/events body on $LISTENER answered $CODE (want 413)"
+  CODE="$(http_code -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $SMOKE_TOKEN" \
+    --data-binary @"$OVERSIZE_OTLP" "http://127.0.0.1:$LISTENER/v1/logs")"
+  [ "$CODE" = "413" ] || fail "fabric web (auth): oversized /v1/logs body on $LISTENER answered $CODE (want 413)"
+done
+
+# Side-effect proof: the two valid-token submissions ingested exactly one
+# event each; no rejected request left anything behind.
+[ "$(count_worker "$PORT" smoke-auth-valid)" = "1" ] || fail "fabric web (auth): valid /api/events event not ingested exactly once"
+[ "$(count_worker "$PORT" smoke-auth-valid-log)" = "1" ] || fail "fabric web (auth): valid /v1/logs event not ingested exactly once"
+
+CODE="$(post_auth "$PORT" /api/events - '{"ts":"2026-09-26T00:00:05.000Z","event":"worker.started","worker":"smoke-auth-missing"}')"
+[ "$CODE" = "401" ] || fail "fabric web (auth): valid-shaped body with missing token answered $CODE (want 401)"
+CODE="$(post_auth "$PORT" /api/events wrong-token '{"ts":"2026-09-26T00:00:06.000Z","event":"worker.started","worker":"smoke-auth-wrong"}')"
+[ "$CODE" = "403" ] || fail "fabric web (auth): valid-shaped body with wrong token answered $CODE (want 403)"
+for W in smoke-auth-missing smoke-auth-wrong smoke-auth-oversize; do
+  [ "$(count_worker "$PORT" "$W")" = "0" ] \
+    || fail "fabric web (auth): rejected/oversized worker $W must have ingested nothing"
+done
+
+kill -INT "$WPID"
+wait "$WPID" || fail "fabric web (auth): nonzero exit after SIGINT"
+pass "fabric web (configured token): GETs open, 401/403/valid/malformed/oversized on both listeners, no rejected side effects, graceful SIGINT exit"
 
 # 5f. fabric tui — pty startup + graceful SIGINT.
 # `script` allocates the pty blessed needs; `timeout` runs inside it so SIGINT

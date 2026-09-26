@@ -37,7 +37,12 @@ unauthorized submission never ingests an event or touches metrics.
 - Bodies are parsed by `express.json({ limit: "65536" })` — **64 KiB per
   request**, for the single route and the batch route alike.
 - A body larger than the cap is rejected by body-parser with `413` before
-  the handler runs.
+  the handler runs. (Pinned for `/api/*` — over-cap `413` and
+  just-under-cap acceptance — by `src/web/server.authRoutes.test.ts`; the
+  `/v1/*` receiver cap is pinned in `src/otlpHttpReceiver.test.ts`; the
+  whole auth matrix including the oversized cases is exercised end-to-end
+  on both HTTP listeners by the clean-install smoke,
+  `scripts/smoke-clean-install.sh` phase 5e/5e2.)
 - Malformed JSON is rejected by body-parser with `400`, also before the
   handler runs. (Both pinned for `/api/*` by `src/web/server.authRoutes.test.ts`.)
 - `Content-Type: application/json` is required; without a parseable body the

@@ -25,6 +25,11 @@
  *   - valid token + malformed body → the gate passed and the request dies
  *     at the parse layer (400 from body-parser on /api/*, the receiver's
  *     500 decode failure on /v1/*) with no handler side effect.
+ *   - valid token + oversized body → the gate passed and the transport cap
+ *     answers 413 (64 KiB express.json cap on /api/*, 5 MB receiver
+ *     raw-body cap on /v1/*) with no handler side effect, while a
+ *     just-under-cap body still ingests (docs/events-api.md "Transport
+ *     limits").
  *   - unset-token mode (no authToken configured) → the gate lets EVERY
  *     POST through on BOTH listeners; handlers run for real (events ingest,
  *     theme persists).
@@ -342,6 +347,59 @@ describe('POST auth route-discovery contract', () => {
       });
       expect(res.status).toBe(400);
       expect(fs.existsSync(themeFile)).toBe(false);
+    });
+  });
+
+  describe('oversized bodies die at the transport cap with a valid token', () => {
+    // docs/events-api.md "Transport limits": express.json caps /api/* at
+    // 64 KiB, the OTLP/HTTP receiver caps /v1/* at 5 MB of raw body. A
+    // valid token gets the gate to pass, so the transport layer itself
+    // answers 413 — and an over-cap body never reaches a handler.
+    it('answers 413 for an over-cap /api/events body on both listeners', async () => {
+      const overCap = JSON.stringify({
+        ts: new Date().toISOString(),
+        event: 'auth.oversize',
+        worker: 'auth-oversize-worker',
+        pad: 'x'.repeat(80 * 1024), // ~80 KiB > 64 KiB cap
+      });
+      for (const listener of listenerPorts()) {
+        const res = await post(listener, '/api/events', {
+          body: overCap,
+          contentType: 'application/json',
+          token: AUTH_TOKEN,
+        });
+        expect(res.status, `listener ${listener}`).toBe(413);
+      }
+      expect(store.size).toBe(0);
+    });
+
+    it('answers 413 for an over-cap /v1/logs body (receiver raw-body cap)', async () => {
+      const overCap = JSON.stringify({ pad: 'x'.repeat(6 * 1024 * 1024) }); // 6 MiB > 5 MiB cap
+      const res = await post(otlpPort, '/v1/logs', {
+        body: overCap,
+        contentType: 'application/json',
+        token: AUTH_TOKEN,
+      });
+      expect(res.status).toBe(413);
+      const data = await res.json() as { error?: string };
+      expect(data.error).toBe('payload too large');
+      expect(store.size).toBe(0);
+    });
+
+    it('still accepts a just-under-cap event body with a valid token', async () => {
+      const underCap = JSON.stringify({
+        ts: new Date().toISOString(),
+        event: 'auth.under-cap',
+        worker: 'auth-under-cap-worker',
+        pad: 'x'.repeat(60 * 1024), // ~60 KiB < 64 KiB cap
+      });
+      const res = await post(port, '/api/events', {
+        body: underCap,
+        contentType: 'application/json',
+        token: AUTH_TOKEN,
+      });
+      expect(res.status).toBe(201);
+      expect(store.size).toBe(1);
     });
   });
 
