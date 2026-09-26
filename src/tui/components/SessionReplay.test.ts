@@ -16,6 +16,34 @@ vi.mock('fs', () => ({
   readdirSync: vi.fn(),
 }));
 
+type BoxKeyHandler = (ch?: string, key?: { name?: string }) => void;
+
+/**
+ * Capture every key binding registered on blessed.box instances while the
+ * factory runs. Element#key resolves through Box.prototype to
+ * Element.prototype, so a Box-scoped spy sees the overlay container's
+ * constructor-time bindings (blessed.log children resolve to Element directly
+ * and are intentionally out of scope).
+ */
+function captureBoxKeyBindings(
+  factory: () => SessionReplay,
+): { instance: SessionReplay; keyCalls: Array<{ keys: string[]; handler: BoxKeyHandler }> } {
+  const keyCalls: Array<{ keys: string[]; handler: BoxKeyHandler }> = [];
+  const boxWithProto = blessed.box as unknown as {
+    prototype: { key: (keys: string[], handler: BoxKeyHandler) => void };
+  };
+  const originalKey = boxWithProto.prototype.key;
+  boxWithProto.prototype.key = function (keys, handler) {
+    keyCalls.push({ keys, handler });
+    return originalKey.call(this, keys, handler);
+  };
+  try {
+    return { instance: factory(), keyCalls };
+  } finally {
+    boxWithProto.prototype.key = originalKey;
+  }
+}
+
 describe('SessionReplay', () => {
   let screen: blessed.Widgets.Screen;
   let replay: SessionReplay;
@@ -560,6 +588,60 @@ describe('SessionReplay', () => {
         });
         testReplay.destroy();
       }).not.toThrow();
+    });
+
+    it('should bind lowercase r to a context-local reset', () => {
+      const { instance, keyCalls } = captureBoxKeyBindings(() => {
+        return new SessionReplay({
+          parent: screen,
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+        });
+      });
+      try {
+        // The r/R deconfliction: r stays context-local inside the replay
+        // overlay (reset to the beginning), never a view toggle.
+        const rBindings = keyCalls.filter(b => b.keys.includes('r'));
+        expect(rBindings.length).toBe(1);
+        expect(rBindings[0].keys).toEqual(['r']);
+
+        instance.loadEvents(mockEvents);
+        instance.seekTo(2);
+        expect(instance.getProgress().current).toBe(2);
+
+        const resetSpy = vi.fn();
+        instance.on('reset', resetSpy);
+        rBindings[0].handler();
+
+        expect(resetSpy).toHaveBeenCalledTimes(1);
+        expect(instance.getState()).toBe('idle');
+        expect(instance.getProgress().current).toBe(0);
+      } finally {
+        instance.destroy();
+      }
+    });
+
+    it('must not bind uppercase R — replay toggling belongs to the app screen', () => {
+      const { instance, keyCalls } = captureBoxKeyBindings(() => {
+        return new SessionReplay({
+          parent: screen,
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+        });
+      });
+      try {
+        // Regression guard for the r/R deconfliction: R toggles the replay
+        // view globally (bound once on the app screen). If the overlay ever
+        // binds R itself, the toggle fires twice per keypress and fights the
+        // screen handler.
+        expect(keyCalls.filter(b => b.keys.includes('R'))).toEqual([]);
+      } finally {
+        instance.destroy();
+      }
     });
   });
 
