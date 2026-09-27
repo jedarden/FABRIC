@@ -97,6 +97,11 @@ workers on a fleet host. Requires `git`, `curl`, `tar`, and `script`
 source tree is packaged from `HEAD`, so commit before relying on it. Set
 `SMOKE_KEEP_WORKDIR=1` to keep the temp workdir for inspection.
 
+The smoke workflow and its release gate (`src/smoke-clean-install.test.ts`)
+are owned by bead `fabric-2fd06cd1`: when a CLI command ships, changes the
+packaging contract, or renames a fixture, extend the smoke script, the README
+section, and the gate suite in the same change.
+
 ## Quick Start
 
 ```bash

@@ -165,7 +165,7 @@ aggregate large:
 - **CLI operational-option contracts** (`fabric-13164cdc`, `fabric-7666ce28`, `fabric-83cc1dea`, `fabric-c7fab6aa`, `fabric-2c20fd74`, `fabric-13c185d9`): `--max-events` liveness, `--heap-snapshots`/`--snapshot-interval` propagation, help-overlay keys.
 - **Retention-prune audit** (`fabric-0a4e421b`): tests vs documented count/age/size rules.
 - **Ingest-schema validation via synthetic logs** (`fabric-8abad6e9`, `fabric-f88573e2` + trace/catalog children): derive required-field lists from src/normalizer.ts and src/store.ts.
-- **Smoke & release gate** (`fabric-f05a227a`, `fabric-b7b48295`): authenticated web/OTLP smoke coverage; clean-install smoke workflow.
+- **Smoke & release gate** (`fabric-f05a227a`, `fabric-b7b48295`, owner `fabric-2fd06cd1`): authenticated web/OTLP smoke coverage; clean-install smoke workflow — script (`scripts/smoke-clean-install.sh`), README promise section, and the 16-test alignment gate (`src/smoke-clean-install.test.ts`, keeping README ↔ package.json ↔ smoke script ↔ `--help` consistent) all landed 2026-09-26.
 - **TUI shortcut documentation** (`fabric-6361cc78`, `fabric-5a449ea7`, `fabric-a90a6ab0`, `fabric-06fb6dc0`, `fabric-3e4e93b3`).
 
 ### 4. Operational noise (P4)
