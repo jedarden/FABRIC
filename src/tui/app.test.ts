@@ -965,6 +965,206 @@ describe('FabricTuiApp', () => {
       expect(hm.updateData).toHaveBeenCalledTimes(1);
     });
   });
+
+  // --- full documented behavior contract, pinned at the app seam (fabric-c0413489) ---
+  // docs/FileHeatmap-Integration.md §4 specifies sort cycling, mutually
+  // exclusive collision/anomaly filters, directory filtering, navigation,
+  // heat levels, worker attribution, collision highlighting, and updates
+  // from new events. The component owns the keys (pinned in
+  // FileHeatmap.test.ts); these tests pin the app-side seam — the store
+  // getters handed to the component when the view opens — against a real
+  // InMemoryEventStore fed through the live ingestion path.
+
+  describe('heatmap view data contract (documented behaviors)', () => {
+    const pressViewKey = (key: string): void => {
+      const mockScreen = getMockScreen();
+      const call = mockScreen.key.mock.calls.find(
+        (c: unknown[]) => Array.isArray(c?.[0]) && c[0].includes(key)
+      );
+      expect(call).toBeDefined();
+      (call?.[1] as () => void)();
+    };
+
+    const heatmapMock = () => (app as unknown as { fileHeatmap: any }).fileHeatmap;
+
+    const fileEventAt = (path: string, worker: string, ts: number): LogEvent => ({
+      ts,
+      worker,
+      level: 'info',
+      msg: `Modifying ${path}`,
+      path,
+      tool: 'Edit',
+    });
+
+    // Live ingestion path: the tailer writes the event to the store, then
+    // the app refreshes the open heatmap view.
+    const ingest = (path: string, worker: string, ts: number): void => {
+      store.add(fileEventAt(path, worker, ts));
+      app.addEvent(fileEventAt(path, worker, ts));
+    };
+
+    // Store getters wired into the most recent updateData call.
+    const wiredGetters = () => heatmapMock().updateData.mock.calls.at(-1);
+
+    const entryFor = (getHeatmap: (opts: unknown) => Array<Record<string, any>>, path: string) =>
+      getHeatmap({}).find((e) => e.path === path);
+
+    let base: number;
+
+    beforeEach(() => {
+      app = new FabricTuiApp(store);
+      base = Date.now();
+    });
+
+    // Fixture fleet (different-worker edits spaced past the 5s collision
+    // window unless a collision is intended):
+    //   /src/hot.ts               12 mods, 1 worker  -> critical (11+)
+    //   /src/multi.ts              4 mods, 3 workers -> warm, top of workers sort
+    //   /src/quiet.ts              1 mod,  1 worker  -> cold, collision-free control
+    //   /src/collided.ts           2 mods, 2 workers 1s apart -> active collision, most recent
+    //   /app/config/settings.yaml  1 mod,  1 worker  -> config anomaly, outside /src
+    const feedFleet = (): void => {
+      for (let i = 0; i < 12; i++) ingest('/src/hot.ts', 'w-fleet-one', base + i * 1000);
+      ingest('/src/multi.ts', 'w-fleet-one', base + 20000);
+      ingest('/src/multi.ts', 'w-fleet-one', base + 21000);
+      ingest('/src/multi.ts', 'w-fleet-two', base + 40000);
+      ingest('/src/multi.ts', 'w-fleet-three', base + 60000);
+      ingest('/src/quiet.ts', 'w-fleet-two', base + 50000);
+      ingest('/src/collided.ts', 'w-fleet-two', base + 60000);
+      ingest('/src/collided.ts', 'w-fleet-three', base + 61000);
+      ingest('/app/config/settings.yaml', 'w-fleet-one', base + 45000);
+    };
+
+    it('wired heatmap getter honors all four documented sort modes over live data', () => {
+      feedFleet();
+      pressViewKey('H');
+
+      const [getHeatmap] = wiredGetters();
+
+      // Modifications (default): busiest file first.
+      expect(getHeatmap({ sortBy: 'modifications' })[0].path).toBe('/src/hot.ts');
+      // Recent: latest-touched file first.
+      expect(getHeatmap({ sortBy: 'recent' })[0].path).toBe('/src/collided.ts');
+      // Worker count: most contributors first.
+      expect(getHeatmap({ sortBy: 'workers' })[0].path).toBe('/src/multi.ts');
+      // Collision priority: collided files first, the rest by modification count.
+      const byCollisions = getHeatmap({ sortBy: 'collisions' });
+      expect(byCollisions[0]).toMatchObject({ path: '/src/collided.ts', hasCollision: true });
+      expect(byCollisions.slice(1).every((e: { hasCollision: boolean }) => !e.hasCollision)).toBe(true);
+    });
+
+    it('highlights collisions through the wired getters (entry flags, stats, and filter)', () => {
+      feedFleet();
+      pressViewKey('H');
+
+      const [getHeatmap, getStats] = wiredGetters();
+
+      const collided = entryFor(getHeatmap, '/src/collided.ts');
+      expect(collided).toMatchObject({ hasCollision: true, activeWorkers: 2 });
+
+      const quiet = entryFor(getHeatmap, '/src/quiet.ts');
+      expect(quiet).toMatchObject({ hasCollision: false, activeWorkers: 1 });
+
+      expect(getStats().collisionFiles).toBe(1);
+
+      // The documented [c] collisions-only filter keeps just the collided file.
+      expect(getHeatmap({ collisionsOnly: true }).map((e: { path: string }) => e.path))
+        .toEqual(['/src/collided.ts']);
+    });
+
+    it('filters by directory through the wired getter, alone and with the collision filter', () => {
+      feedFleet();
+      pressViewKey('H');
+
+      const [getHeatmap] = wiredGetters();
+
+      const srcOnly = getHeatmap({ directoryFilter: '/src' });
+      expect(srcOnly).toHaveLength(4);
+      expect(srcOnly.every((e: { path: string }) => e.path.startsWith('/src'))).toBe(true);
+      // The config edit outside /src is excluded by the filter.
+      expect(srcOnly.some((e: { path: string }) => e.path.includes('config'))).toBe(false);
+
+      // Both filter axes travel in a single getter request.
+      expect(
+        getHeatmap({ directoryFilter: '/src', collisionsOnly: true }).map((e: { path: string }) => e.path)
+      ).toEqual(['/src/collided.ts']);
+    });
+
+    it('reports the documented heat bands and distribution through the wired getters', () => {
+      feedFleet();
+      pressViewKey('H');
+
+      const [getHeatmap, getStats] = wiredGetters();
+
+      // Bands per docs: cold 1-2, warm 3-5, hot 6-10, critical 11+.
+      expect(entryFor(getHeatmap, '/src/quiet.ts')?.heatLevel).toBe('cold'); // 1 mod
+      expect(entryFor(getHeatmap, '/src/collided.ts')?.heatLevel).toBe('cold'); // 2 mods
+      expect(entryFor(getHeatmap, '/src/multi.ts')?.heatLevel).toBe('warm'); // 4 mods
+      expect(entryFor(getHeatmap, '/src/hot.ts')?.heatLevel).toBe('critical'); // 12 mods
+
+      expect(getStats().heatDistribution).toEqual({ cold: 3, warm: 1, hot: 0, critical: 1 });
+    });
+
+    it('attributes modifications per worker through the wired getter', () => {
+      feedFleet();
+      pressViewKey('H');
+
+      const [getHeatmap] = wiredGetters();
+      const multi = entryFor(getHeatmap, '/src/multi.ts');
+      if (!multi) throw new Error('missing /src/multi.ts entry');
+
+      expect(multi.workers).toHaveLength(3);
+      // Workers are ordered by contribution; the lead worker did 2 of 4.
+      expect(multi.workers[0]).toMatchObject({
+        workerId: 'w-fleet-one',
+        modifications: 2,
+        percentage: 50,
+      });
+      expect(multi.workers.slice(1).map((w: { workerId: string }) => w.workerId).sort())
+        .toEqual(['w-fleet-three', 'w-fleet-two']);
+      expect(multi.workers[1]).toMatchObject({ modifications: 1, percentage: 25 });
+      expect(multi.workers[2]).toMatchObject({ modifications: 1, percentage: 25 });
+    });
+
+    it('upgrades heat band and attribution as new events land in the live view', () => {
+      pressViewKey('H'); // view open before the data exists
+
+      ingest('/src/growing.ts', 'w-live-alpha', base);
+      const [getHeatmapCold] = wiredGetters();
+      const cold = entryFor(getHeatmapCold, '/src/growing.ts');
+      if (!cold) throw new Error('missing cold /src/growing.ts entry');
+      expect(cold).toMatchObject({ modifications: 1, heatLevel: 'cold' });
+      expect(cold.workers).toHaveLength(1);
+
+      // Five more events: 6 total crosses warm (3-5) into hot (6-10); the
+      // last lands from a second worker inside the 5s collision window.
+      for (let i = 1; i <= 4; i++) ingest('/src/growing.ts', 'w-live-alpha', base + i * 1000);
+      ingest('/src/growing.ts', 'w-live-beta', base + 4500);
+
+      const [getHeatmapHot, getStats] = wiredGetters();
+      expect(entryFor(getHeatmapHot, '/src/growing.ts')).toMatchObject({
+        modifications: 6,
+        heatLevel: 'hot',
+        hasCollision: true,
+      });
+      const growing = entryFor(getHeatmapHot, '/src/growing.ts');
+      if (!growing) throw new Error('missing hot /src/growing.ts entry');
+      expect(growing.workers.map((w: { workerId: string }) => w.workerId).sort())
+        .toEqual(['w-live-alpha', 'w-live-beta']);
+      expect(getStats().totalModifications).toBe(6);
+    });
+
+    it('carries detected anomalies to the component through the wired anomaly getter', () => {
+      feedFleet();
+      pressViewKey('H');
+
+      const [, , getAnomalies] = wiredGetters();
+      const anomalies = getAnomalies({});
+      const configAnomaly = anomalies.find((a: { path: string }) => a.path === '/app/config/settings.yaml');
+      expect(configAnomaly).toBeDefined();
+      expect(configAnomaly.type).toBe('config_modification');
+    });
+  });
 });
 
 describe('TuiOptions interface', () => {

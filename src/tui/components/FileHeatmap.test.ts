@@ -1565,4 +1565,68 @@ describe('FileHeatmap', () => {
       expect(rowForPath(lastRenderedContent(), 'new.ts')).toBeDefined();
     });
   });
+
+  // --- remaining documented-behavior pins (fabric-c0413489) ---
+  // Completes the docs/FileHeatmap-Integration.md §4 contract at the
+  // component layer: the sort choice survives live refreshes, re-entering
+  // the anomaly view restarts its selection, and the directory filter
+  // combines with the collision filter in a single getter request.
+
+  describe('sort mode persistence across refreshes', () => {
+    it('keeps the cycled sort mode when new data arrives', () => {
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      const sHandler = getKeyHandler('s');
+      sHandler?.(); // modifications -> recent
+      sHandler?.(); // recent -> workers
+
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sortBy: 'workers' })
+      );
+    });
+  });
+
+  describe('anomaly selection reset on re-entry', () => {
+    it('resets to the first anomaly when anomalies-only is re-entered', () => {
+      const makeAnomaly = (path: string): FileAnomaly => ({
+        path,
+        type: 'config_modification',
+        severity: 'warning',
+        message: 'm',
+        detectedAt: Date.now(),
+        details: {},
+      });
+      const anomalies = [makeAnomaly('first.yaml'), makeAnomaly('second.yaml')];
+
+      getKeyHandler('a')?.();
+      fileHeatmap.updateData(() => [], createMockStats, () => anomalies);
+      fileHeatmap.selectNext();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('second.yaml');
+
+      // Leave and re-enter the anomaly view; the selection starts over.
+      getKeyHandler('a')?.();
+      getKeyHandler('a')?.();
+      fileHeatmap.updateData(() => [], createMockStats, () => anomalies);
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('first.yaml');
+    });
+  });
+
+  describe('combined filter axes', () => {
+    it('sends the directory filter and collisions-only together in one request', () => {
+      fileHeatmap.setFilter('/src/auth');
+      getKeyHandler('c')?.();
+
+      const getHeatmap = vi.fn(() => []);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      expect(getHeatmap).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          directoryFilter: '/src/auth',
+          collisionsOnly: true,
+        })
+      );
+    });
+  });
 });
