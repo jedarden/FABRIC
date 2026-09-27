@@ -81,7 +81,13 @@ of `HEAD`, an empty install directory, and a sandboxed `$HOME` with no
      parse, directory hot-add, graceful SIGINT, and identical `--help` output
      (the CLI reference documents `logs` as an alias of `tail`)
    - `fabric web` — `/api/health`, SPA assets served from the installed
-     package, graceful SIGINT
+     package, graceful SIGINT, plus the `docs/api-auth.md` auth matrix over
+     **both** HTTP listeners (main + `--otlp-http`): an unset-token run
+     (every POST accepted with no header — or a wrong one — and handlers
+     really ingest) and a configured-token run (GETs open, missing token
+     `401`, wrong token `403`, valid token passes and ingests, malformed
+     body rejected at the parse layer, oversized body `413` at the transport
+     cap, rejected requests leave nothing behind)
    - `fabric tui` — startup on a pty via `script`, graceful SIGINT
    - `fabric replay` — pty startup over the fixture logs, graceful SIGINT
    - `fabric prune` — dry run reports an aged fixture without touching it,
