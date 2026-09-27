@@ -86,9 +86,12 @@ work from any view and `Escape` always steps back. The `?` help overlay is
 *not* a view: it floats above whichever view is active without changing it,
 and `?` is the only key that opens *or* closes it — `Escape` does not
 dismiss the overlay. The overlay is a quick summary, not an exact mirror of
-this reference: it omits the conversation-transcript and cross-reference
-views, and it still lists `/` (search) and `f` (filter), which are bound
-only inside specific views (transcript search), not globally.
+this reference: its Actions list carries only genuinely global keys, and
+the view-local ones are listed inside their views' own sections — including
+the conversation-transcript and cross-reference views. In particular `/`
+appears only under Conversation Transcript (search) and `f` only under
+Dependency DAG (cycle filters) and Semantic Narrative (full narrative);
+neither is bound globally.
 
 #### Global keys (active in every view)
 

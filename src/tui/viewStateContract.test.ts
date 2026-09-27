@@ -13,9 +13,10 @@
  * command palette above any view and Escape with the palette open still
  * steps back the view; view entry closes the file-context split and the
  * default view never restores it; and the help text's key claims match the
- * keys actually bound at the screen level (including its documented
- * omissions: no transcript/xref toggles, `/` and `f` listed as view-scoped
- * actions that are not bound globally).
+ * keys actually bound at the screen level — the transcript and
+ * cross-reference toggles are accounted for, and the view-local `/`
+ * (transcript search) and `f` (DAG filters, narrative full view) keys are
+ * listed only inside their views' sections, never as global Actions.
  *
  * The blessed module and the panel components are replaced with stateful
  * fakes: panel visibility, header/footer content, help-overlay lifecycle
@@ -356,6 +357,8 @@ const HELP_TOGGLE_CLAIMS = [
   { key: 'I', action: 'Toggle git integration', view: 'git' },
   { key: 'N', action: 'Toggle semantic narrative', view: 'narrative' },
   { key: 'A', action: 'Toggle worker analytics', view: 'analytics' },
+  { key: 'T', action: 'Toggle conversation transcript', view: 'transcript' },
+  { key: 'X', action: 'Toggle cross references', view: 'xref' },
   { key: 'B', action: 'Toggle budget dashboard view', view: 'budget' },
 ];
 
@@ -848,6 +851,7 @@ describe('TUI view-state contract (docs/cli.md)', () => {
           'Reset to beginning', // Session Replay overlay
           'Refresh narrative', // Semantic Narrative
           'Refresh metrics', // Worker Analytics
+          'Refresh references', // Cross References
           'Refresh cost data', // Budget Dashboard
         ].sort()
       );
@@ -858,21 +862,52 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       expect(content).toMatch(/^\s*C-r\s+- Force refresh\s*$/m);
     });
 
-    it('lists / and f as scoped actions but binds neither at screen level', () => {
+    it('scopes / and f to their views — listed only inside view sections, never as global Actions', () => {
       const content = openHelpContent();
-      expect(content).toMatch(/^\s*\/\s+- Search\s*$/m);
-      expect(content).toMatch(/^\s*f\s+- Filter\s*$/m);
-      // docs/cli.md: "/" searches only inside the conversation transcript
-      // and "f" acts only inside specific views — neither is a global key.
+      // docs/cli.md: there is no global `/` or `f` key — "/" searches only
+      // inside the conversation transcript, "f" cycles filters in the DAG
+      // and toggles the full narrative. The old unscoped "Search"/"Filter"
+      // lines under Actions claimed otherwise; they must never return.
+      expect(content).not.toMatch(/^\s*\/\s+- Search\s*$/m);
+      expect(content).not.toMatch(/^\s*f\s+- Filter\s*$/m);
+
+      // The Actions block (bounded by the view-local-keys note) carries
+      // only genuinely global keys — no /, no f.
+      const actionsBlock = content.slice(
+        content.indexOf('Actions (global keys):'),
+        content.indexOf('View-local keys')
+      );
+      expect(actionsBlock).not.toBe('');
+      expect(actionsBlock).not.toMatch(/^\s*\/\s+- /m);
+      expect(actionsBlock).not.toMatch(/^\s*f\s+- /m);
+
+      // Every remaining f line is one of the two real view-local actions.
+      const fLines = content
+        .split('\n')
+        .map(line => line.match(/^\s*f\s+- (.+?)\s*$/))
+        .filter((m): m is RegExpMatchArray => m !== null)
+        .map(m => m[1]);
+      expect(fLines.sort()).toEqual(['Cycle filters', 'Toggle full narrative'].sort());
+
+      // / appears exactly once — in the transcript section, labeled with
+      // its scope.
+      const slashLines = content.split('\n').filter(l => /^\s*\/\s+- /.test(l));
+      expect(slashLines).toHaveLength(1);
+      expect(slashLines[0]).toMatch(
+        /^\s*\/\s+- Search conversation \(transcript view only\)\s*$/
+      );
+
+      // The scoping is real: neither key is bound at screen level.
       expect(isBound('/')).toBe(false);
       expect(isBound('f')).toBe(false);
     });
 
-    it('omits the transcript and cross-reference view toggles (documented omission)', () => {
-      const content = openHelpContent().toLowerCase();
-      expect(content).not.toContain('transcript');
-      expect(content).not.toContain('cross');
-      // …while T and X are nevertheless real, bound view toggles.
+    it('accounts for the transcript and cross-reference views (the old documented omission)', () => {
+      const content = openHelpContent();
+      expect(content).toMatch(/^Conversation Transcript \(all keys below are this view's own\):$/m);
+      expect(content).toMatch(/^Cross References \(all keys below are this view's own\):$/m);
+      // The toggles themselves are pinned as real view entries by
+      // HELP_TOGGLE_CLAIMS; T and X must stay bound for those to hold.
       expect(isBound('T')).toBe(true);
       expect(isBound('X')).toBe(true);
     });

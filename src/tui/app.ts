@@ -1941,9 +1941,7 @@ Navigation:
   Tab     - Next panel
   Shift+Tab - Previous panel
 
-Actions:
-  /       - Search
-  f       - Filter
+Actions (global keys):
   r       - Refresh
   H       - Toggle file heatmap
   D       - Toggle dependency DAG
@@ -1954,6 +1952,12 @@ Actions:
   I       - Toggle git integration
   N       - Toggle semantic narrative
   A       - Toggle worker analytics
+  T       - Toggle conversation transcript
+  X       - Toggle cross references
+
+View-local keys (bound inside a single view only — / searches only in the
+transcript, f acts only in the DAG and narrative views) are listed under
+those views' sections below, never here.
 
 Focus Mode:
   F       - Toggle focus mode
@@ -2031,6 +2035,23 @@ Worker Analytics:
   a       - Toggle aggregated view
   s       - Cycle sort mode
   r       - Refresh metrics
+  Esc     - Return to default view
+
+Conversation Transcript (all keys below are this view's own):
+  /       - Search conversation (transcript view only)
+  n/N     - Next/previous match
+  t       - Toggle nearest tool call
+  c       - Collapse all tool calls
+  e       - Expand all tool calls
+  x       - Export as Markdown
+  j/k     - Scroll content
+  Esc     - Return to default view
+
+Cross References (all keys below are this view's own):
+  Enter   - Follow selected reference
+  s       - Toggle stats
+  l       - Toggle links
+  r       - Refresh references
   Esc     - Return to default view
 
 Budget Dashboard:
