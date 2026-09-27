@@ -340,6 +340,111 @@ describe('native event API conformance (docs/events-api.md)', () => {
     });
   });
 
+  // ── POST /api/events — level derivation ───────────────────────
+
+  describe('single route: level derivation (doc "Success response")', () => {
+    /** Post one event and return the level on the normalized event. */
+    const levelOf = async (body: Record<string, unknown>): Promise<unknown> => {
+      const res = await postJson('/api/events', body);
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      return data.event.level;
+    };
+
+    it('infers the level from the event name when none is given: error.* / *.failed / *.retry / debug.* / else', async () => {
+      expect(await levelOf(jsonlEvent({ event: 'error.boot.crashed' }))).toBe('error');
+      expect(await levelOf(jsonlEvent({ event: 'bead.claim.failed' }))).toBe('warn');
+      expect(await levelOf(jsonlEvent({ event: 'tool.invoke.retry' }))).toBe('warn');
+      expect(await levelOf(jsonlEvent({ event: 'debug.trace.dump' }))).toBe('debug');
+      expect(await levelOf(jsonlEvent({ event: 'worker.started' }))).toBe('info');
+    });
+
+    it('a valid explicit level overrides the event-name inference', async () => {
+      expect(await levelOf(jsonlEvent({ event: 'error.boot.crashed', level: 'info' }))).toBe('info');
+    });
+
+    it('an invalid level in the JSONL shape is not fatal — inference applies instead (the flat shape 400s on the same input)', async () => {
+      expect(await levelOf(jsonlEvent({ level: 'verbose' }))).toBe('info');
+      expect(await levelOf(jsonlEvent({ event: 'error.boot.crashed', level: 'verbose' }))).toBe('error');
+    });
+  });
+
+  // ── POST /api/events — timestamp shapes ───────────────────────
+
+  describe('single route: timestamp shapes (doc payload table: RFC3339 string or epoch-ms number)', () => {
+    it('normalizes an RFC3339 ts with a non-UTC offset to the equivalent epoch ms', async () => {
+      // 14:00+02:00 is 12:00Z — the offset must be honored, not dropped.
+      const res = await postJson('/api/events', jsonlEvent({ ts: '2026-09-26T14:00:00+02:00' }));
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.ts).toBe(Date.parse('2026-09-26T12:00:00.000Z'));
+    });
+
+    it('reads a numeric ts as epoch milliseconds — no seconds heuristic', async () => {
+      // 1773035639 as epoch *seconds* would be 2026; the doc pins the unit as ms.
+      const res = await postJson('/api/events', flatEvent({ ts: 1773035639 }));
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.ts).toBe(1773035639);
+    });
+  });
+
+  // ── POST /api/events — worker/session normalization details ───
+
+  describe('single route: worker and session normalization details (doc shape 1)', () => {
+    it('omits session from the normalized event when the body carries none', async () => {
+      const res = await postJson('/api/events', jsonlEvent());
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.session).toBeUndefined();
+    });
+
+    it('composes every worker-object component into the id, in runner-provider-model-identifier order', async () => {
+      const res = await postJson('/api/events', jsonlEvent({
+        worker: { runner: 'codex', provider: 'openai', model: 'gpt-5o', identifier: 'zulu' },
+      }));
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.worker).toBe('codex-openai-gpt-5o-zulu');
+    });
+  });
+
+  // ── POST /api/events — bead promotion and recognized fields ───
+
+  describe('single route: bead promotion and recognized fields across shapes', () => {
+    it('shape 1 promotes data.bead_id and keeps the remaining data keys alongside it', async () => {
+      const res = await postJson('/api/events', jsonlEvent({
+        data: { bead_id: 'bd-123', workspace: '/home/coder/NEEDLE' },
+      }));
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.bead).toBe('bd-123');
+      expect(data.event.bead_id).toBeUndefined();
+      expect(data.event.workspace).toBe('/home/coder/NEEDLE');
+    });
+
+    it('shape 2 promotes a top-level string bead, and the recognized tool/path fields surface as named event fields', async () => {
+      const res = await postJson('/api/events', flatEvent({
+        bead: 'bd-55',
+        tool: 'Edit',
+        path: 'src/auth/login.ts',
+      }));
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.bead).toBe('bd-55');
+      expect(data.event.tool).toBe('Edit');
+      expect(data.event.path).toBe('src/auth/login.ts');
+    });
+
+    it('shape 2 lifts duration_ms and error onto their named event fields', async () => {
+      const res = await postJson('/api/events', flatEvent({ duration_ms: 5000, error: 'boom' }));
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.duration_ms).toBe(5000);
+      expect(data.event.error).toBe('boom');
+    });
+  });
+
   describe('single route: canonical NeedleEvent (doc shape 3)', () => {
     it('rejects a canonical-only body (no ts/event gate pair) at the pre-check', async () => {
       const { ts: _ts, event: _event, ...canonicalOnly } = canonicalEvent();
@@ -391,6 +496,50 @@ describe('native event API conformance (docs/events-api.md)', () => {
       const res = await postJson('/api/events', canonicalEvent({ schema_version: 1 }));
       expect(res.status).toBe(201);
       expect(store.size).toBe(1);
+    });
+  });
+
+  describe('single route: canonical required fields and bead/host sources', () => {
+    it('requires every canonical field: a missing sequence falls through every shape to "Failed to parse"', async () => {
+      const { sequence: _sequence, ...noSequence } = canonicalEvent();
+      const res = await postJson('/api/events', noSequence);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Invalid event format',
+        message: 'Failed to parse event object',
+      });
+      expect(store.size).toBe(0);
+    });
+
+    it('requires session_id too: the gate pair alone does not make a body parseable', async () => {
+      const { session_id: _session, ...noSession } = canonicalEvent();
+      const res = await postJson('/api/events', noSession);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Invalid event format',
+        message: 'Failed to parse event object',
+      });
+      expect(store.size).toBe(0);
+    });
+
+    it('does not promote data.bead_id in the canonical shape — bead comes from the top-level bead_id only', async () => {
+      const { bead_id: _bead, ...dataBeadOnly } = canonicalEvent({ data: { bead_id: 'bd-777' } });
+      const res = await postJson('/api/events', dataBeadOnly);
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.bead).toBeUndefined();
+      // …and the event still attributes to its explicit canonical host.
+      expect(await hostEventCount('fleet-remote-1')).toBe('1');
+    });
+
+    it('a canonical body without an explicit host stores no host and lands on the local-host metric series', async () => {
+      const { host: _host, ...noHost } = canonicalEvent();
+      const res = await postJson('/api/events', noHost);
+      expect(res.status).toBe(201);
+      const data = await res.json() as { event: Record<string, unknown> };
+      expect(data.event.host).toBeUndefined();
+      expect(await hostEventCount('fleet-remote-1')).toBeNull();
+      expect(await hostEventCount(getLocalHostname())).toBe('1');
     });
   });
 
@@ -477,6 +626,40 @@ describe('native event API conformance (docs/events-api.md)', () => {
       expect((await postJson('/api/events', body)).status).toBe(201);
       expect(store.size).toBe(2);
       expect(await hostEventCount(getLocalHostname())).toBe('2');
+    });
+  });
+
+  describe('store side effects: worker materialization (doc "Side effects (201 only)")', () => {
+    it('an accepted event materializes its worker, readable back via /api/workers', async () => {
+      const before = await getJson('/api/workers');
+      expect(before.status).toBe(200);
+      expect(before.data).toEqual([]);
+
+      const res = await postJson('/api/events', jsonlEvent({ worker: 'contract-materialize' }));
+      expect(res.status).toBe(201);
+
+      const all = await getJson('/api/workers');
+      expect(all.status).toBe(200);
+      const workers = all.data as Array<Record<string, unknown>>;
+      const mine = workers.find((w) => w.id === 'contract-materialize');
+      expect(mine).toBeDefined();
+      expect(mine).toMatchObject({ status: 'active', eventCount: 1 });
+    });
+
+    it('an event carrying a bead materializes the worker with that bead active, at its own host', async () => {
+      const res = await postJson('/api/events', jsonlEvent({
+        worker: 'contract-bead-worker',
+        data: { bead_id: 'bd-materialize' },
+      }));
+      expect(res.status).toBe(201);
+
+      const detail = await getJson('/api/workers/contract-bead-worker');
+      expect(detail.status).toBe(200);
+      expect(detail.data).toMatchObject({
+        id: 'contract-bead-worker',
+        activeBead: 'bd-materialize',
+        host: getLocalHostname(),
+      });
     });
   });
 
@@ -579,6 +762,70 @@ describe('native event API conformance (docs/events-api.md)', () => {
       expect(data.total).toBe(2);
       expect('errors' in data).toBe(false);
       expect(store.size).toBe(2);
+    });
+  });
+
+  describe('batch route: mixed-host attribution and a fatal error mid-batch', () => {
+    it('attributes each ingested event to its own host series: canonical explicit host vs local default', async () => {
+      expect(await hostEventCount('fleet-remote-2')).toBeNull();
+      const res = await postJson('/api/events/batch', [
+        canonicalEvent({ host: 'fleet-remote-2' }),
+        jsonlEvent(),
+      ]);
+      expect(res.status).toBe(201);
+      const data = await res.json() as { ingested: number; total: number };
+      expect(data.ingested).toBe(2);
+      expect(await hostEventCount('fleet-remote-2')).toBe('1');
+      expect(await hostEventCount(getLocalHostname())).toBe('1');
+      expect(store.size).toBe(2);
+    });
+
+    it('a schema-mismatch canonical event answers 500 for the whole batch, yet events before it were already stored', async () => {
+      const res = await postJson('/api/events/batch', [
+        jsonlEvent({ event: 'contract.batch.before-fatal' }),
+        canonicalEvent({ schema_version: 2 }),
+        jsonlEvent({ event: 'contract.batch.after-fatal' }),
+      ]);
+      expect(res.status).toBe(500);
+      const data = await res.json() as { error: string; message: string };
+      expect(data.error).toBe('Internal server error');
+      expect(data.message).toContain('schema mismatch');
+      // Ingestion happens per event inside the loop: index 0 landed before the throw.
+      expect(store.size).toBe(1);
+      expect(await hostEventCount(getLocalHostname())).toBe('1');
+    });
+  });
+
+  // ── Content type variants and empty bodies ────────────────────
+
+  describe('content type variants and empty bodies (both routes)', () => {
+    it('accepts the charset-annotated JSON content type', async () => {
+      const res = await post('/api/events', JSON.stringify(jsonlEvent()), {
+        contentType: 'application/json; charset=utf-8',
+        token: AUTH_TOKEN,
+      });
+      expect(res.status).toBe(201);
+      expect(store.size).toBe(1);
+    });
+
+    it('an empty body with the JSON content type parses to an empty object and fails the ts check (single route)', async () => {
+      const res = await post('/api/events', '', { contentType: 'application/json', token: AUTH_TOKEN });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Missing required field',
+        message: 'Field "ts" is required',
+      });
+      expect(store.size).toBe(0);
+    });
+
+    it('an empty body with the JSON content type fails the array pre-check (batch route)', async () => {
+      const res = await post('/api/events/batch', '', { contentType: 'application/json', token: AUTH_TOKEN });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Invalid request body',
+        message: 'Expected JSON array of events',
+      });
+      expect(store.size).toBe(0);
     });
   });
 
