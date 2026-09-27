@@ -531,4 +531,250 @@ describe('File Heatmap', () => {
       expect(anomalies.some(a => a.path === '/project/deploy.sh')).toBe(false);
     });
   });
+
+  describe('directory filter semantics', () => {
+    it('returns no entries when the filter matches nothing', () => {
+      const now = Date.now();
+      store.add(createFileEvent('/src/auth/login.ts', 'w-aaa', 'Edit', now));
+
+      expect(store.getFileHeatmap({ directoryFilter: '/nope/' })).toEqual([]);
+    });
+
+    // getFileHeatmap filters with String.startsWith, so a filter is a raw
+    // path prefix, not a directory-segment boundary. Pin that contract so a
+    // future switch to segment matching is a conscious change, not an
+    // unnoticed behavior break.
+    it('matches by raw path prefix, not directory-segment boundary', () => {
+      const now = Date.now();
+      store.add(createFileEvent('/src/authx/login.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/docs/readme.md', 'w-aaa', 'Edit', now + 1000));
+
+      const heatmap = store.getFileHeatmap({ directoryFilter: '/src/auth' });
+      expect(heatmap.map(e => e.path)).toEqual(['/src/authx/login.ts']);
+    });
+
+    it('combines with the collisionsOnly filter', () => {
+      const now = Date.now();
+      // Collided file inside the directory
+      store.add(createFileEvent('/src/api/shared.ts', 'w-aaa', 'Edit', now));
+      store.add(createFileEvent('/src/api/shared.ts', 'w-bbb', 'Edit', now + 1000));
+      // Quiet file inside the directory
+      store.add(createFileEvent('/src/api/quiet.ts', 'w-aaa', 'Edit', now + 2000));
+      // Collided file outside the directory
+      store.add(createFileEvent('/other/shared.ts', 'w-aaa', 'Edit', now + 3000));
+      store.add(createFileEvent('/other/shared.ts', 'w-bbb', 'Edit', now + 4000));
+
+      const heatmap = store.getFileHeatmap({
+        directoryFilter: '/src/api',
+        collisionsOnly: true,
+      });
+      expect(heatmap.map(e => e.path)).toEqual(['/src/api/shared.ts']);
+    });
+  });
+
+  describe('entry limits', () => {
+    it('caps at the documented default of 50 entries', () => {
+      const now = Date.now();
+      for (let i = 0; i < 60; i++) {
+        store.add(createFileEvent(`/src/file-${i}.ts`, 'w-aaa', 'Edit', now + i));
+      }
+
+      expect(store.getFileHeatmap()).toHaveLength(50);
+      expect(store.getFileHeatmap({ maxEntries: 60 })).toHaveLength(60);
+    });
+  });
+
+  describe('getHeatmapTimelapse', () => {
+    // Anchor every timeline to Date.now(): the collision detector compares
+    // event timestamps against the wall clock, so far-past timestamps would
+    // shed their collisions before the timelapse is built.
+    let base: number;
+
+    beforeEach(() => {
+      base = Date.now();
+    });
+
+    it('builds a snapshot envelope honoring explicit start, end, and snapshot count', () => {
+      store.add(createFileEvent('/src/a.ts', 'w-aaa', 'Edit', base));
+
+      const timelapse = store.getHeatmapTimelapse({
+        startTimestamp: base - 1000,
+        endTimestamp: base + 5000,
+        snapshotCount: 5,
+      });
+
+      expect(timelapse.startTimestamp).toBe(base - 1000);
+      expect(timelapse.endTimestamp).toBe(base + 5000);
+      // floor(6000ms / 5 snapshots) = 1200ms, and the loop walks i = 0..5
+      // inclusive while timestamp <= end, so the end lands exactly on a frame
+      expect(timelapse.interval).toBe(1200);
+      expect(timelapse.totalSnapshots).toBe(timelapse.snapshots.length);
+      expect(timelapse.snapshots.map(s => s.timestamp)).toEqual([
+        base - 1000,
+        base + 200,
+        base + 1400,
+        base + 2600,
+        base + 3800,
+        base + 5000,
+      ]);
+    });
+
+    it('only includes a file in snapshots at or after its first modification', () => {
+      store.add(createFileEvent('/src/early.ts', 'w-aaa', 'Edit', base));
+      store.add(createFileEvent('/src/late.ts', 'w-bbb', 'Edit', base + 30000));
+
+      const timelapse = store.getHeatmapTimelapse({
+        startTimestamp: base,
+        endTimestamp: base + 40000,
+        snapshotCount: 4,
+      });
+
+      const pathsAt = (i: number) => timelapse.snapshots[i].entries.map(e => e.path);
+
+      expect(pathsAt(0)).toEqual(['/src/early.ts']);
+      expect(pathsAt(1)).toEqual(['/src/early.ts']);
+      expect(pathsAt(2)).toEqual(['/src/early.ts']);
+      expect(pathsAt(3)).toContain('/src/late.ts');
+      expect(pathsAt(4)).toEqual(['/src/early.ts', '/src/late.ts']);
+    });
+
+    // The timelapse computes heat from the as-of-snapshot modification total
+    // using its own thresholds (warm >= 5, hot >= 10, critical >= 20) — not
+    // the live heatmap's 3/6/11. A file with 8 modifications is therefore
+    // 'hot' live but only 'warm' in its snapshots. Pin both sides.
+    it('counts a worker\'s full contribution at the first snapshot at or after their last edit', () => {
+      const path = '/src/solo.ts';
+      for (let i = 0; i < 8; i++) {
+        store.add(createFileEvent(path, 'w-solo', 'Edit', base + i * 5000));
+      }
+
+      const timelapse = store.getHeatmapTimelapse({
+        startTimestamp: base,
+        endTimestamp: base + 40000,
+        snapshotCount: 8,
+      });
+
+      // w-solo's last edit lands at base + 35000. Snapshots before it show
+      // nothing (a worker contributes from their last edit onward, never
+      // partially); from base + 35000 the full count of 8 appears.
+      const entryAt = (i: number) =>
+        timelapse.snapshots[i].entries.find(e => e.path === path);
+
+      expect(entryAt(5)).toBeUndefined();
+      const entry = entryAt(7);
+      expect(entry).toBeDefined();
+      expect(entry!.modifications).toBe(8);
+      expect(entry!.heatLevel).toBe('warm');
+      expect(entry!.workers[0]).toMatchObject({ workerId: 'w-solo', modifications: 8, percentage: 100 });
+
+      // Same store, live heatmap: 8 modifications sits in the hot band.
+      expect(store.getFileHeatmap().find(e => e.path === path)?.heatLevel).toBe('hot');
+    });
+
+    it('splits worker percentages once every contributor has touched the file', () => {
+      const path = '/src/paired.ts';
+      store.add(createFileEvent(path, 'w-aaa', 'Edit', base));
+      store.add(createFileEvent(path, 'w-bbb', 'Edit', base + 15000));
+
+      const timelapse = store.getHeatmapTimelapse({
+        startTimestamp: base,
+        endTimestamp: base + 20000,
+        snapshotCount: 4,
+      });
+
+      // Snapshot at base + 10000: only w-aaa has edited
+      const solo = timelapse.snapshots[2].entries.find(e => e.path === path);
+      expect(solo?.workers).toHaveLength(1);
+      expect(solo?.workers[0]).toMatchObject({ workerId: 'w-aaa', percentage: 100 });
+
+      // Snapshot at base + 15000: both have edited, one modification each
+      const paired = timelapse.snapshots[3].entries.find(e => e.path === path);
+      expect(paired?.workers.map(w => w.percentage).sort()).toEqual([50, 50]);
+    });
+
+    it('honors the directory filter inside snapshots', () => {
+      store.add(createFileEvent('/app/one.ts', 'w-aaa', 'Edit', base));
+      store.add(createFileEvent('/lib/two.ts', 'w-aaa', 'Edit', base + 1000));
+
+      const timelapse = store.getHeatmapTimelapse({
+        startTimestamp: base,
+        endTimestamp: base + 10000,
+        snapshotCount: 5,
+        directoryFilter: '/app',
+      });
+
+      for (const snapshot of timelapse.snapshots) {
+        expect(snapshot.entries.map(e => e.path)).not.toContain('/lib/two.ts');
+      }
+      expect(timelapse.snapshots[timelapse.snapshots.length - 1].entries.map(e => e.path))
+        .toEqual(['/app/one.ts']);
+    });
+
+    it('honors collisionsOnly inside snapshots', () => {
+      // Two workers within the 5s collision window -> active collision
+      store.add(createFileEvent('/src/shared.ts', 'w-aaa', 'Edit', base));
+      store.add(createFileEvent('/src/shared.ts', 'w-bbb', 'Edit', base + 1000));
+      store.add(createFileEvent('/src/quiet.ts', 'w-aaa', 'Edit', base + 2000));
+
+      const timelapse = store.getHeatmapTimelapse({
+        startTimestamp: base,
+        endTimestamp: base + 10000,
+        snapshotCount: 5,
+        collisionsOnly: true,
+      });
+
+      for (const snapshot of timelapse.snapshots) {
+        expect(snapshot.entries.map(e => e.path)).not.toContain('/src/quiet.ts');
+      }
+      expect(timelapse.snapshots[timelapse.snapshots.length - 1].entries.map(e => e.path))
+        .toEqual(['/src/shared.ts']);
+    });
+  });
+
+  describe('collision lifecycle', () => {
+    // The doc pins "active collisions (⚠ red)" as same-file edits from
+    // multiple workers inside a 5s window; the collision view's own query
+    // (getCollisions) is what retires collisions older than its 30s stale
+    // threshold, and the heatmap's highlighting follows that state.
+    it('retires collision highlighting once the collision goes stale', () => {
+      const now = Date.now();
+      // Two workers, 2s apart, but both in the past: inside the 5s
+      // collision window relative to each other, yet old enough that the
+      // stale threshold (30s) has already elapsed.
+      store.add(createFileEvent('/src/stale.ts', 'w-aaa', 'Edit', now - 40_000));
+      store.add(createFileEvent('/src/stale.ts', 'w-bbb', 'Edit', now - 38_000));
+
+      // Before any cleanup runs the collision is formed and highlighted.
+      expect(store.getFileHeatmap()[0].hasCollision).toBe(true);
+      expect(store.getFileHeatmap({ collisionsOnly: true }).map(e => e.path))
+        .toEqual(['/src/stale.ts']);
+
+      // The collision view's query performs the staleness sweep and no
+      // longer reports it as active.
+      expect(store.getCollisions()).toEqual([]);
+
+      // Highlighting follows: the file drops out of collisions-only and
+      // loses its flag in the unfiltered heatmap.
+      expect(store.getFileHeatmap({ collisionsOnly: true })).toEqual([]);
+      expect(store.getFileHeatmap()[0].hasCollision).toBe(false);
+      // The modification history itself is untouched by the retirement.
+      expect(store.getFileHeatmap()[0].modifications).toBe(2);
+      expect(store.getFileHeatmap()[0].workers.map(w => w.workerId).sort())
+        .toEqual(['w-aaa', 'w-bbb']);
+    });
+
+    it('keeps highlighting while the collision is still fresh', () => {
+      const now = Date.now();
+      store.add(createFileEvent('/src/fresh.ts', 'w-aaa', 'Edit', now - 1_000));
+      store.add(createFileEvent('/src/fresh.ts', 'w-bbb', 'Edit', now));
+
+      // A cleanup pass runs; the collision is well inside the 30s window.
+      store.getCollisions();
+
+      const entry = store.getFileHeatmap({ collisionsOnly: true })[0];
+      expect(entry?.path).toBe('/src/fresh.ts');
+      expect(entry?.hasCollision).toBe(true);
+      expect(entry?.activeWorkers).toBe(2);
+    });
+  });
 });

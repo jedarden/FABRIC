@@ -1679,4 +1679,93 @@ describe('FileHeatmap', () => {
       );
     });
   });
+
+  describe('real-time refresh behavior', () => {
+    const makeAnomaly = (path: string): FileAnomaly => ({
+      path,
+      type: 'config_modification',
+      severity: 'warning',
+      message: 'm',
+      detectedAt: Date.now(),
+      details: {},
+    });
+
+    it('keeps previously loaded anomalies when a refresh omits the anomaly getter', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry()],
+        createMockStats,
+        () => [makeAnomaly('kept.yaml')]
+      );
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('kept.yaml');
+
+      // A live refresh whose source provides no anomaly getter must not wipe
+      // the anomalies already fetched — updateData treats the getter as
+      // optional, not as "there are no anomalies".
+      fileHeatmap.updateData(() => [createMockEntry()], createMockStats);
+
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('kept.yaml');
+      expect(lastRenderedContent()).toContain('Unexpected Activity');
+    });
+
+    it('restores the previous file selection after an anomalies-only round trip', () => {
+      const entries = [
+        createMockEntry({ path: 'a.ts' }),
+        createMockEntry({ path: 'b.ts' }),
+        createMockEntry({ path: 'c.ts' }),
+      ];
+      fileHeatmap.updateData(() => entries, createMockStats, () => []);
+
+      getKeyHandler('j')?.();
+      expect(fileHeatmap.getSelected()?.path).toBe('b.ts');
+
+      // Enter anomalies-only, move the anomaly selection
+      getKeyHandler('a')?.();
+      fileHeatmap.updateData(() => entries, createMockStats, () => [
+        makeAnomaly('x.yaml'),
+        makeAnomaly('y.yaml'),
+      ]);
+      getKeyHandler('j')?.();
+      expect(fileHeatmap.getSelectedAnomaly()?.path).toBe('y.yaml');
+
+      // Back to files: the file selection is untouched by anomaly navigation
+      getKeyHandler('a')?.();
+      expect(fileHeatmap.getAnomalyFilter()).toBe(false);
+      expect(fileHeatmap.getSelected()?.path).toBe('b.ts');
+    });
+
+    it('drops rows for files absent from the refreshed data', () => {
+      fileHeatmap.updateData(
+        () => [createMockEntry({ path: 'kept.ts' }), createMockEntry({ path: 'retired.ts' })],
+        createMockStats
+      );
+      expect(rowForPath(lastRenderedContent(), 'retired.ts')).toBeDefined();
+
+      // The file left the heatmap (e.g. its tracker aged out of the store);
+      // the refresh must remove its row, not leave it rendered stale.
+      fileHeatmap.updateData(() => [createMockEntry({ path: 'kept.ts' })], createMockStats);
+
+      const content = lastRenderedContent();
+      expect(rowForPath(content, 'kept.ts')).toBeDefined();
+      expect(rowForPath(content, 'retired.ts')).toBeUndefined();
+      expect(content).not.toContain('retired.ts');
+
+      // Selection clamps onto the surviving entry.
+      expect(fileHeatmap.getSelected()?.path).toBe('kept.ts');
+    });
+
+    it('clears a leftover directory filter from the getter contract on re-entry', () => {
+      fileHeatmap.setFilter('/stale/dir');
+      fileHeatmap.updateData(() => [], createMockStats);
+
+      // Re-entering the view re-issues updateData after clearFilter; the
+      // getter must see the filter lifted, not the stale directory.
+      fileHeatmap.clearFilter();
+      const getHeatmap = vi.fn(() => [createMockEntry()]);
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      expect(getHeatmap).toHaveBeenCalledWith(
+        expect.objectContaining({ directoryFilter: undefined })
+      );
+    });
+  });
 });

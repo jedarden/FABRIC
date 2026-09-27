@@ -726,4 +726,207 @@ describe('FileHeatmap Component', () => {
       });
     });
   });
+
+  describe('Sort, filter, and refresh wiring', () => {
+    // Route by endpoint so every refresh resolves without a Once-queue that
+    // breaks when an interaction triggers an extra fetch.
+    const routeFetch = (): void => {
+      mockFetch.mockImplementation((url: unknown) => {
+        if (String(url).includes('/api/heatmap/stats')) {
+          return Promise.resolve(createMockResponse(mockStats));
+        }
+        return Promise.resolve(createMockResponse(mockEntries));
+      });
+    };
+
+    const heatmapParams = (): URLSearchParams => {
+      const calls = mockFetch.mock.calls.map(c => String(c[0]));
+      const last = calls.filter(u => u.includes('/api/heatmap?')).pop();
+      expect(last).toBeDefined();
+      return new URL(last!, 'http://localhost').searchParams;
+    };
+
+    it('cycles the sort mode and refetches with the new sortBy', async () => {
+      routeFetch();
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /sort: modifications/i })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /sort: modifications/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /sort: recent/i })).toBeTruthy();
+      });
+      expect(heatmapParams().get('sortBy')).toBe('recent');
+      expect(heatmapParams().get('collisionsOnly')).toBe('false');
+    });
+
+    it('sends the directory filter with the refresh request', async () => {
+      routeFetch();
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Filter by directory...')).toBeTruthy();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText('Filter by directory...'), {
+        target: { value: '/src/utils' },
+      });
+
+      await waitFor(() => {
+        expect(heatmapParams().get('directoryFilter')).toBe('/src/utils');
+      });
+    });
+
+    it('refetches with collisionsOnly=true when the collision toggle is clicked', async () => {
+      routeFetch();
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /collisions/i })).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /collisions/i }));
+
+      await waitFor(() => {
+        expect(heatmapParams().get('collisionsOnly')).toBe('true');
+      });
+    });
+  });
+
+  describe('Re-entry (remount) and manual refresh', () => {
+    // App.tsx unmounts FileHeatmap on close, so every re-entry is a fresh
+    // mount: sort/filter/collision state must start from the defaults again
+    // and the entry list must come from a new fetch, never the prior
+    // session's rows. These tests pin that contract; if the panel is ever
+    // made persistent (state hoisted to App), the stale-filter assertions
+    // here will fail — that would be the conscious change to document.
+    const routeFetchWith = (entries: FileHeatmapEntry[]): void => {
+      mockFetch.mockImplementation((url: unknown) => {
+        if (String(url).includes('/api/heatmap/stats')) {
+          return Promise.resolve(createMockResponse(mockStats));
+        }
+        return Promise.resolve(createMockResponse(entries));
+      });
+    };
+
+    const heatmapCalls = (from: number): URLSearchParams[] =>
+      mockFetch.mock.calls
+        .slice(from)
+        .map(c => String(c[0]))
+        .filter(u => u.includes('/api/heatmap?'))
+        .map(u => new URL(u, 'http://localhost').searchParams);
+
+    it('starts a fresh mount with default sort, empty filter, and collisions off', async () => {
+      routeFetchWith(mockEntries);
+      const { unmount: unmountPanel } = render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('/src/components/Button.tsx')).toBeTruthy();
+      });
+
+      // Dirty the state the way a real session would.
+      fireEvent.change(screen.getByPlaceholderText('Filter by directory...'), {
+        target: { value: '/src/utils' },
+      });
+      await waitFor(() => {
+        expect(heatmapCalls(0).some(p => p.get('directoryFilter') === '/src/utils')).toBe(true);
+      });
+      fireEvent.click(screen.getByRole('button', { name: /sort: modifications/i }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /sort: recent/i })).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /collisions/i }));
+      await waitFor(() => {
+        expect(heatmapCalls(0).some(p => p.get('collisionsOnly') === 'true')).toBe(true);
+      });
+
+      // Close and re-enter: the component remounts from scratch.
+      unmountPanel();
+      mockFetch.mockClear();
+      routeFetchWith(mockEntries);
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('/src/components/Button.tsx')).toBeTruthy();
+      });
+
+      // The mount fetch carries the defaults, not the previous session's
+      // filter, sort, or collision toggle.
+      const mountParams = heatmapCalls(0)[0];
+      expect(mountParams.get('sortBy')).toBe('modifications');
+      expect(mountParams.get('collisionsOnly')).toBe('false');
+      expect(mountParams.get('directoryFilter')).toBeNull();
+
+      // The controls render the defaults too.
+      expect(screen.getByRole('button', { name: /sort: modifications/i })).toBeTruthy();
+      expect(
+        (screen.getByPlaceholderText('Filter by directory...') as HTMLInputElement).value
+      ).toBe('');
+      expect((screen.getByTitle('Toggle collisions only') as HTMLButtonElement).className).not.toContain('active');
+    });
+
+    it('renders freshly fetched rows after re-entry, not the prior session\'s', async () => {
+      const priorSession: FileHeatmapEntry[] = [mockEntries[0]];
+      const nextSession: FileHeatmapEntry[] = [mockEntries[1]];
+
+      routeFetchWith(priorSession);
+      const { unmount: unmountPanel } = render(<FileHeatmap visible={true} onClose={() => {}} />);
+      await waitFor(() => {
+        expect(screen.getByText('/src/components/Button.tsx')).toBeTruthy();
+      });
+      unmountPanel();
+
+      // The fleet moved on between visits: different file, different heat.
+      mockFetch.mockClear();
+      routeFetchWith(nextSession);
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('/src/utils/helpers.ts')).toBeTruthy();
+      });
+      expect(screen.queryByText('/src/components/Button.tsx')).toBeNull();
+    });
+
+    it('picks up new activity when the refresh button is used', async () => {
+      routeFetchWith([mockEntries[2]]);
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+      await waitFor(() => {
+        expect(screen.getByText('/src/types.ts')).toBeTruthy();
+      });
+
+      // A new event lands in the store between the initial load and now.
+      routeFetchWith([mockEntries[2], mockEntries[1]]);
+      fireEvent.click(screen.getByTitle('Refresh'));
+
+      await waitFor(() => {
+        expect(screen.getByText('/src/utils/helpers.ts')).toBeTruthy();
+      });
+      expect(screen.getByText('/src/types.ts')).toBeTruthy();
+    });
+
+    it('renders per-file worker attribution from the entry payload', async () => {
+      routeFetchWith(mockEntries);
+      render(<FileHeatmap visible={true} onClose={() => {}} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('/src/components/Button.tsx')).toBeTruthy();
+      });
+
+      const rows = document.querySelectorAll('.heatmap-entry');
+      expect(rows).toHaveLength(3);
+
+      // Two-worker file: both ids joined in the row's worker cell,
+      // truncated to 6 chars each by formatWorkers' top-2 display.
+      const shared = rows[0].querySelector('.file-workers');
+      expect(shared?.textContent).toBe('w-alph, w-beta');
+
+      // Single-worker file: the full id, untruncated (≤ 8 chars).
+      const solo = rows[2].querySelector('.file-workers');
+      expect(solo?.textContent).toBe('w-gamma');
+      expect(solo?.textContent).not.toContain('w-alph');
+    });
+  });
 });
