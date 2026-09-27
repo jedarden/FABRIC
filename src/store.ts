@@ -49,6 +49,7 @@ import {
   compareEventsBySequence,
 } from './types.js';
 import { isWorkerStuck } from './tui/utils/stuckDetection.js';
+import { AlertManager, AlertRecord } from './alertManager.js';
 import { detectAnomalies, getAnomalyStats } from './tui/utils/fileAnomalyDetection.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
@@ -145,6 +146,8 @@ export class InMemoryEventStore implements EventStore {
   private workerAnalytics: WorkerAnalytics;
   private semanticNarrativeManager: SemanticNarrativeGenerator;
   private historicalStore: HistoricalStore;
+  /** Deduplicating registry for repeated no-work / stuck alert beads (docs/alert-policy.md). */
+  private alertManager: AlertManager = new AlertManager();
   private maxEvents: number;
   private alertCounter = 0;
   private batchBuffer: LogEvent[] = [];
@@ -339,6 +342,7 @@ export class InMemoryEventStore implements EventStore {
     this.recentFileMods.clear();
     this.errorGroupManager.clear();
     this.crossReferenceManager.clear();
+    this.alertManager.clear();
     this.batchBuffer = [];
     this.taskStartTimes.clear();
     if (this.batchTimeout) {
@@ -614,6 +618,21 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
+   * Active deduplicated alert instances (one per no-work/stuck condition).
+   * See docs/alert-policy.md.
+   */
+  getActiveAlerts(): AlertRecord[] {
+    return this.alertManager.activeAlerts();
+  }
+
+  /**
+   * Full alert instance history including resolved epochs.
+   */
+  getAlertHistory(): AlertRecord[] {
+    return this.alertManager.history();
+  }
+
+  /**
    * Get event count
    */
   get size(): number {
@@ -753,14 +772,33 @@ export class InMemoryEventStore implements EventStore {
       worker.currentBead = event.bead;
     }
 
+    // Alert-dedup observations for no-work (docs/alert-policy.md): repeated
+    // queue-empty/exhausted observations fold into the worker's one active
+    // no-work alert; a successful claim resolves it, so a later dry spell
+    // opens a fresh alert instead of resurrecting the old one.
+    if (needleEvent === 'worker.queue_empty' || needleEvent === 'worker.exhausted') {
+      this.alertManager.observe('no-work', worker.id, { at: event.ts, reason: needleEvent });
+    } else if (needleEvent === 'bead.claim.succeeded') {
+      this.alertManager.resolve('no-work', worker.id, { at: event.ts, note: 'worker claimed a bead' });
+    }
+
     // Update last event
     worker.lastEvent = event;
 
     // Run gap-based stuck detection (throttled — only every 100 events per worker)
     if (worker.eventCount % 100 === 0) {
       const stuckPattern = isWorkerStuck(worker, this.events);
+      const wasStuck = worker.stuck === true;
       worker.stuck = stuckPattern != null;
       worker.stuckReason = stuckPattern?.reason ?? undefined;
+      // Alert-dedup observations for stuck (docs/alert-policy.md): every
+      // detection folds into the worker's one active stuck alert; the
+      // true→false transition resolves it so a later relapse opens a new one.
+      if (worker.stuck) {
+        this.alertManager.observe('stuck', worker.id, { at: event.ts, reason: worker.stuckReason });
+      } else if (wasStuck) {
+        this.alertManager.resolve('stuck', worker.id, { at: event.ts, note: 'worker resumed progress' });
+      }
     }
 
     // Update collision status (throttled — only when a new collision is detected
