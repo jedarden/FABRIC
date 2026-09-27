@@ -971,7 +971,11 @@ export class InMemoryEventStore implements EventStore {
     const now = Date.now();
     const staleThreshold = 30000; // 30 seconds
 
-    for (const [key, collision] of this.collisions) {
+    // First pass: retire every stale collision before recomputing any
+    // worker flags, so a worker's flag reflects all retirements in this
+    // sweep rather than whichever subset had been iterated so far.
+    const retiredWorkers = new Set<string>();
+    for (const collision of this.collisions.values()) {
       // Check if all involved workers are still active on this file
       const isStale = collision.workers.every(workerId => {
         const worker = this.workers.get(workerId);
@@ -981,13 +985,27 @@ export class InMemoryEventStore implements EventStore {
         return false;
       });
 
-      if (isStale) {
+      if (isStale && collision.isActive) {
         collision.isActive = false;
-        // Update worker collision status
         for (const workerId of collision.workers) {
-          const worker = this.workers.get(workerId);
-          if (worker) {
-            worker.hasCollision = this.getWorkerCollisions(workerId).some(c => c.isActive);
+          retiredWorkers.add(workerId);
+        }
+      }
+    }
+
+    // Second pass: recompute flags directly over the collision map.
+    // Routing this through getWorkerCollisions re-enters getCollisions ->
+    // cleanupStaleCollisions and recurses without bound whenever a stale
+    // collision still has registered workers (RangeError crash, found by
+    // the collision-lifecycle regression tests, fabric-2f9fd906).
+    for (const workerId of retiredWorkers) {
+      const worker = this.workers.get(workerId);
+      if (worker) {
+        worker.hasCollision = false;
+        for (const collision of this.collisions.values()) {
+          if (collision.isActive && collision.workers.includes(workerId)) {
+            worker.hasCollision = true;
+            break;
           }
         }
       }
