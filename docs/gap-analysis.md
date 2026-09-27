@@ -152,7 +152,7 @@ twice in newer commands:
 |------|---------|------|
 | `fabric-e91edf0c`, owner `fabric-f511a390` (+ Unravel children) | Digest AI narrative | src/digestAi.ts landed 2026-09-16 (plan.md §AI Session Digest); beads remain open for verification/ownership closure |
 | `fabric-92a4b7cb` | TUI heartbeat liveness indicator | collapse heartbeat events per worker |
-| `fabric-de6a9f72` | TUI `r`/`R` shortcut conflict | replay-overlay keys collide with global reset |
+| `fabric-de6a9f72` | TUI `r`/`R` shortcut conflict | resolved — b1e8567 deconflicted the bindings (`r` re-renders, `R` alone toggles replay, DAG force-refresh moved to `C-r`); a707ec86 pinned the help-overlay text |
 
 ### 3. Verification & coverage hardening (largest cluster, ~70 beads)
 
@@ -205,7 +205,7 @@ fabric-bd06ee99 (2026-09-26 refresh — this document)
 ├── fabric-931136a0 (tui --source busy-loop) — open
 ├── fabric-e91edf0c / fabric-f511a390 (digest AI closure) — open
 ├── fabric-92a4b7cb (heartbeat liveness) — open
-├── fabric-de6a9f72 (r/R shortcut conflict) — open
+├── fabric-de6a9f72 (r/R shortcut conflict) — resolved (b1e8567, a707ec86)
 └── verification & coverage hardening cluster (~70 beads) — open
 ```
 
@@ -266,7 +266,7 @@ What remains is not planned-feature work but:
 
 1. **Two recurrences of the single-file source bug** (digest `--source`, TUI busy-loop)
 2. **A large verification/coverage hardening frontier** (~70 small contract-test beads)
-3. **Small TUI polish** (heartbeat liveness, shortcut conflict)
+3. **Small TUI polish** (heartbeat liveness; the `r`/`R` shortcut conflict is resolved — b1e8567)
 4. **Bookkeeping closures** (digest-AI tracking beads whose code already landed)
 
 All current gaps have corresponding open `fabric-*` beads. The next refresh of this
