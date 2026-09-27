@@ -517,6 +517,13 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       fromView => {
         for (const toView of VIEWS) {
           if (toView.name === fromView.name) continue;
+          // heatmap → digest is the one documented exception: inside the
+          // heatmap view g/G are the heatmap's jump-to-first/last
+          // navigation and the digest toggle is suppressed (docs/cli.md
+          // "Binding conflicts"); the digest is reached with Escape then G
+          // or the command palette. Pinned in detail by the
+          // "g/G: heatmap navigation versus digest toggle" block below.
+          if (fromView.name === 'heatmap' && toView.name === 'digest') continue;
           buildApp();
           press(fromView.keys[0]);
           press(toView.keys[0]);
@@ -529,6 +536,24 @@ describe('TUI view-state contract (docs/cli.md)', () => {
         }
       }
     );
+
+    it('heatmap → digest goes through Escape: g/G never leave the heatmap', () => {
+      buildApp();
+      press('H');
+      expectViewActive(findView('heatmap'));
+
+      // Both aliases are absorbed by the heatmap view.
+      press('g');
+      expectViewActive(findView('heatmap'), 'g inside heatmap');
+      press('G');
+      expectViewActive(findView('heatmap'), 'G inside heatmap');
+
+      // The documented two-step path reaches the digest from here.
+      press('escape');
+      expectViewActive(null);
+      press('G');
+      expectViewActive(findView('digest'), 'digest after Escape + G');
+    });
 
     it('every view key is a toggle: pressing it again returns to the default view', () => {
       for (const view of VIEWS) {

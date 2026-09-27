@@ -113,7 +113,7 @@ only inside specific views (transcript search), not globally.
 | Task dependency DAG | `FABRIC - Task Dependency DAG` | `D` or `d` |
 | Session replay | `FABRIC - Session Replay` | `R` |
 | Error groups | `FABRIC - Error Groups` | `E` or `e` |
-| Session digest | `FABRIC - Session Digest` | `G` or `g` |
+| Session digest | `FABRIC - Session Digest` | `G` or `g` (anywhere but the heatmap view — see *Binding conflicts*) |
 | Collision alerts | `FABRIC - Collision Alerts` | `C` or `c` |
 | Git integration | `FABRIC - Git Integration` | `I` |
 | Semantic narrative | `FABRIC - Semantic Narrative` | `N` |
@@ -173,7 +173,10 @@ currently bound in the default view.
 
 **File heatmap** (`H`): `s` cycle sort mode · `c` filter to files with
 collisions · `a` show anomalies only · `↑`/`↓`/`j`/`k` navigate · `g`/`G`
-jump to first/last.
+jump to first/last. Inside this view `g`/`G` are exclusively the heatmap's
+first/last navigation — the digest toggle does not fire here; reach the
+digest with `Escape` then `G`, or the command palette's `digest` command
+(see *Binding conflicts*).
 
 **Task dependency DAG** (`D`): `t` tree · `b` top blockers · `r` ready tasks
 · `s` statistics · `f` cycle filters · `C-r` force refresh · `↑`/`↓`/`j`/`k`
@@ -245,7 +248,7 @@ both fire — the local action runs and the global toggle switches views:
 | Key | Global effect | Local effect (focused view) |
 |-----|---------------|------------------------------|
 | `r` | Re-renders the screen (never switches views) | Reset in replay, ready-tasks sub-view in DAG, refresh in git, narrative, analytics, xref, budget — every local `r` action is itself a refresh, so the combined effect is a data refresh plus a re-render |
-| `g` / `G` | Toggles session digest | Jump to top/bottom in worker grid, heatmap, DAG |
+| `g` / `G` | Toggles session digest — **except in the heatmap view, where the toggle is suppressed** (deconflicted, see below) | Jump to top/bottom in worker grid and DAG; in the heatmap view the jump to first/last file is the *only* effect |
 | `d` | Enters the DAG | Diff sub-view in git integration |
 | `e` / `E` | Enters error groups | Export in digest (`e`) and replay (`e` file, `E` base64), expand-all in transcript |
 | `c` | Enters collision alerts | Collisions-only filter in heatmap, comparison mode in analytics, collapse-all in transcript, clear history in git |
@@ -257,13 +260,19 @@ and the DAG view's force refresh moved from `R` to `C-r` so it cannot collide
 with the replay toggle. Lowercase `h` is fully deconflicted too: `H`/`h`
 toggle the heatmap and no view binds a local `h` — worker analytics used to
 move its comparison selection with `h`, and both handlers fired; that alias
-was removed and comparison selection is arrow-keys-only now.
+was removed and comparison selection is arrow-keys-only now. `g`/`G` are
+deconflicted inside the heatmap view specifically: the screen-level digest
+toggle steps aside there, so the heatmap's jump-to-first/last handlers are the
+sole effect. Everywhere else — the default view and every other overlay —
+`g`/`G` toggle the session digest exactly as before, and in the worker grid
+and DAG the jump still fires alongside the toggle.
 
 In practice: `d`/`e`/`c` inside the git/digest/transcript/heatmap/analytics
 views will also switch you away — expect the view change and re-enter with the
 view's uppercase key. Keys unique to a single view (`s`, `a`, `f`, `t`, `b`,
 `n`, `l`, `m`, `x`, `i`, `1`–`5`, `Home`/`End`) and the deconflicted
-`h` / `r` / `R` / `C-r` bindings have no view-switching collision.
+`h` / `r` / `R` / `C-r` bindings — plus `g`/`G` within the heatmap view —
+have no view-switching collision.
 
 ---
 

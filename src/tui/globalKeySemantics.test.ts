@@ -24,6 +24,10 @@
  *   - uppercase R versus lowercase r: `r` only re-renders and never
  *     switches views (in particular never toggles replay); `R` is the only
  *     replay toggle
+ *   - g/G versus the heatmap: `g`/`G` toggle the session digest from the
+ *     default view and every overlay except the heatmap, where they are
+ *     the heatmap's own jump-to-first/last navigation and the toggle is
+ *     suppressed (docs/cli.md "Binding conflicts")
  *   - view switching from overlays: a view key pressed while the help
  *     overlay, the worker detail, or the open command palette floats above
  *     switches views and leaves the overlay open
@@ -809,6 +813,51 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
       // toggle, and the replay binding must not also claim lowercase r.
       expect(rBinding).not.toBe(upperBinding);
       expect(upperBinding?.names).toEqual(['R']);
+    });
+  });
+
+  describe('g/G: digest toggle versus heatmap first/last navigation', () => {
+    it('g and G both toggle the digest from the default view', () => {
+      press('g');
+      expectViewActive(findView('digest'), 'g opens the digest');
+
+      press('G');
+      expectDefaultView('G closes the digest');
+    });
+
+    it('inside the heatmap view g/G are the heatmap navigation and never toggle the digest', () => {
+      press('H');
+      expectViewActive(findView('heatmap'));
+
+      // Blessed would fire the screen-level toggle alongside the heatmap's
+      // own g/G handlers; the toggle is gated off so the jump is the sole
+      // effect (docs/cli.md "Binding conflicts").
+      press('g');
+      expectViewActive(findView('heatmap'), 'g absorbed by the heatmap');
+      press('G');
+      expectViewActive(findView('heatmap'), 'G absorbed by the heatmap');
+
+      // The digest panel never opened underneath.
+      expect(h.state.components.sessionDigest.visible).toBe(false);
+    });
+
+    it.each(VIEWS.filter(v => v.name !== 'heatmap'))(
+      'g still toggles the digest from $name (the gate is heatmap-only)',
+      view => {
+        press(view.keys[0]);
+        press('g');
+        if (view.name === 'digest') {
+          expectDefaultView('g inside the digest toggles it off');
+        } else {
+          expectViewActive(findView('digest'), `g from ${view.name}`);
+        }
+      }
+    );
+
+    it('the screen-level binding still claims both aliases — the deconfliction is a state gate, not a binding removal', () => {
+      const gBinding = h.state.keyBindings.find(b => b.names.includes('g'));
+      expect(gBinding).toBeDefined();
+      expect(gBinding?.names).toEqual(['G', 'g']);
     });
   });
 

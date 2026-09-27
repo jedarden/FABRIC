@@ -537,8 +537,14 @@ export class FabricTuiApp {
       this.toggleErrorsView();
     });
 
-    // Toggle session digest view
+    // Toggle session digest view. State-aware: inside the heatmap view g/G
+    // belong to the heatmap's jump-to-first/last navigation (the heatmap box
+    // binds its own g/G handlers, and blessed fires every matching handler,
+    // so this toggle would otherwise yank the user out of the view on every
+    // jump). Everywhere else g/G toggle the digest as documented; from the
+    // heatmap, reach the digest with Escape then G, or the command palette.
     this.screen.key(['G', 'g'], () => {
+      if (this.viewMode === 'heatmap') return;
       this.toggleDigestView();
     });
 
@@ -1970,7 +1976,8 @@ File Context Panel (Split View):
   Tab     - Switch focus between panels
 
 Heatmap View:
-  j/k     - Navigate files (g/G jump first/last)
+  j/k     - Navigate files
+  g/G     - Jump to first/last file (digest toggle is suppressed here)
   s       - Cycle sort mode
   c       - Toggle collisions only
   a       - Toggle anomalies only
@@ -1995,7 +2002,7 @@ Session Replay:
   Esc     - Return to default view
 
 Session Digest:
-  G       - Toggle session digest view
+  G       - Toggle session digest view (except from the heatmap view)
   1-5     - Switch tabs (Summary/Beads/Files/Errors/Workers)
   e       - Export as JSON
   m       - Export as Markdown

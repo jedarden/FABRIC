@@ -492,6 +492,56 @@ describe('FileHeatmap', () => {
     });
   });
 
+  describe('first/last jump keys (g/G)', () => {
+    // The other half of the digest-toggle deconfliction (docs/cli.md
+    // "Binding conflicts"): inside the heatmap view these bindings are the
+    // sole g/G effect — the screen-level digest toggle is gated off there.
+    // These tests pin that the jump handlers exist and jump.
+
+    function keyHandler(key: string): () => void {
+      const call = mockBoxInstance.key.mock.calls.find(
+        (c: unknown[]) => Array.isArray(c?.[0]) && c[0].includes(key)
+      );
+      expect(call, `FileHeatmap must bind '${key}'`).toBeDefined();
+      return call![1] as () => void;
+    }
+
+    it('g jumps to the first entry', () => {
+      const entries = [
+        createMockEntry({ path: 'a.ts' }),
+        createMockEntry({ path: 'b.ts' }),
+        createMockEntry({ path: 'c.ts' }),
+      ];
+      fileHeatmap.updateData(() => entries, createMockStats);
+      fileHeatmap.selectNext();
+      fileHeatmap.selectNext();
+      expect(fileHeatmap.getSelected()?.path).toBe('c.ts');
+
+      keyHandler('g')();
+      expect(fileHeatmap.getSelected()?.path).toBe('a.ts');
+    });
+
+    it('G jumps to the last entry', () => {
+      const entries = [
+        createMockEntry({ path: 'a.ts' }),
+        createMockEntry({ path: 'b.ts' }),
+        createMockEntry({ path: 'c.ts' }),
+      ];
+      fileHeatmap.updateData(() => entries, createMockStats);
+      expect(fileHeatmap.getSelected()?.path).toBe('a.ts');
+
+      keyHandler('G')();
+      expect(fileHeatmap.getSelected()?.path).toBe('c.ts');
+    });
+
+    it('G is a no-op on an empty heatmap', () => {
+      fileHeatmap.updateData(() => [], createMockStats);
+
+      expect(() => keyHandler('G')()).not.toThrow();
+      expect(fileHeatmap.getSelected()).toBeUndefined();
+    });
+  });
+
   describe('sort mode cycling', () => {
     it('should start with modifications sort mode', () => {
       expect(fileHeatmap.getSortMode()).toBe('modifications');
