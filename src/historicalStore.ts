@@ -16,6 +16,7 @@ import {
   ErrorCategory,
   AggregatedAnalytics,
 } from './types.js';
+import { AlertRecord } from './alertManager.js';
 
 // ============================================
 // Type Definitions
@@ -128,7 +129,7 @@ export interface LearnedRecoveryEntry {
 // Database Schema
 // ============================================
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const CREATE_SESSIONS_TABLE = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -262,6 +263,45 @@ CREATE INDEX IF NOT EXISTS idx_factory_ledger_ts ON factory_ledger_events(ts);
 CREATE INDEX IF NOT EXISTS idx_factory_ledger_kind ON factory_ledger_events(kind);
 `;
 
+// Schema v5: durable alert inventory (docs/alert-policy.md §Durability) — the
+// deduplicating AlertManager registry survives a restart: every instance
+// (active + resolved epochs) restores through AlertManager.restore() before
+// the tailer replays recent log files, so replayed observations fold into the
+// restored epochs instead of opening duplicate ones.
+const CREATE_ALERT_RECORDS_TABLE = `
+CREATE TABLE IF NOT EXISTS alert_records (
+  id TEXT PRIMARY KEY,
+  identity TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  epoch INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  first_observed_at INTEGER NOT NULL,
+  last_observed_at INTEGER NOT NULL,
+  resolved_at INTEGER,
+  occurrences INTEGER NOT NULL DEFAULT 1,
+  notifications INTEGER NOT NULL DEFAULT 1,
+  last_notified_at INTEGER NOT NULL DEFAULT 0,
+  last_reason TEXT,
+  resolution_note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_records_identity ON alert_records(identity, epoch);
+`;
+
+// Schema v5: alert fold watermarks — per (session, worker), the highest event
+// sequence already offered to the alert registry. Replayed events at or below
+// the watermark are skipped at the alert observation sites, so a restart
+// cannot re-fold an old claim (which would resolve a restored active instance
+// and spuriously re-open it as a duplicate epoch).
+const CREATE_ALERT_FOLD_WATERMARKS_TABLE = `
+CREATE TABLE IF NOT EXISTS alert_fold_watermarks (
+  source_key TEXT PRIMARY KEY,
+  last_sequence INTEGER NOT NULL
+);
+`;
+
 // ============================================
 // Historical Store Class
 // ============================================
@@ -342,6 +382,12 @@ export class HistoricalStore {
     if (currentVersion < 4) {
       // v4: factory panel ledger events
       this.db.exec(CREATE_FACTORY_LEDGER_TABLE);
+    }
+
+    if (currentVersion < 5) {
+      // v5: durable alert inventory + fold watermarks (alert restart durability)
+      this.db.exec(CREATE_ALERT_RECORDS_TABLE);
+      this.db.exec(CREATE_ALERT_FOLD_WATERMARKS_TABLE);
     }
 
     // Update version
@@ -832,6 +878,110 @@ export class HistoricalStore {
       'DELETE FROM factory_ledger_events WHERE ts < ?'
     ).run(olderThanTs);
     return result.changes;
+  }
+
+  // ============================================
+  // Alert Durability (docs/alert-policy.md §Durability)
+  // ============================================
+
+  /**
+   * Persist the full alert inventory and fold watermarks as one snapshot.
+   *
+   * Written debounced after alert mutations and synchronously on shutdown by
+   * the store that owns the durable inventory. Replace-all semantics (one
+   * transaction): the registry is the single source of truth for these rows,
+   * so a stale row must never survive beside its rewritten siblings.
+   */
+  saveAlertState(records: readonly AlertRecord[], watermarks: ReadonlyMap<string, number>): void {
+    const persist = this.db.transaction(() => {
+      this.db.exec('DELETE FROM alert_records');
+      this.db.exec('DELETE FROM alert_fold_watermarks');
+      const insertRecord = this.db.prepare(`
+        INSERT INTO alert_records (
+          id, identity, kind, scope, epoch, status, created_at,
+          first_observed_at, last_observed_at, resolved_at,
+          occurrences, notifications, last_notified_at, last_reason, resolution_note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const r of records) {
+        insertRecord.run(
+          r.id, r.identity, r.kind, r.scope, r.epoch, r.status, r.createdAt,
+          r.firstObservedAt, r.lastObservedAt, r.resolvedAt,
+          r.occurrences, r.notifications, r.lastNotifiedAt, r.lastReason, r.resolutionNote,
+        );
+      }
+      const insertWatermark = this.db.prepare(
+        'INSERT INTO alert_fold_watermarks (source_key, last_sequence) VALUES (?, ?)'
+      );
+      for (const [key, seq] of watermarks) {
+        insertWatermark.run(key, seq);
+      }
+    });
+    persist();
+  }
+
+  /**
+   * Load the persisted alert inventory and fold watermarks for boot restore.
+   *
+   * Rows are returned ordered per identity (resolved epochs ascending, active
+   * last) — the shape `AlertManager.restore()` ingests. Malformed rows (an
+   * unknown kind/status from a foreign writer) are dropped rather than
+   * failing the restore.
+   */
+  loadAlertState(): { records: AlertRecord[]; watermarks: Map<string, number> } {
+    const VALID_KINDS = new Set(['no-work', 'stuck']);
+    const VALID_STATUSES = new Set(['active', 'resolved']);
+
+    const rows = this.db.prepare(`
+      SELECT id, identity, kind, scope, epoch, status, created_at,
+             first_observed_at, last_observed_at, resolved_at,
+             occurrences, notifications, last_notified_at, last_reason, resolution_note
+      FROM alert_records
+      ORDER BY identity ASC, epoch ASC, created_at ASC
+    `).all() as Array<{
+      id: string; identity: string; kind: string; scope: string; epoch: number;
+      status: string; created_at: number; first_observed_at: number;
+      last_observed_at: number; resolved_at: number | null; occurrences: number;
+      notifications: number; last_notified_at: number; last_reason: string | null;
+      resolution_note: string | null;
+    }>;
+
+    // Manager-produced snapshots always have the active instance at the
+    // identity's highest epoch, so (identity, epoch) order feeds restore()
+    // in creation order; restore() re-reconciles regardless, so even a
+    // foreign-shaped inventory lands policy-conformant.
+    const records: AlertRecord[] = [];
+    for (const row of rows) {
+      if (!VALID_KINDS.has(row.kind) || !VALID_STATUSES.has(row.status)) continue;
+      records.push({
+        id: row.id,
+        identity: row.identity,
+        kind: row.kind as AlertRecord['kind'],
+        scope: row.scope,
+        epoch: row.epoch,
+        status: row.status as AlertRecord['status'],
+        createdAt: row.created_at,
+        firstObservedAt: row.first_observed_at,
+        lastObservedAt: row.last_observed_at,
+        resolvedAt: row.resolved_at,
+        occurrences: row.occurrences,
+        notifications: row.notifications,
+        lastNotifiedAt: row.last_notified_at,
+        lastReason: row.last_reason,
+        resolutionNote: row.resolution_note,
+      });
+    }
+
+    const watermarkRows = this.db.prepare(
+      'SELECT source_key, last_sequence FROM alert_fold_watermarks'
+    ).all() as Array<{ source_key: string; last_sequence: number }>;
+    const watermarks = new Map<string, number>();
+    for (const w of watermarkRows) {
+      watermarks.set(w.source_key, w.last_sequence);
+    }
+
+    return { records, watermarks };
   }
 
   // ============================================
@@ -1430,6 +1580,8 @@ export class HistoricalStore {
     this.db.exec('DELETE FROM error_history');
     this.db.exec('DELETE FROM task_metrics');
     this.db.exec('DELETE FROM factory_ledger_events');
+    this.db.exec('DELETE FROM alert_records');
+    this.db.exec('DELETE FROM alert_fold_watermarks');
     this.db.exec('DELETE FROM sessions');
   }
 

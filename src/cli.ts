@@ -390,7 +390,25 @@ program
     const deduplicator = new EventDeduplicator();
 
     try {
-      const store = getStore();
+      // The web service owns the durable alert inventory (docs/alert-policy.md
+      // §Durability): persist alert state across restarts and restore it below.
+      const store = getStore({ persistAlerts: true });
+
+      // Restore the persisted alert inventory BEFORE any ingest path can run
+      // (OTLP receivers, tailer replay), so replayed observations fold into
+      // the restored epochs instead of opening duplicate ones. A restart must
+      // never change which epochs exist — see docs/alert-policy.md.
+      const alertRecovery = store.restorePersistedAlerts();
+      if (alertRecovery.recordsRestored > 0) {
+        console.error(
+          `Alert inventory restored: ${alertRecovery.recordsRestored} record(s), ` +
+          `${alertRecovery.activeInstancesAfter} active, ` +
+          `${alertRecovery.watermarksRestored} replay watermark(s)` +
+          (alertRecovery.duplicatesClosed > 0
+            ? `, ${alertRecovery.duplicatesClosed} legacy duplicate(s) closed`
+            : '')
+        );
+      }
       const { RetentionControlStore, defaultRetentionControlDirectory } = await import('./retentionControls.js');
       const retentionControlStore = new RetentionControlStore({
         directory: defaultRetentionControlDirectory(resolved.path),

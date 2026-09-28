@@ -50,6 +50,7 @@ import {
 } from './types.js';
 import { isWorkerStuck } from './tui/utils/stuckDetection.js';
 import {
+  AlertKind,
   AlertManager,
   AlertRecord,
   LegacyReconciliation,
@@ -137,6 +138,23 @@ const MAX_BATCH_BUFFER_SIZE = 500;
 /** Max age (ms) for inactive workers before pruning from the workers map. */
 const STALE_WORKER_MAX_AGE_MS = 3_600_000; // 1 hour
 
+/** Debounce window for persisting alert state after a mutation (docs/alert-policy.md §Durability). */
+const ALERT_PERSIST_DEBOUNCE_MS = 2_000;
+
+/** Options for constructing an InMemoryEventStore. */
+export interface InMemoryEventStoreOptions {
+  /**
+   * Own the durable alert inventory: persist the AlertRecord registry and
+   * fold watermarks to SQLite (debounced + on shutdown), enabling
+   * `restorePersistedAlerts()` at boot. Only the long-running fleet service
+   * (web mode) enables this — ephemeral CLI views reconstruct from replay
+   * and never write the durable inventory. Default: false.
+   */
+  persistAlerts?: boolean;
+  /** Historical store backing alert persistence. Default: the global singleton. */
+  historicalStore?: HistoricalStore;
+}
+
 export class InMemoryEventStore implements EventStore {
   private events: LogEvent[] = [];
   private sequenceIndex: Map<string, LogEvent> = new Map(); // key: `${worker}:${sequence}`
@@ -161,15 +179,26 @@ export class InMemoryEventStore implements EventStore {
   private taskStartTimes: Map<string, number> = new Map(); // beadId -> startTime
   /** Index of file-path → last modification timestamp — used by detectCollision for O(1) lookups. */
   private recentFileMods: Map<string, { workerId: string; ts: number }[]> = new Map();
+  /**
+   * Durability state (docs/alert-policy.md §Durability): when persistence is
+   * enabled, `alertFoldWatermarks` records, per (session, worker), the highest
+   * event sequence already offered to the alert registry — replayed events at
+   * or below it are skipped so a restart cannot re-fold an old observation and
+   * spuriously open a duplicate epoch.
+   */
+  private readonly alertPersistenceEnabled: boolean;
+  private alertFoldWatermarks: Map<string, number> = new Map();
+  private alertPersistTimer: NodeJS.Timeout | null = null;
 
-  constructor(maxEvents: number = 10000) {
+  constructor(maxEvents: number = 10000, options: InMemoryEventStoreOptions = {}) {
     this.maxEvents = maxEvents;
+    this.alertPersistenceEnabled = options.persistAlerts ?? false;
     this.errorGroupManager = new ErrorGroupManager();
     this.recoveryManager = getRecoveryManager();
     this.crossReferenceManager = getCrossReferenceManager();
     this.workerAnalytics = getWorkerAnalytics();
     this.semanticNarrativeManager = getSemanticNarrativeManager();
-    this.historicalStore = getHistoricalStore();
+    this.historicalStore = options.historicalStore ?? getHistoricalStore();
     this.sessionStartTime = Date.now();
     this.historicalStore.startSession();
   }
@@ -336,6 +365,11 @@ export class InMemoryEventStore implements EventStore {
   clear(): void {
     // Persist session data before clearing
     this.persistSession();
+
+    // Snapshot the alert inventory to the durable store before the in-memory
+    // wipe — the SIGINT shutdown path relies on this so the next boot's
+    // restore continues the inventory (docs/alert-policy.md §Durability).
+    this.flushAlertState();
 
     this.events = [];
     this.sequenceIndex.clear();
@@ -657,6 +691,127 @@ export class InMemoryEventStore implements EventStore {
     return this.alertManager.reconcileLegacyDuplicates(options);
   }
 
+  // ─── Alert durability (docs/alert-policy.md §Durability) ──────────────────
+
+  /**
+   * Restore the persisted alert inventory and fold watermarks from SQLite.
+   *
+   * The web service calls this ONCE at boot, BEFORE any ingest path runs
+   * (tailer replay, OTLP receivers), so replayed observations fold into the
+   * restored epochs instead of opening duplicate ones. Replace semantics:
+   * live registry state is replaced by the persisted snapshot (conformant —
+   * restore() reconciles), matching AlertManager.restore().
+   */
+  restorePersistedAlerts(options?: ReconcileOptions): LegacyReconciliation & {
+    recordsRestored: number;
+    watermarksRestored: number;
+  } {
+    let persisted: { records: AlertRecord[]; watermarks: Map<string, number> };
+    try {
+      persisted = this.historicalStore.loadAlertState();
+    } catch {
+      // A missing/corrupt table must never take the service down — fall back
+      // to the pre-durability behavior (fresh registry, replay re-derives).
+      return {
+        recordsAudited: 0,
+        identitiesAudited: 0,
+        duplicatesClosed: 0,
+        activeInstancesAfter: 0,
+        reconciled: [],
+        recordsRestored: 0,
+        watermarksRestored: 0,
+      };
+    }
+    const report = this.alertManager.restore(persisted.records, options);
+    this.alertFoldWatermarks = persisted.watermarks;
+    return {
+      ...report,
+      recordsRestored: persisted.records.length,
+      watermarksRestored: persisted.watermarks.size,
+    };
+  }
+
+  /**
+   * Write the alert inventory and fold watermarks to SQLite now. Called by
+   * the debounced schedule, by clear() (shutdown), and directly by tests.
+   * No-op unless this store owns the durable inventory (`persistAlerts`).
+   */
+  flushAlertState(): void {
+    if (this.alertPersistTimer) {
+      clearTimeout(this.alertPersistTimer);
+      this.alertPersistTimer = null;
+    }
+    if (!this.alertPersistenceEnabled) return;
+    this.historicalStore.saveAlertState(this.alertManager.history(), this.alertFoldWatermarks);
+  }
+
+  /** Schedule a debounced persist after an alert mutation. */
+  private scheduleAlertPersist(): void {
+    if (!this.alertPersistenceEnabled || this.alertPersistTimer) return;
+    const timer = setTimeout(() => {
+      this.alertPersistTimer = null;
+      this.flushAlertState();
+    }, ALERT_PERSIST_DEBOUNCE_MS);
+    // Never hold the process open for a pending persist (CLI short-lived runs).
+    timer.unref?.();
+    this.alertPersistTimer = timer;
+  }
+
+  /** Watermark key for an event's alert source: (session, worker). */
+  private alertWatermarkKey(event: LogEvent): string {
+    return `${event.session ?? ''}\u0000${event.worker}`;
+  }
+
+  /**
+   * True when this event was already offered to the alert registry in a
+   * previous process generation — a replay artifact. Guarding the alert
+   * observation sites on the per-(session, worker) sequence watermark is what
+   * makes restart+replay unable to re-fold an old claim (which would resolve
+   * a restored active instance and spuriously re-open it as a duplicate
+   * epoch). Sequence-less (legacy) events cannot be watermarked and always
+   * fold — documented limitation: replaying them may re-fold evidence.
+   */
+  private isAlertEventAlreadyFolded(event: LogEvent): boolean {
+    const seq = event.sequence;
+    if (seq == null || seq < 0) return false;
+    const wm = this.alertFoldWatermarks.get(this.alertWatermarkKey(event));
+    return wm !== undefined && seq <= wm;
+  }
+
+  /** Fold an observation (guarding replays), advancing the fold watermark. */
+  private observeAlert(
+    kind: AlertKind,
+    scope: string,
+    event: LogEvent,
+    reason?: string
+  ): void {
+    if (this.isAlertEventAlreadyFolded(event)) return;
+    this.alertManager.observe(kind, scope, { at: event.ts, reason });
+    const seq = event.sequence;
+    if (seq != null && seq >= 0) {
+      const key = this.alertWatermarkKey(event);
+      this.alertFoldWatermarks.set(key, Math.max(this.alertFoldWatermarks.get(key) ?? 0, seq));
+    }
+    this.scheduleAlertPersist();
+  }
+
+  /** Fold a resolution (guarding replays), advancing the fold watermark. */
+  private resolveAlert(
+    kind: AlertKind,
+    scope: string,
+    event: LogEvent,
+    note: string
+  ): void {
+    if (this.isAlertEventAlreadyFolded(event)) return;
+    this.alertManager.resolve(kind, scope, { at: event.ts, note });
+    const seq = event.sequence;
+    if (seq != null && seq >= 0) {
+      const key = this.alertWatermarkKey(event);
+      this.alertFoldWatermarks.set(key, Math.max(this.alertFoldWatermarks.get(key) ?? 0, seq));
+    }
+    this.scheduleAlertPersist();
+  }
+
   /**
    * Get event count
    */
@@ -800,11 +955,14 @@ export class InMemoryEventStore implements EventStore {
     // Alert-dedup observations for no-work (docs/alert-policy.md): repeated
     // queue-empty/exhausted observations fold into the worker's one active
     // no-work alert; a successful claim resolves it, so a later dry spell
-    // opens a fresh alert instead of resurrecting the old one.
+    // opens a fresh alert instead of resurrecting the old one. Replayed
+    // events already folded in a previous process generation are skipped so
+    // a restart cannot resolve-then-reopen a restored instance as a
+    // duplicate epoch (docs/alert-policy.md §Durability).
     if (needleEvent === 'worker.queue_empty' || needleEvent === 'worker.exhausted') {
-      this.alertManager.observe('no-work', worker.id, { at: event.ts, reason: needleEvent });
+      this.observeAlert('no-work', worker.id, event, needleEvent);
     } else if (needleEvent === 'bead.claim.succeeded') {
-      this.alertManager.resolve('no-work', worker.id, { at: event.ts, note: 'worker claimed a bead' });
+      this.resolveAlert('no-work', worker.id, event, 'worker claimed a bead');
     }
 
     // Update last event
@@ -818,11 +976,12 @@ export class InMemoryEventStore implements EventStore {
       worker.stuckReason = stuckPattern?.reason ?? undefined;
       // Alert-dedup observations for stuck (docs/alert-policy.md): every
       // detection folds into the worker's one active stuck alert; the
-      // true→false transition resolves it so a later relapse opens a new one.
+      // true→false transition resolves it so a later relapse opens a new
+      // one. Replay guard as above.
       if (worker.stuck) {
-        this.alertManager.observe('stuck', worker.id, { at: event.ts, reason: worker.stuckReason });
+        this.observeAlert('stuck', worker.id, event, worker.stuckReason);
       } else if (wasStuck) {
-        this.alertManager.resolve('stuck', worker.id, { at: event.ts, note: 'worker resumed progress' });
+        this.resolveAlert('stuck', worker.id, event, 'worker resumed progress');
       }
     }
 
@@ -2210,9 +2369,9 @@ export class InMemoryEventStore implements EventStore {
  */
 let globalStore: InMemoryEventStore | undefined;
 
-export function getStore(): InMemoryEventStore {
+export function getStore(options?: InMemoryEventStoreOptions): InMemoryEventStore {
   if (!globalStore) {
-    globalStore = new InMemoryEventStore();
+    globalStore = new InMemoryEventStore(10000, options);
   }
   return globalStore;
 }

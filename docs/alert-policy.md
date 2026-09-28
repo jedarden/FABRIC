@@ -96,7 +96,9 @@ alerts.history();                     // every instance, resolved included
 ```
 
 The event store owns one `AlertManager` (`InMemoryEventStore.getActiveAlerts()`
-/ `getAlertHistory()`), reset by `clear()` alongside the rest of the store.
+/ `getAlertHistory()`), reset by `clear()` alongside the rest of the store —
+after `clear()` snapshots the inventory to SQLite when the store owns the
+durable inventory (§Durability).
 
 Every NEEDLE observation enters through `InMemoryEventStore.add()`, so the
 store's observation sites are the single enforcement point of this policy:
@@ -165,10 +167,9 @@ Rules:
 - **Idempotent** — reconciling an inventory (or its own output) that already
   conforms closes zero duplicates and changes nothing.
 
-This is also the durable-restore path: any future persistence of alert
-state (see bead `fabric-8402deda`) should load through `restore()` /
-`restoreAlertRecords()` so a restored snapshot is policy-conformant before
-the first live observation lands.
+This is also the durable-restore path: persisted alert state (§Durability
+below) loads through `restore()` / `restoreAlertRecords()` so a restored
+snapshot is policy-conformant before the first live observation lands.
 
 **Live note (2026-09-28):** the `fabric-web.service` process on codinghome
 had started ~7h before the policy shipped (`629f3f2`/`2b27660`), so the
@@ -178,6 +179,126 @@ service onto the policy-enforcing build replaced that pile: the inventory
 rebuilds through `InMemoryEventStore.add()` with §2 enforced from the first
 observation, and `reconcileLegacyAlerts` covers any older snapshot imported
 afterward.
+
+## Durability across restarts
+
+The lifecycle sections above define transitions *within* one process. This
+section defines what happens to the inventory when FABRIC restarts — which
+it does routinely (systemd restarts, crash-loops, deploys).
+
+### The model: persisted inventory + watermark-guarded replay
+
+FABRIC's restart model re-reads recent log files from the beginning
+(`DirectoryTailer.startupRereadMs`, default 4 hours) and re-feeds them
+through `InMemoryEventStore.add()` to reconstruct worker state. That replay
+is the hazard: a naive replay of the already-consumed window into a restored
+registry would re-run a `bead.claim.succeeded` resolution and then re-open
+the condition as a **spurious next epoch** — a duplicate epoch the restart
+itself manufactured, not a real recurrence.
+
+Neither pure alternative is sufficient on its own:
+
+- **Reconstruction from replay alone** loses everything older than the
+  replay window (epoch numbering restarts per process generation, occurrence
+  totals and cooldown state reset — every crash-loop re-notifies a
+  long-running condition), and silently rewrites the inventory each boot.
+- **Persistence alone** restores the registry but still lets the replayed
+  window re-fold evidence, spurious-resolve a restored active instance, and
+  fork it into a duplicate epoch (above).
+
+The implemented model is the combination:
+
+1. **Persist** — the store that owns the durable inventory (web mode;
+   `getStore({ persistAlerts: true })`) writes the full registry — every
+   instance, active **and** resolved epochs — plus per-source **fold
+   watermarks** to SQLite (`alert_records`, `alert_fold_watermarks` in the
+   historical DB, schema v5). Writes are debounced (2 s) after any alert
+   mutation and synchronous on shutdown (`clear()`, the SIGINT path, snapshots
+   before the in-memory wipe).
+2. **Restore before replay** — at boot, the web service calls
+   `store.restorePersistedAlerts()` immediately after creating the store and
+   **before any ingest path can run** (OTLP receivers, tailer replay). The
+   snapshot loads through `AlertManager.restore()`, so it is reconciled into
+   the exact shape `observe()` expects — one active instance per identity,
+   positioned last per identity — before the first replayed observation.
+3. **Guard the replay** — each alert observation/resolve site checks the
+   event against the fold watermark for its `(session, worker)` source: the
+   highest event `sequence` already offered to the registry in any
+   generation. Events at or below the watermark are skipped — they were
+   consumed; re-folding them is what would resolve-then-reopen a restored
+   instance. Live events (sequence above the watermark) fold normally, and
+   every fold advances the watermark.
+
+```typescript
+// Boot (src/cli.ts, web command) — order is load-bearing:
+const store = getStore({ persistAlerts: true });
+const report = store.restorePersistedAlerts();   // BEFORE tailer/OTLP start
+tailer.start();                                   // replay folds into restored epochs
+```
+
+### Guarantees
+
+- **G1 — Epoch continuity.** A condition active at shutdown keeps its
+  instance across the restart: same `id` (`<identity>#<epoch>`), same
+  `createdAt`, occurrences continue. A restart never opens a new epoch for a
+  condition that was already active.
+- **G2 — No duplicate epochs.** After restore + replay, the inventory equals
+  what single-generation processing of the same stream would have produced:
+  one instance per `(identity, epoch)`, epochs contiguous. Replaying the
+  window twice (crash mid-replay) still adds nothing — only a *post-watermark*
+  observation can fold, and only a real post-resolution recurrence in the
+  event stream opens the next epoch.
+- **G3 — Cooldown continuity.** `lastNotifiedAt` persists, so a condition
+  notified minutes before a crash-loop restart does not re-notify immediately
+  after boot.
+- **G4 — Id stability.** Because ids survive restarts, downstream consumers
+  (the future bead-filer, dashboards) can key on `AlertRecord.id` without an
+  restart re-filing or re-numbering their alerts.
+- **G5 — Conformant restore.** A snapshot — including one written by a
+  foreign, non-deduplicating writer — loads through §Legacy reconciliation,
+  so a legacy pile imported from disk collapses to one active instance per
+  identity before the first live observation.
+
+### What persists vs. what reconstructs
+
+| State | Across a restart |
+|---|---|
+| Alert registry (all epochs, occurrence/notification counts, cooldown, resolution notes) | **Persisted** (`alert_records`) |
+| Fold watermarks per `(session, worker)` | **Persisted** (`alert_fold_watermarks`) |
+| Worker state, analytics, collisions, conversations | Reconstructed from the replayed window (unchanged pre-durability behavior) |
+| Events themselves | Never persisted by FABRIC — the NEEDLE JSONL logs are the source of truth |
+
+### Scope and limitations
+
+- **Only the web service owns the durable inventory.** Ephemeral CLI views
+  (`tui`, `logs`, `digest`) reconstruct from their replay window only and
+  never persist or restore — they are read-only views, and an offline run
+  must not write the live service's inventory.
+- **Legacy sequence-less events** (pre-sequence NEEDLE formats; the
+  normalizer emits `sequence: -1`) cannot be watermarked and always fold.
+  Replaying them after a restore may re-fold evidence (occurrence counts can
+  inflate); epoch discipline holds because the fold goes into the restored
+  instance rather than forking. Modern NEEDLE emits a monotonic `sequence` on
+  every event, so the fleet's live streams are fully guarded.
+- **Missing/corrupt persistence** falls back to the pre-durability behavior:
+  `restorePersistedAlerts()` returns zero records, the registry starts
+  empty, and replay re-derives what the window covers. Alert durability is
+  additive — it can degrade to replay-only, never block ingest.
+- **Resolved epochs are not pruned** yet; they accumulate in `alert_records`
+  (small — one row per instance). If that ever needs bounding, prune resolved
+  epochs older than a window; never prune an active instance's history.
+
+### Invariants pinned
+
+`src/alertDurability.test.ts` simulates two process generations sharing one
+SQLite store — restore + full replay of the consumed window — and pins:
+epoch continuation without forking (G1), the replayed-claim
+cannot-resolve-then-reopen case (G2), continuation folds of post-watermark
+observations, exactly-once recurrence across a double replay (G2), cooldown
+continuity (G3), immutable resolved history + §5 recurrence across restarts,
+session-scoped and per-worker watermark independence, the legacy
+sequence-less limitation, `clear()` snapshots before the wipe, and the
+empty-database no-op boot.
 
 ## Invariants (test-pinned)
 
@@ -200,20 +321,27 @@ full stuck detect→resume→relapse cycle). The HTTP contract is pinned in
    id, and leaves the resolved record untouched.
 6. Distinct kinds and distinct workers never share an instance.
 
+The restart-durability guarantees (G1–G5, §Durability) are pinned in
+`src/alertDurability.test.ts` — two simulated process generations over one
+SQLite store, proving restore + full replay of the consumed window never
+opens a duplicate epoch.
+
 ## Verification results
 
 **Last verified 2026-09-28 (UTC)** on `main` — contract coverage shipped by
 `fabric-17d442e5` (`629f3f2`, manager + unit pins) and `fabric-c0e278ee`
 (`2b27660`, store-path integration + HTTP pins); legacy-reconciliation
-coverage added by `fabric-ade0e71c`. Runs from the repo root:
+coverage added by `fabric-ade0e71c`; restart-durability coverage added by
+`fabric-8402deda` (`src/alertDurability.test.ts`, §Durability pins). Runs
+from the repo root:
 
 ```
-npx vitest run src/alertManager.test.ts src/web/server.alerts.test.ts
-#   → 2 files, 39 tests passed
+npx vitest run src/alertManager.test.ts src/web/server.alerts.test.ts src/alertDurability.test.ts
+#   → 3 files, 56 tests passed
 npx tsc --noEmit
 #   → exit 0
 npx vitest run
-#   → 103 files, 3586 passed / 2 skipped / 0 failed
+#   → 104 files, 3603 passed / 2 skipped / 0 failed
 ```
 
 `src/alertManager.test.ts` owns 36 of those tests — 15 direct manager units
@@ -250,4 +378,6 @@ The alert inventory is exposed over HTTP (`GET /api/alerts`, above). Not
 wired yet: rendering it in the TUI/web dashboards, and filing/closing the
 corresponding beads in a bead workspace. Both should key on
 `AlertRecord.identity` (dedup) and `AlertRecord.id` (the specific open/closed
-bead) so the UI inherits this policy rather than re-implementing it.
+bead) so the UI inherits this policy rather than re-implementing it. Since
+§Durability, ids are stable across restarts — a filed bead stays keyed to its
+instance for the instance's whole life.
