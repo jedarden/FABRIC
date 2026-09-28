@@ -27,9 +27,8 @@
  *   toolbar mount at the served-artifact level (workspace UI policy); the
  *   in-browser mounting proof stays in the jsdom mount check and the
  *   playwright spec
- * - the README discloses that the published-registry install is not
- *   exercised anywhere and names the release-tarball substitute the smoke
- *   enforces (bin linking, version/help output, packaged web assets)
+ * - the README documents the published-registry install and points to the
+ *   separate exact-version registry smoke
  */
 
 import { describe, it, expect } from 'vitest';
@@ -41,10 +40,13 @@ import { join, dirname } from 'path';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SMOKE_SCRIPT = 'scripts/smoke-clean-install.sh';
 const smokePath = join(repoRoot, SMOKE_SCRIPT);
+const REGISTRY_SMOKE_SCRIPT = 'scripts/smoke-registry-install.sh';
+const registrySmokePath = join(repoRoot, REGISTRY_SMOKE_SCRIPT);
 
 const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
 const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
 const smoke = readFileSync(smokePath, 'utf8');
+const registrySmoke = readFileSync(registrySmokePath, 'utf8');
 
 // The smoke script uses backslash line continuations for long invocations;
 // join them so per-statement assertions see one logical line.
@@ -238,34 +240,19 @@ describe('smoke release gate: npm packaging installation path', () => {
   });
 });
 
-describe('smoke release gate: published-package install substitute (release tarball)', () => {
-  // The README documents `npm install -g @needle/fabric`, but the package is
-  // not on the public npm registry, so no smoke run, CI run, or test can
-  // exercise the registry path — and an "approximation" framing is how that
-  // gap goes undocumented. The substitute is deliberate instead: the README
-  // must disclose that the registry install is not exercised anywhere and
-  // name the release tarball as its enforced substitute, and the smoke must
-  // enforce the facets a registry install exercises — bin linking, packaged
-  // web assets, version output, and --help discovery — against the installed
-  // tarball. When the package is published, this block is what forces the
-  // docs to say so instead of silently inheriting the old caveat.
-
-  it('discloses in the README that the registry install is not exercised and names the substitute', () => {
-    const section = readmeSmokeSection();
-    expect(section).toContain('release-tarball substitute');
-    expect(section).toContain('not exercised anywhere');
+describe('smoke release gate: package and registry installation', () => {
+  it('documents the published registry status and exact-version smoke', () => {
+    expect(readmeInstallationSection()).toContain('published to the public npm');
+    expect(readme).toContain('npm run smoke:registry-install -- @needle/fabric@<version>');
+    expect(readFileSync(join(repoRoot, 'docs', 'cli.md'), 'utf8')).toContain(
+      'published to the public npm',
+    );
+    expect(registrySmoke).toContain('npm install');
   });
 
-  it('marks the unpublished registry status next to every documented npm install', () => {
-    expect(readmeInstallationSection()).toMatch(/not yet published/);
-    // The CLI reference repeats the registry install; it must carry the same
-    // status note rather than a second undocumented promise.
-    const cliDoc = readFileSync(join(repoRoot, 'docs', 'cli.md'), 'utf8');
-    expect(cliDoc).toContain('not yet published');
-  });
-
-  it('names phase 4 the published-package substitute', () => {
-    expect(smoke).toContain('4/5 release-tarball install (published-package substitute)');
+  it('keeps the clean smoke package phase local to the release tarball', () => {
+    expect(smoke).toContain('4/5 release-tarball install (local package artifact)');
+    expect(smoke).toContain('scripts/smoke-registry-install.sh');
   });
 
   it('enforces the bin-link facet: npm symlink shape resolving into the installed package', () => {
@@ -282,6 +269,13 @@ describe('smoke release gate: published-package install substitute (release tarb
   it('enforces the version facet: the installed CLI reports the installed package version', () => {
     expect(smoke).toContain("require('$PKG/package.json').version");
     expect(smoke).toContain('[ "$VERSION_OUT" != "$PKG_VERSION" ]');
+  });
+
+  it('keeps the registry smoke isolated from the repository and global npm prefix', () => {
+    expect(registrySmoke).toContain('mktemp -d /tmp/fabric-registry-smoke.');
+    expect(registrySmoke).toContain('--prefix "$INSTALL"');
+    expect(registrySmoke).not.toContain('npm pack');
+    expect(registrySmoke).not.toContain('npm install -g');
   });
 });
 

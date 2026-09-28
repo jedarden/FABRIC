@@ -49,13 +49,30 @@ npm run build
 npm run build:web
 ```
 
-**Publishing status:** `@needle/fabric` is not yet published to the public npm
-registry, so the registry install above takes effect only on publish day.
-Until then the verified installation paths are the source build above and the
-release tarball: `npm run smoke:clean-install` packs the package and installs
-that tarball as the **enforced substitute** for the registry install — see
-"Verifying the installation" for what the substitute covers, and what it
-cannot.
+**Publishing status:** `@needle/fabric@0.1.0` is published to the public npm
+registry. The release metadata and publication gate live in `package.json`;
+the post-publication registry smoke below verifies the exact published version.
+
+### Release and publication workflow
+
+Releases are made from `main` after the release commit is ready:
+
+1. Bump the package version and create its release commit/tag:
+   `npm version patch` (or `minor` / `major`).
+2. Run the release gate: `npm run release:check`. It type-checks, runs the
+   unit suite, builds the TypeScript and web artifacts, and verifies the npm
+   package contents.
+3. Publish publicly with `npm run release:publish`. The
+   `prepublishOnly` hook repeats the gate and `publishConfig.access=public`
+   makes the scoped package public on `registry.npmjs.org`.
+4. Verify the exact registry artifact in an isolated temporary prefix:
+   `npm run smoke:registry-install -- @needle/fabric@<version>`.
+5. Push the release commit and tag to Forgejo:
+   `git push origin main --follow-tags`.
+
+The local `npm run smoke:clean-install` check remains useful for source and
+release-tarball behavior; it does not replace the post-publication registry
+check.
 
 ### Source repository
 
@@ -77,23 +94,16 @@ of `HEAD`, an empty install directory, and a sandboxed `$HOME` with no
 1. **Source build** — the README clone-and-build commands (`npm install`,
    `npm run build`, `npm run build:web`) and checks the generated artifacts
    (`dist/cli.js` with its shebang, `dist/web/public/` hashed bundles).
-2. **npm install (release-tarball substitute)** — `npm pack` (the package
-   ships `dist/` via the `files` whitelist and rebuilds it via `prepack`),
-   then installs the tarball into an empty project. This is the documented,
-   enforced substitute for `npm install -g @needle/fabric`: the registry path
-   itself is not exercised anywhere (the package is not on the public npm
-   registry, so no smoke or CI run can install it), and the substitute
-   enforces, against the installed tarball, exactly the facets a registry
-   install would exercise — the `fabric` bin link (npm's symlink shape,
-   resolving into the installed package the way a `-g` prefix bin does),
-   `--version` matching the installed package's version, the `--help`
-   command discovery contract, and the packaged web assets (hashed bundles
-   present in the installed tree). What a tarball install cannot cover is
-   registry-side: registry availability, install provenance, and whether a
-   *published* tarball would match a repo tag. On publish day, an isolated
-   registry install (`npm install -g @needle/fabric@<version>` in a scratch
-   prefix, checked for the same three facets) is the remaining manual check.
-3. **Runtime smoke** — every command `fabric --help` documents, exercised
+2. **npm install (release tarball)** — `npm pack` (the package ships
+   `dist/` via the `files` whitelist and rebuilds it via `prepack`), then
+   installs the tarball into an empty project. This verifies the local package
+   artifact's `fabric` bin link, `--version`, `--help` discovery, and
+   packaged web assets.
+3. **post-publication registry install** —
+   `npm run smoke:registry-install -- @needle/fabric@<version>` installs the
+   exact published version into a fresh temporary prefix and repeats the bin,
+   version, help, and web-asset checks against the artifact served by npm.
+4. **Runtime smoke** — every command `fabric --help` documents, exercised
    against the repo's JSONL fixtures inside a sandboxed `$HOME` (nothing
    touches a real `~/.needle/logs`):
    - `fabric logs` and `fabric tail` — both documented spellings: single-file

@@ -50,6 +50,30 @@ describe('npm packaging contract (README install workflows)', () => {
   it('declares a supported Node engine range', () => {
     expect(pkg.engines?.node).toMatch(/^>=18/);
   });
+
+  it('declares public release metadata for the scoped npm package', () => {
+    expect(pkg.author).toBe('Jed Arden <github@jedarden.com>');
+    expect(pkg.license).toBe('Apache-2.0');
+    expect(pkg.repository).toEqual({
+      type: 'git',
+      url: 'https://git.ardenone.com/jedarden/FABRIC.git',
+    });
+    expect(pkg.bugs?.url).toBe('https://git.ardenone.com/jedarden/FABRIC/issues');
+    expect(pkg.homepage).toBe('https://git.ardenone.com/jedarden/FABRIC#readme');
+    expect(pkg.publishConfig).toEqual({
+      access: 'public',
+      registry: 'https://registry.npmjs.org/',
+    });
+  });
+
+  it('wires the release gate, public publication, and registry smoke', () => {
+    expect(pkg.scripts?.['release:check']).toContain('npm test');
+    expect(pkg.scripts?.['release:publish']).toContain('npm publish --access public');
+    expect(pkg.scripts?.prepublishOnly).toBe('npm run release:check');
+    expect(pkg.scripts?.['smoke:registry-install']).toBe(
+      'bash scripts/smoke-registry-install.sh',
+    );
+  });
 });
 
 const distCliBuilt = () => existsSync(join(repoRoot, 'dist', 'cli.js'));

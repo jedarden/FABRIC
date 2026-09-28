@@ -11,11 +11,9 @@
 #                                + generated web asset checks
 #   Phase 3  package             npm pack (prepack rebuilds dist) + tarball
 #                                content checks
-#   Phase 4  npm install         release-tarball substitute for the README
-#                                "Install from npm" path — the registry
-#                                install is not exercised anywhere (the
-#                                package is not published): npm install
-#                                <tarball> into an empty project + bin-link
+#   Phase 4  npm install         release-tarball package-artifact check:
+#                                npm install <tarball> into an empty project
+#                                + bin-link
 #                                symlink resolution + --version matching the
 #                                installed package + --help contract + the
 #                                packaged web assets in the installed tree
@@ -197,7 +195,7 @@ pass "$(basename "$TARBALL") ships the CLI, web assets, and no source/scratch fi
 
 # --- Phase 4: npm install of the tarball (README npm workflow) -----------------
 
-phase "4/5 release-tarball install (published-package substitute)"
+phase "4/5 release-tarball install (local package artifact)"
 
 INSTALL="$WORK/install"
 mkdir -p "$INSTALL"
@@ -207,11 +205,9 @@ run_in "$INSTALL" "$OUT_DIR/npm-install-tarball.log" npm install "$TARBALL" --no
 BIN="$INSTALL/node_modules/.bin/fabric"
 PKG="$INSTALL/node_modules/@needle/fabric"
 
-# The published-package install (`npm install -g @needle/fabric` from a
-# registry) is not exercised anywhere — the package is not on the public npm
-# registry — so this phase is its documented release-tarball substitute
-# (README "Verifying the installation"). The checks below enforce, against
-# the installed tarball, the facets a registry install would exercise:
+# This phase checks the local release tarball artifact. The separate
+# scripts/smoke-registry-install.sh check installs the exact published package
+# from the npm registry after release.
 #
 #   bin linking       npm's symlink shape, resolving into the installed
 #                     package the way a -g prefix bin does
@@ -265,7 +261,7 @@ fi
 for opt in '--source' '--no-follow' '--event-type' '--json'; do
   printf '%s' "$TAIL_HELP" | grep -q -- "$opt" || fail "fabric tail --help does not document $opt"
 done
-pass "release-tarball substitute: bin symlink -> dist/cli.js; --version=$VERSION_OUT (= installed package version); --help lists tui/web/tail|logs; tail/logs help identical; hashed web assets in the installed tree"
+pass "release tarball: bin symlink -> dist/cli.js; --version=$VERSION_OUT (= installed package version); --help lists tui/web/tail|logs; tail/logs help identical; hashed web assets in the installed tree"
 
 # --- Phase 5: runtime smoke in a clean environment -----------------------------
 
