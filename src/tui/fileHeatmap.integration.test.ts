@@ -599,6 +599,56 @@ describe('FileHeatmap TUI integration (real store → real app → real componen
       expect(content).toContain('No file modifications detected');
       expect(content).toContain('Press [c] to show all files');
     });
+
+    it('returns to the normal file view when either filter is toggled off', () => {
+      const world = buildWorld();
+      const { t0 } = world;
+      seedViaApp(world.store, world.app, [
+        edit('w-alpha', 'work/shared.ts', t0 + 10000),
+        edit('w-bravo', 'work/shared.ts', t0 + 11000),
+        ...series('w-alpha', 'proj/config/settings.json', t0 + 20000, 2),
+        ...series('w-bravo', 'deploy/token.env', t0 + 30000, 2),
+      ]);
+
+      openHeatmap(world);
+      const c = heatKey(world, ['c']);
+      const a = heatKey(world, ['a']);
+
+      c();
+      world.app.render();
+      expect(world.heatmap.getCollisionFilter()).toBe(true);
+      expect(world.heatmap.getAnomalyFilter()).toBe(false);
+      expectRowOrder(rendered(world), ['work/shared.ts']);
+
+      // The second c press leaves collision-only mode, and the next app
+      // refresh must restore every file rather than the filtered row set.
+      c();
+      world.app.render();
+      expect(world.heatmap.getCollisionFilter()).toBe(false);
+      expectRowOrder(rendered(world), [
+        'work/shared.ts',
+        'proj/config/settings.json',
+        'deploy/token.env',
+      ]);
+      expect(rendered(world)).not.toContain('Collisions Only');
+
+      a();
+      expect(world.heatmap.getAnomalyFilter()).toBe(true);
+      expect(world.heatmap.getCollisionFilter()).toBe(false);
+      expect(rendered(world)).toContain('Anomalies Only');
+      expect(rendered(world)).not.toContain('work/shared.ts');
+
+      // The second a press returns to the restored file set without needing
+      // another event to arrive.
+      a();
+      expect(world.heatmap.getAnomalyFilter()).toBe(false);
+      expectRowOrder(rendered(world), [
+        'work/shared.ts',
+        'proj/config/settings.json',
+        'deploy/token.env',
+      ]);
+      expect(rendered(world)).not.toContain('Anomalies Only');
+    });
   });
 
   describe('anomaly and collision rendering', () => {
