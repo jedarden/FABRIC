@@ -144,9 +144,10 @@ The two successors that carry their legacy ID in the title (`fabric-7a8aa0c9`,
 
 ## Current Gaps (2026-09-28)
 
-plan.md marks Phases 1–9 complete. The bead store holds **97 open + 1 in_progress
-of 439 beads** (2026-09-28 ~13:00 UTC, machine-read from the bead checkpoint by
-`scripts/gap-inventory-check.mjs`; the authoritative live list is the generated
+plan.md marks Phases 1–9 complete. The bead store holds **96 open + 1 in_progress
+of 439 beads** (2026-09-28 ~13:20 UTC, machine-read from the bead checkpoint by
+`scripts/gap-inventory-check.mjs` after this pass closed superseded
+reconciliation bead `fabric-301ad288`; the authoritative live list is the generated
 inventory block below), dominated by verification/coverage hardening, not missing
 features. This refresh reclassifies the frontier — the 2026-09-26 edition mixed
 bugs, missing features, and already-landed work under one "gaps" heading. Every
@@ -212,7 +213,6 @@ fabric-1913db1c	open	2	Route digest command through resolveFromOptions/resolveSo
 fabric-2696154d	open	2	Create integration test for complete --source file workflow
 fabric-28421d4d	open	2	[Unravel] Implement AI digest provider module with env config and fallback contract — Land the escalation-counter fix: verified_success supersedes infra-failure and declined-SPLIT outcomes
 fabric-2c20fd74	open	2	Add liveness-guard exit and streak-reset contract tests for --max-events
-fabric-301ad288	open	2	Reconcile gap-analysis status with the live bead inventory
 fabric-33f892ca	open	2	Document baseline coverage metrics in artifact directory
 fabric-37c4b812	open	2	Add missing-host-attribute and legacy-source fallback contract tests
 fabric-37cdb6da	open	2	Set default digest source to ~/.needle/logs/ directory
@@ -495,7 +495,7 @@ fabric-cb4e1df8 (status reconciliation + repeatable refresh check — this pass)
 - docs/alert-policy.md — AlertManager policy (enforced end to end by closed `fabric-c0e278ee`)
 - scripts/gap-inventory-check.mjs — NEW this pass: the repeatable status-refresh/check (§0)
 - tests/gapInventoryCheck.test.ts — NEW this pass: pins the tool on fixtures and lints this document in the suite
-- Bead store: `bead list` — **97 open + 1 in_progress of 439** as of 2026-09-28 ~13:00 UTC, machine-read from the checkpoint by scripts/gap-inventory-check.mjs (435 at the ~06:10 reconciliation draft, +4 weave-era beads created since; `fabric-ac301879`, `fabric-8402deda`, `fabric-ade0e71c`, `fabric-d1e3d354` all closed in between); lineage beads `fabric-0c9aeb03`, `fabric-bd06ee99`, `fabric-166beca4`, `fabric-de6a9f72`, `fabric-aa4751af`, `fabric-6dafdf52`, `fabric-c0e278ee`, `fabric-c0413489`, `fabric-2f9fd906`, `fabric-2fd06cd1`/`fabric-f05a227a`/`fabric-b7b48295`, `fabric-9ca2871c`, `fabric-85212f76`, `fabric-14554e53`, `fabric-0538da5f`, `fabric-9c04e80b`, `fabric-e593b9ce`, `fabric-ac301879`, `fabric-8402deda`, `fabric-ade0e71c`, `fabric-d1e3d354` confirmed closed
+- Bead store: `bead list` — **97 open + 1 in_progress of 439** as of 2026-09-28 ~13:00 UTC (96 + 1 after this pass closed superseded bead `fabric-301ad288` at ~13:20), machine-read from the checkpoint by scripts/gap-inventory-check.mjs (435 at the ~06:10 reconciliation draft, +4 weave-era beads created since; `fabric-ac301879`, `fabric-8402deda`, `fabric-ade0e71c`, `fabric-d1e3d354` all closed in between); lineage beads `fabric-0c9aeb03`, `fabric-bd06ee99`, `fabric-166beca4`, `fabric-de6a9f72`, `fabric-aa4751af`, `fabric-6dafdf52`, `fabric-c0e278ee`, `fabric-c0413489`, `fabric-2f9fd906`, `fabric-2fd06cd1`/`fabric-f05a227a`/`fabric-b7b48295`, `fabric-9ca2871c`, `fabric-85212f76`, `fabric-14554e53`, `fabric-0538da5f`, `fabric-9c04e80b`, `fabric-e593b9ce`, `fabric-ac301879`, `fabric-8402deda`, `fabric-ade0e71c`, `fabric-d1e3d354` confirmed closed
 - Doc-vs-store status sweep: now **mechanical** — scripts/gap-inventory-check.mjs `--check` compares the generated inventory block against the store in both directions and lints every `fabric-*` id cited in this document; exit 0 at this refresh (the tool replaces the hand-asserted "zero mismatches" sweep of prior editions)
 - Code/commit claims re-verified: src/cli.ts digest `--source` declaration (:778), `resolveFromOptions` (:96), `DirectoryTailer` construction (:826); src/web/server.ts overload responses (:342/:379) and 3-strike liveness guard (:2137-2143); src/digestAi.ts present; busy-loop WIP patch (91,645 bytes); all 10 cited commits resolve (`52640c8`, `35b44b5`, `fd6c1de`, `66ee920`, `890f3ae`, `0f8363b`, `14e96e0`, `2b27660`, `0044710`, `b1e8567`)
 - Live service: `systemctl --user is-active fabric-web.service` (active), `GET /api/health` (`status:"ok"`, 10,000 events, 121 tailer files watched at ~13:05 UTC), `ss -tln` (:3000, :4318)
