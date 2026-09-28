@@ -430,7 +430,7 @@ fabric-bd06ee99 (2026-09-26 refresh) — CLOSED
 fabric-9ca2871c (2026-09-27/28 refresh) — CLOSED 2026-09-28 (epoch-3/4 refresh landed 659bff3)
 fabric-301ad288 (live-inventory reconciliation draft) — CLOSED as superseded by fabric-cb4e1df8 (same scope; work landed once)
 fabric-cb4e1df8 (status reconciliation + repeatable refresh check) — CLOSED
-fabric-14247d59 (live-checkpoint reconciliation — this pass) — closes with this pass
+fabric-14247d59 (live-checkpoint reconciliation — this pass) — IN_PROGRESS while closure is pending
 ├── fabric-931136a0 (tui --source busy-loop) — open BUG, root-caused (failure-count:4)
 │   ├── fabric-0386d35e (diagnosis umbrella — substance complete, close on the note)
 │   │   ├── fabric-675ead93 / fabric-cdbc3e3a / fabric-d541b07d (note-audit children) — open
