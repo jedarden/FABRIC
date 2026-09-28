@@ -49,7 +49,12 @@ import {
   compareEventsBySequence,
 } from './types.js';
 import { isWorkerStuck } from './tui/utils/stuckDetection.js';
-import { AlertManager, AlertRecord } from './alertManager.js';
+import {
+  AlertManager,
+  AlertRecord,
+  LegacyReconciliation,
+  ReconcileOptions,
+} from './alertManager.js';
 import { detectAnomalies, getAnomalyStats } from './tui/utils/fileAnomalyDetection.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
@@ -630,6 +635,26 @@ export class InMemoryEventStore implements EventStore {
    */
   getAlertHistory(): AlertRecord[] {
     return this.alertManager.history();
+  }
+
+  /**
+   * Replace alert state with a legacy snapshot, reconciled: duplicates closed
+   * into documented history, one active instance per identity preserved.
+   * See docs/alert-policy.md ("Legacy reconciliation").
+   */
+  restoreAlertRecords(
+    records: readonly AlertRecord[],
+    options?: ReconcileOptions
+  ): LegacyReconciliation {
+    return this.alertManager.restore(records, options);
+  }
+
+  /**
+   * Reconcile the live alert inventory in place (no-op when it already
+   * conforms — at most one active instance per identity).
+   */
+  reconcileLegacyAlerts(options?: ReconcileOptions): LegacyReconciliation {
+    return this.alertManager.reconcileLegacyDuplicates(options);
   }
 
   /**

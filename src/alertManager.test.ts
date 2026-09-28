@@ -11,7 +11,9 @@ import {
   alertIdentity,
   AlertManager,
   AlertRecord,
+  AlertStatus,
   DEFAULT_ALERT_COOLDOWN_MS,
+  reconcileLegacyAlerts,
 } from './alertManager.js';
 import { InMemoryEventStore } from './store.js';
 import { LogEvent } from './types.js';
@@ -270,6 +272,41 @@ describe('event store alert wiring', () => {
     expect(store.getActiveAlerts()).toHaveLength(0);
     expect(store.getAlertHistory()).toHaveLength(0);
   });
+
+  it('restoreAlertRecords reconciles legacy state and add() deduplicates into the survivor', () => {
+    // A pre-policy snapshot: two active no-work records for the same worker.
+    const canonical = legacy('no-work', 'w-alpha', RB, {
+      epoch: 1,
+      occurrences: 3,
+      lastNotifiedAt: RB,
+    });
+    const report = store.restoreAlertRecords([
+      canonical,
+      legacy('no-work', 'w-alpha', RB + MIN, { epoch: 2 }),
+    ]);
+    expect(report.duplicatesClosed).toBe(1);
+    expect(store.getActiveAlerts()).toHaveLength(1);
+    expect(store.getActiveAlerts()[0].id).toBe(canonical.id);
+
+    // The next live observation enters through add() — the single
+    // enforcement point — and folds into the survivor: the inventory stays
+    // one-active-per-identity from restore onward.
+    store.add({
+      ts: RB + 2 * MIN,
+      worker: 'w-alpha',
+      level: 'info',
+      msg: 'worker.queue_empty',
+    } as LogEvent);
+    const active = store.getActiveAlerts();
+    expect(active).toHaveLength(1);
+    expect(active[0].occurrences).toBe(5); // 3 + 1 duplicate fold + 1 live
+    expect(store.getAlertHistory()).toHaveLength(2); // closed duplicate + survivor
+
+    // Reconciling the now-conforming inventory is a documented no-op.
+    const noop = store.reconcileLegacyAlerts();
+    expect(noop.duplicatesClosed).toBe(0);
+    expect(store.getActiveAlerts()).toHaveLength(1);
+  });
 });
 
 describe('record shape', () => {
@@ -473,5 +510,296 @@ describe('event store alert policy end to end', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Legacy inventory reconciliation (docs/alert-policy.md)
+//
+// Inventories written before the dedup policy hold one record PER
+// OBSERVATION — many active alerts for the same worker. Reconciliation
+// audits such an inventory by identity and epoch, preserves the canonical
+// active record, closes duplicates as resolved history with a documented
+// reason, and leaves the inventory in the exact shape observe() expects so
+// every future observation deduplicates.
+// ─────────────────────────────────────────────────────────────────────────
+
+const RB = 1_800_000_000_000; // reconciliation-test base timestamp
+const MIN = 60_000;
+
+/** A legacy inventory row: identity/epoch optional (pre-policy rows lack them). */
+function legacy(
+  kind: AlertRecord['kind'],
+  scope: string,
+  createdAt: number,
+  overrides: Partial<AlertRecord> = {}
+): AlertRecord {
+  const status: AlertStatus = overrides.status ?? 'active';
+  return {
+    id: overrides.id ?? `${kind}:${scope}#${createdAt}`,
+    identity: overrides.identity ?? alertIdentity(kind, scope),
+    kind,
+    scope,
+    epoch: overrides.epoch ?? 0,
+    status,
+    createdAt,
+    firstObservedAt: overrides.firstObservedAt ?? createdAt,
+    lastObservedAt: overrides.lastObservedAt ?? createdAt,
+    resolvedAt: overrides.resolvedAt ?? (status === 'resolved' ? createdAt : null),
+    occurrences: overrides.occurrences ?? 1,
+    notifications: overrides.notifications ?? 1,
+    lastNotifiedAt: overrides.lastNotifiedAt ?? createdAt,
+    lastReason: overrides.lastReason ?? null,
+    resolutionNote: overrides.resolutionNote ?? (status === 'resolved' ? 'cleared' : null),
+  };
+}
+
+describe('legacy inventory reconciliation', () => {
+  it('audits a duplicate-laden inventory down to one active record per identity', () => {
+    // w-alpha's no-work condition was observed three times → three active
+    // "beads"; its stuck condition twice; w-bravo's old alert already resolved.
+    const alphaEarliest = legacy('no-work', 'w-alpha', RB, { epoch: 1, occurrences: 4 });
+    const alphaMiddle = legacy('no-work', 'w-alpha', RB + MIN, { epoch: 2 });
+    const alphaLatest = legacy('no-work', 'w-alpha', RB + 2 * MIN, {
+      epoch: 3,
+      lastObservedAt: RB + 2 * MIN,
+      lastReason: 'worker.exhausted',
+    });
+    const stuckEarliest = legacy('stuck', 'w-alpha', RB + 3 * MIN, { epoch: 1 });
+    const stuckLatest = legacy('stuck', 'w-alpha', RB + 4 * MIN, { epoch: 2 });
+    const bravoResolved = legacy('no-work', 'w-bravo', RB, { status: 'resolved' });
+
+    const { inventory, report } = reconcileLegacyAlerts([
+      alphaLatest,
+      alphaEarliest,
+      stuckLatest,
+      bravoResolved,
+      alphaMiddle,
+      stuckEarliest,
+    ]);
+
+    expect(report.recordsAudited).toBe(6);
+    expect(report.identitiesAudited).toBe(3);
+    expect(report.duplicatesClosed).toBe(3);
+    expect(report.activeInstancesAfter).toBe(2);
+
+    // The canonical active record per identity is the EARLIEST-CREATED one —
+    // the longest-standing record keeps its id.
+    const byId = new Map(inventory.map((r) => [r.id, r]));
+    expect(byId.get(alphaEarliest.id)?.status).toBe('active');
+    expect(byId.get(stuckEarliest.id)?.status).toBe('active');
+    expect(byId.get(bravoResolved.id)?.status).toBe('resolved');
+    expect(inventory.filter((r) => r.status === 'active').map((r) => r.id)).toEqual([
+      alphaEarliest.id,
+      stuckEarliest.id,
+    ]);
+
+    // The reconciliation report documents exactly what was folded where.
+    expect(report.reconciled).toContainEqual({
+      identity: 'no-work:w-alpha',
+      kind: 'no-work',
+      scope: 'w-alpha',
+      canonicalId: alphaEarliest.id,
+      closedIds: [alphaMiddle.id, alphaLatest.id],
+    });
+    expect(report.reconciled).toContainEqual({
+      identity: 'stuck:w-alpha',
+      kind: 'stuck',
+      scope: 'w-alpha',
+      canonicalId: stuckEarliest.id,
+      closedIds: [stuckLatest.id],
+    });
+
+    // Each closed duplicate carries a documented reason naming its canonical
+    // record — the audit trail a reader sees in the resolved history.
+    for (const dup of [alphaMiddle, alphaLatest, stuckLatest]) {
+      const closed = byId.get(dup.id)!;
+      expect(closed.status).toBe('resolved');
+      expect(closed.resolvedAt).toBeGreaterThan(0);
+      expect(closed.resolutionNote).toContain(`legacy duplicate of ${dup.kind}:${dup.scope}`);
+      expect(closed.resolutionNote).toContain('docs/alert-policy.md');
+    }
+  });
+
+  it('folds duplicate evidence into the canonical record', () => {
+    const earliest = legacy('no-work', 'w-alpha', RB, {
+      occurrences: 4,
+      notifications: 1,
+      firstObservedAt: RB,
+      lastObservedAt: RB + MIN,
+      lastReason: 'worker.queue_empty',
+    });
+    const middle = legacy('no-work', 'w-alpha', RB + MIN, { occurrences: 2 });
+    const latest = legacy('no-work', 'w-alpha', RB + 2 * MIN, {
+      occurrences: 1,
+      lastObservedAt: RB + 5 * MIN,
+      lastReason: 'worker.exhausted',
+    });
+
+    const { inventory, report } = reconcileLegacyAlerts([latest, earliest, middle]);
+    expect(report.duplicatesClosed).toBe(2);
+
+    const canonical = inventory.find((r) => r.status === 'active')!;
+    expect(canonical.id).toBe(earliest.id);
+    expect(canonical.createdAt).toBe(RB);
+    // Audit signal survives the fold: totals summed, window widened, evidence
+    // taken from the most recently observed duplicate.
+    expect(canonical.occurrences).toBe(7);
+    expect(canonical.notifications).toBe(3);
+    expect(canonical.firstObservedAt).toBe(RB);
+    expect(canonical.lastObservedAt).toBe(RB + 5 * MIN);
+    expect(canonical.lastReason).toBe('worker.exhausted');
+  });
+
+  it('never touches resolved history — only duplicate actives are closed', () => {
+    const resolved = legacy('stuck', 'w-alpha', RB, {
+      status: 'resolved',
+      epoch: 1,
+      resolutionNote: 'worker resumed progress',
+    });
+    const dupA = legacy('stuck', 'w-alpha', RB + MIN, { epoch: 2 });
+    const dupB = legacy('stuck', 'w-alpha', RB + 2 * MIN, { epoch: 3 });
+
+    const { inventory } = reconcileLegacyAlerts([dupB, dupA, resolved]);
+
+    const kept = inventory.find((r) => r.id === resolved.id)!;
+    expect(kept).toEqual(resolved); // byte-for-byte untouched
+    expect(inventory.filter((r) => r.resolutionNote === 'worker resumed progress')).toHaveLength(1);
+  });
+
+  it('is idempotent — reconciling its own output closes nothing', () => {
+    const legacyInventory = [
+      legacy('no-work', 'w-alpha', RB, { occurrences: 3 }),
+      legacy('no-work', 'w-alpha', RB + MIN, { occurrences: 2 }),
+      legacy('stuck', 'w-bravo', RB + 2 * MIN),
+    ];
+
+    const first = reconcileLegacyAlerts(legacyInventory, { at: RB + 9 * MIN });
+    const second = reconcileLegacyAlerts(first.inventory, { at: RB + 10 * MIN });
+
+    expect(second.report.duplicatesClosed).toBe(0);
+    expect(second.report.reconciled).toEqual([]);
+    expect(second.inventory).toEqual(first.inventory);
+  });
+
+  it('derives identity and epoch for pre-policy rows that lack them', () => {
+    // Rows from before the policy: no identity, no epoch — audit still groups
+    // them by (kind, scope) and derives epochs in creation order.
+    const rows = [
+      legacy('no-work', 'w-gamma', RB + 2 * MIN, { identity: '' }),
+      legacy('no-work', 'w-gamma', RB, { identity: '' }),
+      legacy('no-work', 'w-gamma', RB + MIN, { identity: '' }),
+    ];
+
+    const { inventory, report } = reconcileLegacyAlerts(rows);
+
+    expect(report.identitiesAudited).toBe(1);
+    expect(report.duplicatesClosed).toBe(2);
+    const canonical = inventory.find((r) => r.status === 'active')!;
+    expect(canonical.identity).toBe('no-work:w-gamma');
+    expect(canonical.createdAt).toBe(RB);
+    expect(canonical.epoch).toBe(1);
+    // Derived epochs are audit labels: creation order ranks them 1..3.
+    expect(inventory.map((r) => r.epoch)).toEqual([2, 3, 1]);
+  });
+
+  it('positions the canonical active record last so observe() folds into it', () => {
+    // Legacy epochs out of order, resolved row carrying the HIGHEST epoch.
+    const resolvedHighEpoch = legacy('no-work', 'w-alpha', RB, {
+      status: 'resolved',
+      epoch: 9,
+    });
+    const activeEarly = legacy('no-work', 'w-alpha', RB + MIN, { epoch: 1 });
+    const activeLate = legacy('no-work', 'w-alpha', RB + 2 * MIN, { epoch: 2 });
+
+    const { inventory } = reconcileLegacyAlerts([activeLate, resolvedHighEpoch, activeEarly]);
+
+    // Resolved history first (ascending), the active canonical LAST — the
+    // registry contract observe() relies on. Three records in, two resolved
+    // (the untouched epoch-9 history row and the closed duplicate), one live.
+    expect(inventory.map((r) => r.status)).toEqual(['resolved', 'resolved', 'active']);
+    expect(inventory[inventory.length - 1].id).toBe(activeEarly.id);
+  });
+});
+
+describe('AlertManager legacy restore and live reconciliation', () => {
+  it('restore() reconciles a legacy snapshot and future observations deduplicate into the survivor', () => {
+    const clock = makeClock();
+    const mgr = new AlertManager({ now: clock });
+
+    const alphaEarliest = legacy('no-work', 'w-alpha', RB, {
+      epoch: 1,
+      occurrences: 5,
+      lastNotifiedAt: RB,
+    });
+    const bravoActive = legacy('stuck', 'w-bravo', RB + 3 * MIN, { epoch: 1 });
+    const legacyInventory = [
+      alphaEarliest,
+      legacy('no-work', 'w-alpha', RB + MIN, { epoch: 2 }),
+      legacy('no-work', 'w-alpha', RB + 2 * MIN, { epoch: 3 }),
+      bravoActive,
+    ];
+    const report = mgr.restore(legacyInventory);
+
+    expect(report.duplicatesClosed).toBe(2);
+    expect(mgr.activeAlerts().map((r) => r.id)).toEqual([
+      alphaEarliest.id,
+      bravoActive.id,
+    ]);
+    // Evidence folded: 5 + 1 + 1 duplicate observations survive as 7.
+    expect(mgr.activeAlerts()[0].occurrences).toBe(7);
+
+    // The point of the reconciliation: the next observation of the same
+    // condition folds into the CANONICAL record — no new epoch, no new bead.
+    const folded = mgr.observe('no-work', 'w-alpha', { at: RB + 3 * MIN });
+    expect(folded.outcome).toBe('deduplicated');
+    expect(folded.alert.id).toBe(alphaEarliest.id);
+    expect(folded.alert.occurrences).toBe(8);
+    expect(folded.alert.epoch).toBe(1);
+    expect(mgr.activeAlerts()).toHaveLength(2);
+    expect(mgr.history()).toHaveLength(4); // 2 closed dups + 2 active survivors
+  });
+
+  it('restore() preserves recurrence semantics — a resolved tail reopens on observe', () => {
+    const mgr = new AlertManager({ now: makeClock() });
+
+    // Snapshot where the newest record is RESOLVED: the worker had recovered
+    // when the snapshot was taken. The first observation afterwards must
+    // open a NEW epoch, never resurrect the resolved record.
+    const resolved = legacy('no-work', 'w-alpha', RB, {
+      status: 'resolved',
+      epoch: 1,
+      resolutionNote: 'worker claimed a bead',
+    });
+    mgr.restore([resolved]);
+
+    const recurred = mgr.observe('no-work', 'w-alpha', { at: RB + MIN });
+    expect(recurred.outcome).toBe('new-epoch');
+    expect(recurred.alert.epoch).toBe(2);
+    expect(recurred.alert.id).not.toBe(resolved.id);
+    expect(recurred.previous?.id).toBe(resolved.id);
+    // Resolved history is untouched by the restore or the recurrence.
+    expect(resolved.status).toBe('resolved');
+    expect(resolved.resolutionNote).toBe('worker claimed a bead');
+    expect(mgr.history().filter((r) => r.status === 'resolved')).toHaveLength(1);
+  });
+
+  it('reconcileLegacyDuplicates() leaves a conforming registry untouched', () => {
+    const clock = makeClock();
+    const mgr = new AlertManager({ now: clock });
+    const live = mgr.observe('no-work', 'w-alpha');
+    mgr.observe('no-work', 'w-alpha');
+    const stuck = mgr.observe('stuck', 'w-bravo');
+
+    const report = mgr.reconcileLegacyDuplicates();
+
+    expect(report.duplicatesClosed).toBe(0);
+    expect(report.reconciled).toEqual([]);
+    expect(mgr.activeAlerts().map((r) => r.id)).toEqual([live.alert.id, stuck.alert.id]);
+
+    // The registry keeps working normally after a no-op reconciliation.
+    const again = mgr.observe('no-work', 'w-alpha');
+    expect(again.outcome).toBe('deduplicated');
+    expect(again.alert.id).toBe(live.alert.id);
   });
 });

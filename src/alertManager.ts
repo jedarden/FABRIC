@@ -120,6 +120,179 @@ export function alertIdentity(kind: AlertKind, scope: string): string {
   return `${kind}:${scope}`;
 }
 
+// ─── Legacy inventory reconciliation ────────────────────────────────────────
+//
+// Inventories written before this policy (or imported from a non-deduplicating
+// source) can hold MANY active records for one `kind:scope` — one per
+// observation. Reconciliation audits such an inventory by identity and epoch,
+// preserves the canonical active record, closes the duplicates as resolved
+// history with a documented reason, and leaves the inventory in the exact
+// shape `observe()` expects, so every future observation deduplicates.
+
+/** Result of reconciling one identity that held more than one active record. */
+export interface ReconciledIdentity {
+  readonly identity: string;
+  readonly kind: AlertKind;
+  readonly scope: string;
+  /** The preserved active instance (earliest-created of the duplicates). */
+  readonly canonicalId: string;
+  /** Duplicate active instances closed as resolved history. */
+  readonly closedIds: readonly string[];
+}
+
+/** Report for one legacy-inventory reconciliation pass. */
+export interface LegacyReconciliation {
+  /** Total records audited. */
+  readonly recordsAudited: number;
+  /** Distinct identities found in the inventory. */
+  readonly identitiesAudited: number;
+  /** Active duplicate records closed (0 when the inventory already conforms). */
+  readonly duplicatesClosed: number;
+  /** Active instances remaining — at most one per identity. */
+  readonly activeInstancesAfter: number;
+  /** Per-identity actions; only identities that had >1 active record. */
+  readonly reconciled: readonly ReconciledIdentity[];
+}
+
+export interface ReconcileOptions {
+  /** Resolution time (ms epoch) stamped on closed duplicates. Default Date.now(). */
+  at?: number;
+}
+
+/**
+ * Close one legacy duplicate as resolved history pointing at the canonical
+ * instance. The note is the documented reason a reader sees in the record.
+ */
+function closeDuplicate(dup: AlertRecord, canonicalId: string, at: number): AlertRecord {
+  return {
+    ...dup,
+    status: 'resolved',
+    resolvedAt: at,
+    resolutionNote: `legacy duplicate of ${canonicalId} — closed by inventory reconciliation (one active alert per identity; docs/alert-policy.md §2)`,
+  };
+}
+
+/**
+ * Reconcile a legacy alert inventory (pure — the input is never mutated).
+ *
+ * - Audit: records group by `identity` (derived via `alertIdentity(kind,
+ *   scope)` when a legacy row has none) and order by epoch, then createdAt
+ *   (epoch is derived from createdAt order when a legacy row lacks it).
+ * - Canonical: of an identity's active records, the earliest-created is the
+ *   canonical instance and keeps its id, createdAt, and epoch.
+ * - Duplicates: every other active record is closed — `status: 'resolved'`,
+ *   `resolvedAt` stamped, `resolutionNote` naming the canonical id — and its
+ *   evidence folds into the canonical record (occurrence/notification counts
+ *   summed, first/lastObservedAt min/max, lastReason from the most recent).
+ * - Resolved history is never touched; only duplicate ACTIVES are closed.
+ * - Output shape: per identity, resolved epochs first (ascending) and the
+ *   canonical ACTIVE instance LAST — the position `observe()` reads, so
+ *   subsequent observations fold into it instead of opening a new epoch.
+ *
+ * Idempotent: reconciling its own output closes zero duplicates.
+ */
+export function reconcileLegacyAlerts(
+  records: readonly AlertRecord[],
+  options: ReconcileOptions = {}
+): { inventory: AlertRecord[]; report: LegacyReconciliation } {
+  const at = options.at ?? Date.now();
+
+  // Group by identity, preserving input order of first appearance is not
+  // needed — sort identities at the end for a deterministic inventory.
+  const byIdentity = new Map<string, AlertRecord[]>();
+  for (const raw of records) {
+    // Pre-policy rows may carry no identity — derive it from the condition.
+    const r: AlertRecord = { ...raw, identity: raw.identity || alertIdentity(raw.kind, raw.scope) };
+    const epochs = byIdentity.get(r.identity) ?? [];
+    epochs.push(r);
+    byIdentity.set(r.identity, epochs);
+  }
+
+  const inventory: AlertRecord[] = [];
+  const reconciled: ReconciledIdentity[] = [];
+  let duplicatesClosed = 0;
+
+  for (const identity of [...byIdentity.keys()].sort()) {
+    const epochs = byIdentity.get(identity)!;
+    // Order by epoch then createdAt; rows missing an epoch (<=0) rank by
+    // createdAt among themselves, ahead of numbered epochs.
+    epochs.sort((a, b) => a.epoch - b.epoch || a.createdAt - b.createdAt);
+    // Derive a 1-based epoch for rows that lack one: the previous row's
+    // epoch + 1. Derived numbers are audit labels only — ids stay the keys,
+    // and observe() counts epochs positionally, so derivation never affects
+    // which instance is active.
+    for (let i = 0; i < epochs.length; i++) {
+      if (!(epochs[i].epoch > 0)) {
+        const prev = i > 0 ? epochs[i - 1].epoch : 0;
+        epochs[i] = { ...epochs[i], epoch: prev + 1 };
+      }
+    }
+
+    const { active, resolved } = epochs.reduce(
+      (acc, r) => {
+        (r.status === 'active' ? acc.active : acc.resolved).push(r);
+        return acc;
+      },
+      { active: [] as AlertRecord[], resolved: [] as AlertRecord[] }
+    );
+
+    let canonical = active[0];
+    if (active.length > 1) {
+      // Canonical = earliest-created active record; tie-break on epoch order.
+      canonical = [...active].sort(
+        (a, b) => a.createdAt - b.createdAt || a.epoch - b.epoch
+      )[0];
+      const dups = active.filter((r) => r !== canonical);
+
+      // Fold duplicate evidence into the canonical instance so the audit
+      // signal survives the fold; identity fields stay canonical's.
+      const mostRecent = [...active].sort((a, b) => a.lastObservedAt - b.lastObservedAt).pop()!;
+      for (const dup of dups) {
+        canonical.occurrences += dup.occurrences;
+        canonical.notifications += dup.notifications;
+        canonical.firstObservedAt = Math.min(canonical.firstObservedAt, dup.firstObservedAt);
+        canonical.lastObservedAt = Math.max(canonical.lastObservedAt, dup.lastObservedAt);
+      }
+      canonical.lastReason = mostRecent.lastReason;
+
+      const closedIds: string[] = [];
+      for (const dup of dups) {
+        resolved.push(closeDuplicate(dup, canonical.id, at));
+        closedIds.push(dup.id);
+      }
+      duplicatesClosed += dups.length;
+      reconciled.push({
+        identity,
+        kind: canonical.kind,
+        scope: canonical.scope,
+        canonicalId: canonical.id,
+        closedIds,
+      });
+    }
+
+    // Resolved epochs first (ascending), canonical active LAST — observe()
+    // folds into epochs[epochs.length - 1], so the active record must end
+    // the identity's list even when legacy epochs were out of order.
+    resolved.sort((a, b) => a.epoch - b.epoch || a.createdAt - b.createdAt);
+    inventory.push(...resolved);
+    if (canonical) {
+      inventory.push(canonical);
+    }
+  }
+
+  const activeInstancesAfter = inventory.filter((r) => r.status === 'active').length;
+  return {
+    inventory,
+    report: {
+      recordsAudited: records.length,
+      identitiesAudited: byIdentity.size,
+      duplicatesClosed,
+      activeInstancesAfter,
+      reconciled,
+    },
+  };
+}
+
 /**
  * Deduplicating alert registry. See the module header for the policy.
  */
@@ -239,5 +412,36 @@ export class AlertManager {
   /** Drop all state (used by the event store's clear()). */
   clear(): void {
     this.instances.clear();
+  }
+
+  /**
+   * Replace registry state with a legacy snapshot, reconciled. This is the
+   * ingest step for any inventory written before the dedup policy (persisted
+   * state, an import from a non-deduplicating source): duplicates are closed
+   * into documented history and exactly one active instance per identity
+   * survives, so subsequent observations deduplicate into it. The input is
+   * never mutated.
+   */
+  restore(
+    records: readonly AlertRecord[],
+    options: ReconcileOptions = {}
+  ): LegacyReconciliation {
+    const { inventory, report } = reconcileLegacyAlerts(records, options);
+    this.instances.clear();
+    for (const record of inventory) {
+      const epochs = this.instances.get(record.identity) ?? [];
+      epochs.push(record);
+      this.instances.set(record.identity, epochs);
+    }
+    return report;
+  }
+
+  /**
+   * Reconcile this registry's own state in place — audits every identity and
+   * folds multiple active instances into one (see `reconcileLegacyAlerts`).
+   * A conforming registry is left untouched (zero duplicates closed).
+   */
+  reconcileLegacyDuplicates(options: ReconcileOptions = {}): LegacyReconciliation {
+    return this.restore(this.history(), options);
   }
 }
