@@ -128,6 +128,15 @@ the stable `AlertRecord.id` (`<kind>:<scope>#<epoch>`):
 - resolution closes the instance bead with its resolution note; and
 - recurrence files the next epoch while leaving the closed epoch immutable.
 
+The filer also enforces the identity at the creation boundary. If a repeated
+or concurrent producer arrives with a different instance id while an open row
+already exists for the same `kind:scope`, the existing row is used as the
+canonical bead and any other open rows for that identity are closed after their
+evidence is folded into it. A resolution applies the same identity-level rule,
+including legacy rows that do not carry the current stable instance id. This
+makes the normal ingest path safe even when an explicit reconciliation pass
+has not run yet.
+
 `GET /api/alerts/beads` exposes the open and closed filed-bead inventory.
 `POST /api/alerts/beads/reconcile` (authenticated) folds a legacy duplicate
 inventory down to one open bead per active instance, preserves the canonical

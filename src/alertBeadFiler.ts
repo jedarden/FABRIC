@@ -253,25 +253,140 @@ export class AlertBeadFiler {
     }
 
     if (!existing) {
+      const openForIdentity = this.openBeadsForIdentity(record.identity);
+
+      // A normal observation from another producer can arrive with the same
+      // condition but a different instance id. Treat the already-open
+      // identity as the canonical bead instead of creating a second one.
+      // A genuine recurrence is different: its previous epoch has resolved,
+      // so the new epoch is authoritative and any stale open legacy rows are
+      // closed below.
+      if (openForIdentity.length > 0 && result.outcome !== 'new-epoch') {
+        const canonical = this.canonicalOpenBead(openForIdentity);
+        const repaired = this.foldAndCloseDuplicates(
+          canonical,
+          openForIdentity.filter((bead) => bead.id !== canonical.id),
+          at
+        );
+        const evidence = this.foldRegistryEvidence(record, repaired);
+        const patch = this.observationPatch(record, repaired, evidence, result.outcome === 'escalated');
+        this.sink.updateBead(repaired.id, patch);
+        return { action: 'updated', bead: { ...repaired, ...patch } };
+      }
+
       const bead = beadFromRecord(record, at);
       this.sink.fileBead(bead);
       this.rememberRegistryEvidence(record);
-      return { action: 'filed', bead };
+      const filed = this.sink.getBead(record.id) ?? bead;
+
+      // A new epoch must never leave an old, duplicate open row behind. This
+      // also handles a resolution that was delivered after the recurrence.
+      const staleOpen = this.openBeadsForIdentity(record.identity).filter(
+        (openBead) => openBead.id !== filed.id
+      );
+      if (staleOpen.length > 0) {
+        this.foldAndCloseDuplicates(filed, staleOpen, at);
+      }
+      return { action: 'filed', bead: this.sink.getBead(record.id) ?? filed };
     }
 
-    const escalated = result.outcome === 'escalated';
-    const evidence = this.foldRegistryEvidence(record, existing);
+    const canonical = this.foldAndCloseDuplicates(
+      existing,
+      this.openBeadsForIdentity(record.identity).filter((bead) => bead.id !== existing.id),
+      at
+    );
+    const evidence = this.foldRegistryEvidence(record, canonical);
+    const patch = this.observationPatch(record, canonical, evidence, result.outcome === 'escalated');
+    this.sink.updateBead(canonical.id, patch);
+    return { action: 'updated', bead: { ...canonical, ...patch } };
+  }
+
+  /** Return the open rows for one condition, independent of instance id. */
+  private openBeadsForIdentity(identity: string): AlertBead[] {
+    return this.sink.listBeads().filter(
+      (bead) => bead.status === 'open' && bead.identity === identity
+    );
+  }
+
+  /** Prefer the oldest open row when repairing a legacy duplicate inventory. */
+  private canonicalOpenBead(beads: readonly AlertBead[]): AlertBead {
+    return [...beads].sort((a, b) => a.filedAt - b.filedAt || a.id.localeCompare(b.id))[0];
+  }
+
+  /**
+   * Fold duplicate evidence into the chosen row and close the extras. This is
+   * deliberately used by normal emission as well as explicit reconciliation:
+   * the creation boundary must remain safe when repair has not run yet.
+   */
+  private foldAndCloseDuplicates(
+    canonical: AlertBead,
+    duplicates: readonly AlertBead[],
+    at: number
+  ): AlertBead {
+    if (duplicates.length === 0) return canonical;
+
+    const mostRecent = [...duplicates, canonical].sort(
+      (a, b) => a.lastObservedAt - b.lastObservedAt
+    ).pop()!;
+    let occurrences = canonical.occurrences;
+    let notifications = canonical.notifications;
+    let lastObservedAt = canonical.lastObservedAt;
+    let lastEscalatedAt = canonical.lastEscalatedAt;
+    for (const duplicate of duplicates) {
+      occurrences += duplicate.occurrences;
+      notifications += duplicate.notifications;
+      lastObservedAt = Math.max(lastObservedAt, duplicate.lastObservedAt);
+      if (
+        duplicate.lastEscalatedAt !== null &&
+        (lastEscalatedAt === null || duplicate.lastEscalatedAt > lastEscalatedAt)
+      ) {
+        lastEscalatedAt = duplicate.lastEscalatedAt;
+      }
+    }
+    this.sink.updateBead(canonical.id, {
+      occurrences,
+      notifications,
+      lastObservedAt,
+      lastReason: mostRecent.lastReason,
+      lastEscalatedAt,
+    });
+
+    for (const duplicate of duplicates) {
+      this.sink.closeBead(
+        duplicate.id,
+        `duplicate of ${canonical.id} — closed by bead-creation boundary ` +
+          `(one open bead per active alert identity; docs/alert-policy.md §Bead emission)`,
+        at
+      );
+      this.registryEvidence.delete(duplicate.id);
+    }
+    return this.sink.getBead(canonical.id) ?? {
+      ...canonical,
+      occurrences,
+      notifications,
+      lastObservedAt,
+      lastReason: mostRecent.lastReason,
+      lastEscalatedAt,
+    };
+  }
+
+  private observationPatch(
+    record: AlertRecord,
+    existing: AlertBead,
+    evidence: { occurrences: number; notifications: number },
+    escalated: boolean
+  ): AlertBeadPatch {
+    const isNewer = record.lastObservedAt >= existing.lastObservedAt;
     const patch: AlertBeadPatch = {
       occurrences: evidence.occurrences,
       notifications: evidence.notifications,
-      lastObservedAt: record.lastObservedAt,
-      lastReason: record.lastReason,
+      lastObservedAt: Math.max(existing.lastObservedAt, record.lastObservedAt),
+      lastReason: isNewer ? record.lastReason : existing.lastReason,
     };
     if (escalated) {
-      patch.lastEscalatedAt = record.lastNotifiedAt;
+      patch.lastEscalatedAt = Math.max(existing.lastEscalatedAt ?? 0, record.lastNotifiedAt);
     }
-    this.sink.updateBead(record.id, patch);
-    return { action: 'updated', bead: { ...existing, ...patch } };
+    return patch;
   }
 
   private rememberRegistryEvidence(record: AlertRecord): void {
@@ -287,11 +402,16 @@ export class AlertBeadFiler {
   ): { occurrences: number; notifications: number } {
     const previous = this.registryEvidence.get(record.id);
     if (!previous) {
-      // A foreign/pre-policy bead may already contain folded evidence. Keep
-      // it, while establishing the registry's baseline for future deltas.
+      // A foreign/pre-policy bead may already contain folded evidence. A
+      // strictly newer observation is new evidence and is added; an equal or
+      // older timestamp is treated as a concurrent/replayed delivery and is
+      // folded idempotently with max().
       this.rememberRegistryEvidence(record);
       return {
-        occurrences: Math.max(existing.occurrences, record.occurrences),
+        occurrences:
+          record.lastObservedAt > existing.lastObservedAt
+            ? existing.occurrences + record.occurrences
+            : Math.max(existing.occurrences, record.occurrences),
         notifications: Math.max(existing.notifications, record.notifications),
       };
     }
@@ -314,10 +434,44 @@ export class AlertBeadFiler {
       return { action: 'ignored', bead: null };
     }
     const bead = this.sink.getBead(record.id);
-    if (!bead || bead.status === 'closed') {
-      return { action: 'ignored', bead: bead ?? null };
+    if (bead?.status === 'closed') {
+      return { action: 'ignored', bead };
+    }
+    if (!bead) {
+      // A pre-policy inventory may not contain the registry's stable instance
+      // id at all. Resolution still applies to the identity, so close those
+      // legacy rows rather than leaving an apparently active alert behind.
+      const legacyOpen = this.openBeadsForIdentity(record.identity);
+      if (legacyOpen.length === 0) {
+        return { action: 'ignored', bead: null };
+      }
+      for (const legacy of legacyOpen) {
+        this.sink.closeBead(
+          legacy.id,
+          record.resolutionNote ??
+            `closed with alert resolution for ${record.identity} (docs/alert-policy.md §4)`,
+          record.resolvedAt ?? at
+        );
+        this.registryEvidence.delete(legacy.id);
+      }
+      return { action: 'closed', bead: this.sink.getBead(legacyOpen[0].id) ?? null };
     }
     this.sink.closeBead(record.id, record.resolutionNote, record.resolvedAt ?? at);
+    // Resolution is an identity-level transition. Close any legacy duplicate
+    // rows as well, so a condition cannot stay open merely because its
+    // duplicate was created before the filer was installed.
+    const duplicates = this.openBeadsForIdentity(record.identity).filter(
+      (openBead) => openBead.id !== record.id
+    );
+    for (const duplicate of duplicates) {
+      this.sink.closeBead(
+        duplicate.id,
+        `duplicate of ${record.id} — closed with alert resolution ` +
+          `(one open bead per active alert identity; docs/alert-policy.md §Bead emission)`,
+        record.resolvedAt ?? at
+      );
+      this.registryEvidence.delete(duplicate.id);
+    }
     return { action: 'closed', bead: this.sink.getBead(record.id) ?? null };
   }
 

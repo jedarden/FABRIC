@@ -212,6 +212,46 @@ describe('AlertBeadFiler lifecycle', () => {
     expect(open()[0].occurrences).toBe(1);
   });
 
+  it('enforces identity uniqueness while filing into a legacy duplicate inventory', () => {
+    seedOpenBead(sink, 'legacy-1', 'no-work:w-alpha', BASE);
+    seedOpenBead(sink, 'legacy-2', 'no-work:w-alpha', BASE + MIN, {
+      occurrences: 2,
+      lastObservedAt: BASE + MIN,
+    });
+
+    const observed = mgr.observe('no-work', 'w-alpha', { at: BASE + 2 * MIN });
+    const emission = filer.emitObservation(observed, BASE + 2 * MIN);
+
+    expect(emission.action).toBe('updated');
+    expect(open()).toHaveLength(1);
+    expect(sink.getBead('legacy-1')).toMatchObject({
+      status: 'open',
+      occurrences: 4,
+      lastObservedAt: BASE + 2 * MIN,
+    });
+    expect(sink.getBead('legacy-2')).toMatchObject({
+      status: 'closed',
+      closeNote: expect.stringContaining('bead-creation boundary'),
+    });
+  });
+
+  it('keeps concurrent producers at one open bead for one identity', async () => {
+    const leftSink = sink;
+    const rightFiler = new AlertBeadFiler(leftSink);
+    const rightManager = new AlertManager({ now: () => now });
+    const leftObservation = mgr.observe('no-work', 'w-alpha', { at: now });
+    const rightObservation = rightManager.observe('no-work', 'w-alpha', { at: now });
+
+    await Promise.all([
+      Promise.resolve().then(() => filer.emitObservation(leftObservation, now)),
+      Promise.resolve().then(() => rightFiler.emitObservation(rightObservation, now)),
+    ]);
+
+    expect(open()).toHaveLength(1);
+    expect(sink.listBeads().filter((bead) => bead.identity === 'no-work:w-alpha'))
+      .toHaveLength(1);
+  });
+
   it('ignores an observation naming a closed bead — no resurrection', () => {
     const first = mgr.observe('no-work', 'w-alpha', { at: now });
     filer.emitObservation(first, now);
@@ -397,6 +437,23 @@ describe('event store alert bead emission', () => {
       status: 'open',
       occurrences: 5,
       notifications: 1,
+    });
+  });
+
+  it('keeps an event-loop-concurrent no-work burst at one open bead', async () => {
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        Promise.resolve().then(() =>
+          addEvent({ ts: BASE + i, msg: i % 2 === 0 ? 'worker.queue_empty' : 'worker.exhausted' })
+        )
+      )
+    );
+
+    const open = store.getAlertBeads().filter((bead) => bead.status === 'open');
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({
+      identity: 'no-work:w-alpha',
+      occurrences: 20,
     });
   });
 
