@@ -11,9 +11,14 @@
 #                                + generated web asset checks
 #   Phase 3  package             npm pack (prepack rebuilds dist) + tarball
 #                                content checks
-#   Phase 4  npm install         README "Install from npm" equivalent:
-#                                npm install <tarball> into an empty project
-#                                + bin link + --version/--help contract
+#   Phase 4  npm install         release-tarball substitute for the README
+#                                "Install from npm" path — the registry
+#                                install is not exercised anywhere (the
+#                                package is not published): npm install
+#                                <tarball> into an empty project + bin-link
+#                                symlink resolution + --version matching the
+#                                installed package + --help contract + the
+#                                packaged web assets in the installed tree
 #   Phase 5  runtime smoke       clean environment (sandboxed $HOME, no ~/.needle):
 #                                fabric logs   single-file parse, directory hot-add,
 #                                              graceful SIGINT
@@ -192,7 +197,7 @@ pass "$(basename "$TARBALL") ships the CLI, web assets, and no source/scratch fi
 
 # --- Phase 4: npm install of the tarball (README npm workflow) -----------------
 
-phase "4/5 npm install of tarball (README: npm install @needle/fabric equivalent)"
+phase "4/5 release-tarball install (published-package substitute)"
 
 INSTALL="$WORK/install"
 mkdir -p "$INSTALL"
@@ -202,15 +207,43 @@ run_in "$INSTALL" "$OUT_DIR/npm-install-tarball.log" npm install "$TARBALL" --no
 BIN="$INSTALL/node_modules/.bin/fabric"
 PKG="$INSTALL/node_modules/@needle/fabric"
 
-if [ ! -x "$BIN" ]; then fail "installed package has no executable fabric bin link"; fi
+# The published-package install (`npm install -g @needle/fabric` from a
+# registry) is not exercised anywhere — the package is not on the public npm
+# registry — so this phase is its documented release-tarball substitute
+# (README "Verifying the installation"). The checks below enforce, against
+# the installed tarball, the facets a registry install would exercise:
+#
+#   bin linking       npm's symlink shape, resolving into the installed
+#                     package the way a -g prefix bin does
+#   packaged assets   the installed tree ships the built web assets — the
+#                     hashed bundles included, not just the referencing index
+#   version output    the installed CLI reports the installed package's version
+#   --help discovery  the primary commands are listed (checked below)
+
+if [ ! -L "$BIN" ] || [ ! -x "$BIN" ]; then
+  fail "installed package has no executable fabric bin symlink (npm bin-link shape changed)"
+fi
+RESOLVED_BIN="$(readlink -f "$BIN")"
+if [ "$RESOLVED_BIN" != "$PKG/dist/cli.js" ]; then
+  fail "fabric bin link resolves to $RESOLVED_BIN, not $PKG/dist/cli.js"
+fi
 if [ ! -f "$PKG/dist/cli.js" ]; then fail "installed package missing dist/cli.js"; fi
 if [ ! -f "$PKG/dist/web/public/index.html" ]; then
   fail "installed package missing generated web assets"
 fi
+for ASSET in 'index-*.js' 'index-*.css'; do
+  if [ -z "$(find "$PKG/dist/web/public/assets" -name "$ASSET" -print -quit 2>/dev/null)" ]; then
+    fail "installed package missing hashed $ASSET bundle in dist/web/public/assets"
+  fi
+done
 
 VERSION_OUT="$("$BIN" --version)"
 if ! printf '%s' "$VERSION_OUT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
   fail "fabric --version did not print a semver (got: $VERSION_OUT)"
+fi
+PKG_VERSION="$(node -p "require('$PKG/package.json').version")"
+if [ "$VERSION_OUT" != "$PKG_VERSION" ]; then
+  fail "fabric --version ($VERSION_OUT) does not match the installed package version ($PKG_VERSION)"
 fi
 
 HELP_OUT="$("$BIN" --help)"
@@ -232,7 +265,7 @@ fi
 for opt in '--source' '--no-follow' '--event-type' '--json'; do
   printf '%s' "$TAIL_HELP" | grep -q -- "$opt" || fail "fabric tail --help does not document $opt"
 done
-pass "bin link works; --version=$VERSION_OUT; --help lists tui/web/tail|logs; tail/logs help identical"
+pass "release-tarball substitute: bin symlink -> dist/cli.js; --version=$VERSION_OUT (= installed package version); --help lists tui/web/tail|logs; tail/logs help identical; hashed web assets in the installed tree"
 
 # --- Phase 5: runtime smoke in a clean environment -----------------------------
 

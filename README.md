@@ -49,6 +49,14 @@ npm run build
 npm run build:web
 ```
 
+**Publishing status:** `@needle/fabric` is not yet published to the public npm
+registry, so the registry install above takes effect only on publish day.
+Until then the verified installation paths are the source build above and the
+release tarball: `npm run smoke:clean-install` packs the package and installs
+that tarball as the **enforced substitute** for the registry install — see
+"Verifying the installation" for what the substitute covers, and what it
+cannot.
+
 ### Source repository
 
 The canonical repository is **Forgejo**: `https://git.ardenone.com/jedarden/FABRIC`. Clone from it, and push to it — `origin` points there, and all development commits land on `main`.
@@ -69,11 +77,22 @@ of `HEAD`, an empty install directory, and a sandboxed `$HOME` with no
 1. **Source build** — the README clone-and-build commands (`npm install`,
    `npm run build`, `npm run build:web`) and checks the generated artifacts
    (`dist/cli.js` with its shebang, `dist/web/public/` hashed bundles).
-2. **npm install** — `npm pack` (the package ships `dist/` via the `files`
-   whitelist and rebuilds it via `prepack`), then installs the tarball into an
-   empty project, approximating `npm install -g @needle/fabric` without
-   touching the global prefix. Checks the `fabric` bin link plus the
-   `--version` / `--help` contract.
+2. **npm install (release-tarball substitute)** — `npm pack` (the package
+   ships `dist/` via the `files` whitelist and rebuilds it via `prepack`),
+   then installs the tarball into an empty project. This is the documented,
+   enforced substitute for `npm install -g @needle/fabric`: the registry path
+   itself is not exercised anywhere (the package is not on the public npm
+   registry, so no smoke or CI run can install it), and the substitute
+   enforces, against the installed tarball, exactly the facets a registry
+   install would exercise — the `fabric` bin link (npm's symlink shape,
+   resolving into the installed package the way a `-g` prefix bin does),
+   `--version` matching the installed package's version, the `--help`
+   command discovery contract, and the packaged web assets (hashed bundles
+   present in the installed tree). What a tarball install cannot cover is
+   registry-side: registry availability, install provenance, and whether a
+   *published* tarball would match a repo tag. On publish day, an isolated
+   registry install (`npm install -g @needle/fabric@<version>` in a scratch
+   prefix, checked for the same three facets) is the remaining manual check.
 3. **Runtime smoke** — every command `fabric --help` documents, exercised
    against the repo's JSONL fixtures inside a sandboxed `$HOME` (nothing
    touches a real `~/.needle/logs`):

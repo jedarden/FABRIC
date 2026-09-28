@@ -27,6 +27,9 @@
  *   toolbar mount at the served-artifact level (workspace UI policy); the
  *   in-browser mounting proof stays in the jsdom mount check and the
  *   playwright spec
+ * - the README discloses that the published-registry install is not
+ *   exercised anywhere and names the release-tarball substitute the smoke
+ *   enforces (bin linking, version/help output, packaged web assets)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -78,6 +81,18 @@ function readmeSmokeSection(): string {
   const end = readme.indexOf('## Quick Start');
   expect(start, 'README lost the smoke-test section heading').toBeGreaterThan(-1);
   expect(end, 'README lost the Quick Start heading after the smoke section').toBeGreaterThan(start);
+  return readme.slice(start, end);
+}
+
+/** The README's Installation section, from its heading to the source-repo one. */
+function readmeInstallationSection(): string {
+  const start = readme.indexOf('## Installation');
+  const end = readme.indexOf('### Source repository');
+  expect(start, 'README lost the Installation heading').toBeGreaterThan(-1);
+  expect(
+    end,
+    'README lost the Source repository heading after the Installation section'
+  ).toBeGreaterThan(start);
   return readme.slice(start, end);
 }
 
@@ -220,6 +235,53 @@ describe('smoke release gate: npm packaging installation path', () => {
         `phase 4 --help check does not list '${cmd}'`
       ).toBeTruthy();
     }
+  });
+});
+
+describe('smoke release gate: published-package install substitute (release tarball)', () => {
+  // The README documents `npm install -g @needle/fabric`, but the package is
+  // not on the public npm registry, so no smoke run, CI run, or test can
+  // exercise the registry path — and an "approximation" framing is how that
+  // gap goes undocumented. The substitute is deliberate instead: the README
+  // must disclose that the registry install is not exercised anywhere and
+  // name the release tarball as its enforced substitute, and the smoke must
+  // enforce the facets a registry install exercises — bin linking, packaged
+  // web assets, version output, and --help discovery — against the installed
+  // tarball. When the package is published, this block is what forces the
+  // docs to say so instead of silently inheriting the old caveat.
+
+  it('discloses in the README that the registry install is not exercised and names the substitute', () => {
+    const section = readmeSmokeSection();
+    expect(section).toContain('release-tarball substitute');
+    expect(section).toContain('not exercised anywhere');
+  });
+
+  it('marks the unpublished registry status next to every documented npm install', () => {
+    expect(readmeInstallationSection()).toMatch(/not yet published/);
+    // The CLI reference repeats the registry install; it must carry the same
+    // status note rather than a second undocumented promise.
+    const cliDoc = readFileSync(join(repoRoot, 'docs', 'cli.md'), 'utf8');
+    expect(cliDoc).toContain('not yet published');
+  });
+
+  it('names phase 4 the published-package substitute', () => {
+    expect(smoke).toContain('4/5 release-tarball install (published-package substitute)');
+  });
+
+  it('enforces the bin-link facet: npm symlink shape resolving into the installed package', () => {
+    expect(smoke).toContain('[ ! -L "$BIN" ]');
+    expect(smoke).toContain('readlink -f "$BIN"');
+    expect(smoke).toContain('"$RESOLVED_BIN" != "$PKG/dist/cli.js"');
+  });
+
+  it('enforces the packaged-assets facet: hashed bundles in the installed tree', () => {
+    expect(smoke).toContain("for ASSET in 'index-*.js' 'index-*.css'");
+    expect(smoke).toContain('find "$PKG/dist/web/public/assets" -name "$ASSET"');
+  });
+
+  it('enforces the version facet: the installed CLI reports the installed package version', () => {
+    expect(smoke).toContain("require('$PKG/package.json').version");
+    expect(smoke).toContain('[ "$VERSION_OUT" != "$PKG_VERSION" ]');
   });
 });
 

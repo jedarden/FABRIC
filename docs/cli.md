@@ -12,6 +12,12 @@ pnpm add -g @needle/fabric
 
 The binary installs as `fabric` (or `fabric-node` if there's a naming conflict).
 
+> **Publishing status:** `@needle/fabric` is not yet published to the public
+> npm registry. The verified installation paths are the source build and the
+> release tarball that `npm run smoke:clean-install` packs and installs as the
+> enforced substitute for the registry install — see README
+> "Verifying the installation".
+
 ## Commands Overview
 
 | Command | Description |
