@@ -41,7 +41,7 @@ file is mapped explicitly below.
 | Keyboard Navigation | src/tui/utils/keyboard.ts | ✅ (r/R deconfliction landed b1e8567; `fabric-de6a9f72` closed) |
 | Focus Mode | src/tui/app.ts | ✅ (remaining view-machine coverage open → `fabric-becb1ab0`; `fabric-6dafdf52` closed 2026-09-27) |
 
-### Phase 3: Web Display ✅ COMPLETE (2026-07→09 outage resolved; alert-dedup policy enforced)
+### Phase 3: Web Display — IMPLEMENTED; PRODUCTION READINESS PENDING
 | Feature | File | Status |
 |---------|------|--------|
 | HTTP Server | src/web/server.ts | ✅ |
@@ -52,16 +52,21 @@ file is mapped explicitly below.
 | Fleet Summary Bar (Phase 9) | src/web/frontend/src/components/FleetSummaryBar.tsx | ✅ |
 | Focus Mode | src/web/frontend/src/App.tsx | ✅ |
 
-The live-service outage tracked by `fabric-166beca4` (dashboard dark since
-2026-07-09; root cause of the long darkness was the hetzner-ex44 → codinghome
-host migration, which no fabric systemd units survived) **closed 2026-09-14**.
-Live check 2026-09-28 (~03:40 UTC re-check): `fabric-web.service` active,
-`/api/health` → `status:"ok"` on :3000, OTLP :4318 listening, 113 files watched
-(fleet re-activated; 129 at the 2026-09-27 check, 19 during the overnight
-quiescent window; 81 at the ~05:45 UTC reconciliation re-check). The alerting-pipeline item is resolved too:
-documented AlertManager deduplication is now enforced end to end —
-`fabric-c0e278ee` closed 2026-09-28 with `2b27660` (GET /api/alerts inventory +
-store-path policy tests). No open web-display items remain.
+The web implementation and the historical outage remediation are complete:
+`fabric-166beca4` (dashboard dark since 2026-07-09 after the
+hetzner-ex44 → codinghome migration) closed 2026-09-14, and the AlertManager
+deduplication work in `fabric-c0e278ee` shipped in `2b27660`. That is an
+implementation/liveness result, not a production-readiness attestation.
+
+The live check on 2026-09-28 found `fabric-web.service` active,
+`/api/health` returning HTTP 200 with `status:"ok"`, :3000 and OTLP/HTTP :4318
+listening, and both native and OTLP unauthenticated POSTs rejected with 401.
+The readiness gate still returned **BLOCKED**: the prune timer was disabled,
+`GET /api/retention` reported 218,385 files (3.16 GB), an indefinite policy,
+and no `lastPrune` record. The open inventory also retains the pruning and
+OTLP/metrics contract owners listed in the gate section below. The dashboard
+therefore has no open web-display implementation item, but Phase 3 must not be
+called production-ready until the live gate passes.
 
 ### Phase 4: Intelligence Features (Core) ✅ COMPLETE
 | Feature | File | Status |
@@ -144,11 +149,13 @@ The two successors that carry their legacy ID in the title (`fabric-7a8aa0c9`,
 
 ## Current Gaps (2026-09-28)
 
-plan.md marks Phases 1–9 complete. The checkpoint snapshot used for this refresh
-holds **97 open + 1 in_progress of 451 beads** (2026-09-28 19:55 UTC, machine-read
-by `scripts/gap-inventory-check.mjs`; the authoritative live list is the generated
-inventory block below), dominated by verification/coverage hardening, not missing
-features. This refresh reclassifies the frontier — the 2026-09-26 edition mixed
+plan.md's feature checklists for Phases 1–9 are implemented, but the Phase 3
+production claim is now gated by the live check in §0a. The checkpoint snapshot
+used for this refresh holds **97 open + 1 in_progress of 451 beads** (2026-09-28
+19:55 UTC, machine-read by `scripts/gap-inventory-check.mjs`; the authoritative
+live list is the generated inventory block below), dominated by
+verification/coverage hardening plus the operational readiness items called out
+in §0a. This refresh reclassifies the frontier — the 2026-09-26 edition mixed
 bugs, missing features, and already-landed work under one "gaps" heading. Every
 outstanding item below is linked to **exactly one owning bead**.
 
@@ -186,6 +193,41 @@ for this document:
 The checkpoint (`.beads/checkpoint/current.json` → `active_root`) is the data
 source; bead-rs republishes it after every mutation, so the check never needs a
 token or the live CLI (the CLI is a fallback, nothing more).
+
+### 0a. Production-readiness gate (live, fail-closed)
+
+The implementation checklist is not the production gate. Run the live check
+from this checkout before changing the Phase 3 status:
+
+```bash
+npm run readiness:check
+# Machine-readable evidence:
+node scripts/production-readiness-check.mjs --json
+```
+
+The gate requires all of the following at the same time: `fabric-web.service`
+active; the pruning timer enabled and active; `/api/health` returning a FABRIC
+`status:"ok"` response; an open TCP listener on OTLP/HTTP :4318; 401/403
+rejection for unauthenticated native and OTLP POSTs; an explicit positive
+retention policy with a successful prune within 36 hours; and no open or
+in-progress readiness owner in the checkpoint. A non-zero exit is the required
+status: Phase 3 remains **implemented but not production-ready**.
+
+The owner links currently surfaced by the checkpoint are:
+
+| Owner | Unresolved scope |
+|---|---|
+| `fabric-0a4e421b` | Retention-pruning rules and evidence; this does not prove the live timer or last run is healthy. |
+| `fabric-37c4b812`, `fabric-45dc56ba` | OTLP host fallback and label escaping contracts. |
+| `fabric-86bfc356`, `fabric-96975906`, `fabric-f0f1c757` | OTLP host attribution and per-host metrics contracts. |
+
+The gate ignores the reconciliation bead itself (`fabric-ff926483`) while it
+is in progress. That exception is only to avoid a circular self-block; it does
+not waive any live check. Auth implementation owners `fabric-0538da5f` and
+`fabric-9c04e80b` are closed, but the live 401/403 probes remain mandatory.
+Remote producer wiring is still separately unverified in
+[`docs/otlp-config.md`](otlp-config.md), so a local listener alone cannot
+close the production-readiness claim.
 
 <!-- gap-inventory:begin (generated by scripts/gap-inventory-check.mjs — do not hand-edit; refresh: node scripts/gap-inventory-check.mjs --fix)
 bead_id	status	priority	title
@@ -390,20 +432,23 @@ What is open is *pinning those contracts in tests*:
 
 - Wiring the `>digest` command-palette trigger and the periodic/session-end triggers to the AI digest layer (they stay deterministic by design today; plan.md §AI Session Digest).
 
-### Verification results recorded by this refresh (2026-09-28 UTC, `fabric-14247d59` pass)
+### Verification results recorded by this refresh (2026-09-28 UTC, `fabric-ff926483` pass)
 
 | Check | Result |
 |-------|--------|
 | `npx tsc --noEmit` | exit 0 — no type errors (src and tests configs both clean) |
-| `npx vitest run` | **3677 passed / 2 skipped / 0 failed, 109 files**, exit 0 — includes the gap-inventory checker cases and the digest directory-source coverage |
-| `npm test` | exit 0 — pretest TypeScript build plus the same **3677 passed / 2 skipped / 0 failed** Vitest suite |
+| `npx vitest run` | **3682 passed / 2 skipped / 0 failed, 110 files**, exit 0 — includes the gap-inventory and production-readiness checker cases |
+| `npm test` | exit 0 — pretest TypeScript build plus the same **3682 passed / 2 skipped / 0 failed** Vitest suite |
 | `gap-inventory-check --check` | exit 0 — inventory in sync: 98 open/in_progress beads match the generated block; all cited ids verified |
 | `gap-inventory-check --lint-doc` | exit 0 — 98 inventory rows parse; all cited ids exist in the store (run in the suite via `tests/gapInventoryCheck.test.ts`) |
-| Live service | `fabric-web.service` active; `/api/health` → `status:"ok"`, 10,000 events, **121** tailer files watched at the ~13:05 UTC re-check (113 at ~03:40, 81 at ~05:45 — watch count tracks fleet activity), :3000 + :4318 listening |
+| `npm run build` | exit 0 — TypeScript production build |
+| `npm run build:web` | exit 0 — Vite production frontend build |
+| `npm run readiness:check` | exit 1 — expected block: prune timer disabled, no explicit policy/last prune, and six unresolved readiness owners; service/listener/auth probes pass |
+| Live service | `fabric-web.service` active after restart; `/api/health` → `status:"ok"`, 10,000 events, **200** tailer files watched; :3000 + :4318 listening; native and OTLP unauthenticated POSTs → 401 |
 
-The repeatable checker and its tests were already on `main`; this pass updates
-the document's prose and generated inventory from the live checkpoint. No source
-implementation changed.
+This pass adds the live gate and its contract tests, then updates the document's
+prose and generated inventory from the live checkpoint. The non-zero readiness
+result is retained as evidence that the phase is not yet operationally complete.
 
 ---
 
@@ -433,7 +478,8 @@ fabric-bd06ee99 (2026-09-26 refresh) — CLOSED
 fabric-9ca2871c (2026-09-27/28 refresh) — CLOSED 2026-09-28 (epoch-3/4 refresh landed 659bff3)
 fabric-301ad288 (live-inventory reconciliation draft) — CLOSED as superseded by fabric-cb4e1df8 (same scope; work landed once)
 fabric-cb4e1df8 (status reconciliation + repeatable refresh check) — CLOSED
-fabric-14247d59 (live-checkpoint reconciliation — this pass) — IN_PROGRESS while closure is pending
+fabric-14247d59 (live-checkpoint reconciliation — prior pass) — OPEN, superseded by this readiness reconciliation
+fabric-ff926483 (production-readiness reconciliation — this pass) — IN_PROGRESS while closure is pending
 ├── fabric-931136a0 (tui --source busy-loop) — open BUG, root-caused (failure-count:4)
 │   ├── fabric-0386d35e (diagnosis umbrella — substance complete, close on the note)
 │   │   ├── fabric-675ead93 / fabric-cdbc3e3a / fabric-d541b07d (note-audit children) — open
@@ -502,22 +548,25 @@ fabric-14247d59 (live-checkpoint reconciliation — this pass) — IN_PROGRESS w
 - docs/alert-policy.md — AlertManager policy (enforced end to end by closed `fabric-c0e278ee`)
 - scripts/gap-inventory-check.mjs — repeatable status-refresh/check (§0), landed in the closed `fabric-cb4e1df8` pass
 - tests/gapInventoryCheck.test.ts — fixture coverage for the checker and structural lint of this document
+- scripts/production-readiness-check.mjs — fail-closed live service, listener, auth, retention, and owner gate
+- tests/productionReadinessCheck.test.ts — isolated passing/blocking gate scenarios
 - Bead store checkpoint: **97 open + 1 in_progress of 451** as of 2026-09-28 19:55 UTC, machine-read by `scripts/gap-inventory-check.mjs`; lineage beads `fabric-0c9aeb03`, `fabric-bd06ee99`, `fabric-166beca4`, `fabric-de6a9f72`, `fabric-aa4751af`, `fabric-6dafdf52`, `fabric-c0e278ee`, `fabric-c0413489`, `fabric-2f9fd906`, `fabric-2fd06cd1`/`fabric-f05a227a`/`fabric-b7b48295`, `fabric-9ca2871c`, `fabric-85212f76`, `fabric-14554e53`, `fabric-0538da5f`, `fabric-9c04e80b`, `fabric-e593b9ce`, `fabric-8ffe1cb9`, `fabric-cb4e1df8`, `fabric-ac301879`, `fabric-8402deda`, `fabric-ade0e71c`, `fabric-d1e3d354`, `fabric-08706085`, `fabric-dddac75c`, `fabric-e1f86a53`, `fabric-dd0432e9`, `fabric-32fe329b`, `fabric-e91edf0c` confirmed closed
 - Doc-vs-store status sweep: now **mechanical** — scripts/gap-inventory-check.mjs `--check` compares the generated inventory block against the store in both directions and lints every `fabric-*` id cited in this document; exit 0 at this refresh
 - Code/commit claims re-verified: src/cli.ts digest `--source` declaration (:778), `resolveFromOptions` (:96), `DirectoryTailer` construction (:826); src/web/server.ts overload responses (:342/:379) and 3-strike liveness guard (:2137-2143); src/digestAi.ts present; busy-loop WIP patch (91,645 bytes); all 10 cited commits resolve (`52640c8`, `35b44b5`, `fd6c1de`, `66ee920`, `890f3ae`, `0f8363b`, `14e96e0`, `2b27660`, `0044710`, `b1e8567`)
-- Live service: `systemctl --user is-active fabric-web.service` (active), `GET /api/health` (`status:"ok"`, 10,000 events, 121 tailer files watched at ~13:05 UTC), `ss -tln` (:3000, :4318)
-- Verification: `npx tsc --noEmit`, `npx vitest run`, `node scripts/gap-inventory-check.mjs --check`, and `node scripts/gap-inventory-check.mjs --lint-doc` — results recorded above for this pass
+- Live service: `systemctl --user is-active fabric-web.service` (active after required restart), `GET /api/health` (`status:"ok"`, 10,000 events, 200 tailer files watched), `ss -tlnp` (:3000, :4318); native and OTLP unauthenticated POST probes both returned 401
+- Verification: `npx tsc --noEmit`, `npx vitest run`, `npm test`, `npm run build`, `npm run build:web`, `node scripts/gap-inventory-check.mjs --check`, `node scripts/gap-inventory-check.mjs --lint-doc`, and `npm run readiness:check` — results recorded above for this pass
 
 ---
 
 ## Conclusion
 
 FABRIC is **feature-complete against plan.md Phases 1–9** and the ADR-1 multi-host
-collector architecture. The 2026-03-07 gap list is **fully resolved: 12/12 gaps
-closed**, each traceable to a closed `fabric-*` successor bead and a verified
-implementation file on `main`.
+collector architecture. The 2026-03-07 implementation gap list is **fully
+resolved: 12/12 gaps closed**, each traceable to a closed `fabric-*` successor
+bead and a verified implementation file on `main`. This does not make the web
+display production-ready: the live gate in §0a must pass separately.
 
-Reconciled against the open bead store on 2026-09-28 under `fabric-14247d59`
+Reconciled against the open bead store on 2026-09-28 under `fabric-ff926483`
 (following the closed `fabric-cb4e1df8` pass and its superseded duplicate
 `fabric-301ad288`), what actually
 remains is:
@@ -531,8 +580,9 @@ remains is:
    section previously counted as open is fully closed — §3a.)
 4. **Bookkeeping closures** (digest `--source` and digest-AI beads whose code
    already landed).
-5. **Resolved and on record:** the web dashboard outage (`fabric-166beca4`,
-   closed 2026-09-14; re-verified live 2026-09-28), the `r`/`R` shortcut conflict
+5. **Resolved and on record:** the web dashboard outage remediation
+   (`fabric-166beca4`, closed 2026-09-14; service liveness re-verified live
+   2026-09-28), the `r`/`R` shortcut conflict
    (`fabric-de6a9f72`), the alert-dedup policy gap (`fabric-c0e278ee`, closed
    2026-09-28 via `2b27660`), the TUI view-state contract batch
    (`fabric-6dafdf52`, closed 2026-09-27), the FileHeatmap behavior-contract pair
@@ -552,4 +602,6 @@ and this document's structural honesty — pinned in the test suite. Every
 outstanding item above is linked to exactly one owning bead, and the
 2026-09-26 edition's last stale claim — digest lacking directory-tail support —
 is corrected: the resolver layer now backs `tui`, `web`, `tail`, `replay`, and
-`digest` alike.
+`digest` alike. The separate production gate is intentionally still blocking on
+retention/pruning evidence and unresolved OTLP owner work, so this document does
+not declare Phase 3 operationally complete.

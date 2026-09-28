@@ -1381,7 +1381,7 @@ fabric logs --worker w-abc123           # Filter by worker
 - [x] File context panel (split view)
 - [x] Focus mode with pinning
 
-### Phase 3: Web Display
+### Phase 3: Web Display (implementation complete; production readiness gated)
 - [x] HTTP server with WebSocket support
 - [x] Real-time event streaming to browser
 - [x] React/Svelte dashboard UI
@@ -1389,6 +1389,21 @@ fabric logs --worker w-abc123           # Filter by worker
 - [x] Command palette (Cmd+K)
 - [x] File context panel (side panel)
 - [x] Focus mode with pinning
+
+The web-display implementation is complete, but this phase is not a production
+readiness declaration. Before calling it complete operationally, run the
+fail-closed live gate:
+
+```bash
+npm run readiness:check
+```
+
+The gate checks service liveness, the OTLP/HTTP listener, native and OTLP POST
+authentication, pruning timer/recency and explicit retention policy, and open
+readiness owners in the bead checkpoint. See
+[`docs/gap-analysis.md`](gap-analysis.md#0a-production-readiness-gate-live-fail-closed)
+for the current result and owner links. A non-zero result means the phase is
+implemented but remains operationally incomplete.
 
 ### Phase 4: Intelligence Features (Core)
 - [x] Cross-reference hyperlinking (bead, file, worker links)
@@ -1618,8 +1633,10 @@ FABRIC is a live display with intelligence. It shows what NEEDLE is doing, detec
 
 ---
 
-**Status**: Phases 1–9 complete.
-**Last Updated**: 2026-05-26
+**Status**: Phase 1–9 feature implementation complete; Phase 3 production
+readiness remains gated by live service, retention, authentication, and OTLP
+evidence.
+**Last Updated**: 2026-09-28
 
 ## ADR-1: 2026-07-20 — Centralize FABRIC as a Multi-Host OTLP Collector
 

@@ -443,7 +443,18 @@ systemctl --user status fabric-web.service
 
 # Verify OTLP listener
 ss -tlnp | grep 4318
+
+# Fail-closed production-readiness gate
+npm run readiness:check
 ```
+
+The service being active and the listener being present only prove liveness.
+`readiness:check` also requires authenticated native/OTLP POSTs, an enabled
+and recently successful prune, an explicit retention policy, and no open
+production-readiness owners in the bead checkpoint. A non-zero result means
+the web phase is implemented but is not yet production-ready. The current
+live result and owner links are maintained in
+[`docs/gap-analysis.md`](docs/gap-analysis.md#0a-production-readiness-gate-live-fail-closed).
 
 | Component | Port/URL | Purpose |
 |-----------|----------|---------|

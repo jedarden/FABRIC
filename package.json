@@ -25,6 +25,7 @@
     "release:check": "npm run typecheck && npm test && npm run build:web && npm pack --dry-run --json --ignore-scripts",
     "release:publish": "npm publish --access public",
     "release:maintenance": "node scripts/release-maintenance-check.mjs",
+    "readiness:check": "node scripts/production-readiness-check.mjs",
     "smoke:clean-install": "bash scripts/smoke-clean-install.sh",
     "smoke:registry-install": "bash scripts/smoke-registry-install.sh",
     "typecheck": "tsc --noEmit",
