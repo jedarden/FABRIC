@@ -135,6 +135,45 @@ full stuck detect→resume→relapse cycle). The HTTP contract is pinned in
    id, and leaves the resolved record untouched.
 6. Distinct kinds and distinct workers never share an instance.
 
+## Verification results
+
+**Last verified 2026-09-28 (UTC)** on `main` — contract coverage shipped by
+`fabric-17d442e5` (`629f3f2`, manager + unit pins) and `fabric-c0e278ee`
+(`2b27660`, store-path integration + HTTP pins); verification recorded by
+bead `fabric-d1e3d354`. Runs from the repo root:
+
+```
+npx vitest run src/alertManager.test.ts src/web/server.alerts.test.ts
+#   → 2 files, 29 tests passed
+npx tsc --noEmit
+#   → exit 0
+npx vitest run
+#   → 103 files, 3571 passed / 2 skipped / 0 failed
+```
+
+`src/alertManager.test.ts` owns 26 of those tests — 15 direct manager units
+(`alert identity`, `repeated observations maintain one active alert`,
+`resolution workflow`, `registry housekeeping`, `record shape`) and 11 through
+the store path (`event store alert wiring`, `event store alert policy end to
+end`); `src/web/server.alerts.test.ts` owns the 3 HTTP-contract tests.
+
+Contract → test ownership:
+
+| Policy clause | Manager unit | Store path (`add()`) | HTTP `/api/alerts` |
+|---|---|---|---|
+| §1 Identity idempotent | `alert identity` (deterministic, kinds/scopes never collide, reason never changes identity) | `keeps one alert when the observation reason drifts` | inherits upstream |
+| §2 One active instance — no-work | `opens exactly one active instance for repeated observations` | `folds repeated no-work observations of any signal into one active alert` | `folds a burst of repeated observations into one active instance per worker` |
+| §2 One active instance — stuck | `folds repeated observations into the same stuck alert and tracks evidence` | `drives the full stuck cycle — detection, resume, and relapse as a new epoch` | — |
+| §3 Cooldown suppress / escalate | `suppresses re-notification within the cooldown window` + `escalates an ongoing condition after cooldown without creating a new alert` | `suppresses re-notification within the cooldown and escalates after it on the same instance` | — |
+| §4 Resolution idempotent | `resolves the active instance exactly once` + `is idempotent — resolving with no active instance is a no-op` | `resolves exactly once when work arrives, and repeat claims are no-ops` + `claiming without a prior alert resolves nothing and files nothing` | `moves the instance to history on resolution and opens epoch 2 on recurrence` |
+| §5 Recurrence epoch | `a resolved condition can produce a new alert` + `supports repeated resolve/recurrence cycles with monotonic epochs` | `opens a fresh epoch per recurrence and never touches resolved history` | same test, epoch-2 assertions |
+| Scope/kind isolation | `keeps conditions independent across kinds and workers` | `keeps workers independent — one claim only clears its own worker` | per-worker instances in the burst test |
+| Store reset | `reports full history across identities and clears cleanly` | `event store alert wiring: clear() resets alert state` | — |
+
+Re-run the two alert files after any change to `src/alertManager.ts`, the
+store's observation sites (`addEvent`/claim/stuck paths in `src/store.ts`),
+or `GET /api/alerts`; the full suite is the release gate.
+
 ## Future work
 
 The alert inventory is exposed over HTTP (`GET /api/alerts`, above). Not
