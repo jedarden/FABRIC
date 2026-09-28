@@ -252,6 +252,7 @@ export function reconcileLegacyAlerts(
         canonical.notifications += dup.notifications;
         canonical.firstObservedAt = Math.min(canonical.firstObservedAt, dup.firstObservedAt);
         canonical.lastObservedAt = Math.max(canonical.lastObservedAt, dup.lastObservedAt);
+        canonical.lastNotifiedAt = Math.max(canonical.lastNotifiedAt, dup.lastNotifiedAt);
       }
       canonical.lastReason = mostRecent.lastReason;
 
@@ -335,7 +336,10 @@ export class AlertManager {
       return { outcome: 'deduplicated', alert: current, previous: null };
     }
 
-    const epoch = epochs.length + 1;
+    // Legacy snapshots can contain sparse or non-contiguous epoch labels.
+    // Allocate after the highest observed epoch, not after the number of
+    // records, so recurrence never reuses an existing instance id.
+    const epoch = epochs.reduce((highest, record) => Math.max(highest, record.epoch), 0) + 1;
     const record: AlertRecord = {
       id: `${identity}#${epoch}`,
       identity,

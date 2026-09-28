@@ -651,6 +651,37 @@ describe('legacy inventory reconciliation', () => {
     expect(canonical.lastReason).toBe('worker.exhausted');
   });
 
+  it('preserves cooldown state and allocates recurrence after the highest legacy epoch', () => {
+    const earliest = legacy('no-work', 'w-alpha', RB, {
+      id: 'no-work:w-alpha#4',
+      epoch: 4,
+      lastNotifiedAt: RB,
+    });
+    const laterDuplicate = legacy('no-work', 'w-alpha', RB + MIN, {
+      id: 'no-work:w-alpha#9',
+      epoch: 9,
+      lastNotifiedAt: RB + 20 * MIN,
+    });
+
+    const { inventory } = reconcileLegacyAlerts([earliest, laterDuplicate], { at: RB + 21 * MIN });
+    const canonical = inventory.find((record) => record.status === 'active')!;
+    expect(canonical.id).toBe(earliest.id);
+    expect(canonical.lastNotifiedAt).toBe(RB + 20 * MIN);
+
+    const mgr = new AlertManager({ cooldownMs: 30 * MIN });
+    mgr.restore(inventory);
+    const folded = mgr.observe('no-work', 'w-alpha', { at: RB + 25 * MIN });
+    expect(folded.outcome).toBe('deduplicated');
+    expect(folded.alert.notifications).toBe(2);
+
+    const resolved = mgr.resolve('no-work', 'w-alpha', { at: RB + 26 * MIN });
+    expect(resolved?.id).toBe(earliest.id);
+
+    const recurred = mgr.observe('no-work', 'w-alpha', { at: RB + 27 * MIN });
+    expect(recurred.outcome).toBe('new-epoch');
+    expect(recurred.alert.id).toBe('no-work:w-alpha#10');
+  });
+
   it('never touches resolved history — only duplicate actives are closed', () => {
     const resolved = legacy('stuck', 'w-alpha', RB, {
       status: 'resolved',
