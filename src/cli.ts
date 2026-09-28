@@ -409,6 +409,23 @@ program
             : '')
         );
       }
+      // Catch the bead inventory up to the restored registry (docs/
+      // alert-policy.md §Bead emission): beads are process-local, so every
+      // boot files the active instances' beads and folds any duplicate open
+      // beads left by a pre-policy writer — before ingest can file more.
+      const beadReconciliation = store.reconcileAlertBeads();
+      if (
+        beadReconciliation.filed > 0 ||
+        beadReconciliation.duplicatesClosed > 0 ||
+        beadReconciliation.orphansClosed > 0
+      ) {
+        console.error(
+          `Alert bead inventory reconciled: ${beadReconciliation.filed} filed, ` +
+          `${beadReconciliation.duplicatesClosed} duplicate(s) closed, ` +
+          `${beadReconciliation.orphansClosed} orphan(s) closed, ` +
+          `${beadReconciliation.openBeadsAfter} open`
+        );
+      }
       const { RetentionControlStore, defaultRetentionControlDirectory } = await import('./retentionControls.js');
       const retentionControlStore = new RetentionControlStore({
         directory: defaultRetentionControlDirectory(resolved.path),

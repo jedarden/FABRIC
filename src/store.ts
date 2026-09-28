@@ -56,6 +56,13 @@ import {
   LegacyReconciliation,
   ReconcileOptions,
 } from './alertManager.js';
+import {
+  AlertBead,
+  AlertBeadFiler,
+  InMemoryAlertBeadSink,
+  BeadReconciliation,
+  ReconcileBeadsOptions,
+} from './alertBeadFiler.js';
 import { detectAnomalies, getAnomalyStats } from './tui/utils/fileAnomalyDetection.js';
 import { ErrorGroupManager, getErrorGroupManager } from './errorGrouping.js';
 import { RecoveryManager, getRecoveryManager } from './tui/utils/recoveryPlaybook.js';
@@ -171,6 +178,13 @@ export class InMemoryEventStore implements EventStore {
   private historicalStore: HistoricalStore;
   /** Deduplicating registry for repeated no-work / stuck alert beads (docs/alert-policy.md). */
   private alertManager: AlertManager = new AlertManager();
+  /**
+   * The open-bead inventory the registry's lifecycle outcomes file into, plus
+   * the dedup-enforcing filer that drives it (docs/alert-policy.md §Bead
+   * emission). Process-local: rebuilt against the restored registry at boot.
+   */
+  private alertBeadSink: InMemoryAlertBeadSink = new InMemoryAlertBeadSink();
+  private alertBeadFiler: AlertBeadFiler = new AlertBeadFiler(this.alertBeadSink);
   private maxEvents: number;
   private alertCounter = 0;
   private batchBuffer: LogEvent[] = [];
@@ -382,6 +396,10 @@ export class InMemoryEventStore implements EventStore {
     this.errorGroupManager.clear();
     this.crossReferenceManager.clear();
     this.alertManager.clear();
+    // The bead inventory is the registry's emission — it resets with it, so
+    // clear() cannot leave open beads for instances that no longer exist
+    // (docs/alert-policy.md §Bead emission).
+    this.alertBeadSink.clear();
     this.batchBuffer = [];
     this.taskStartTimes.clear();
     if (this.batchTimeout) {
@@ -691,6 +709,32 @@ export class InMemoryEventStore implements EventStore {
     return this.alertManager.reconcileLegacyDuplicates(options);
   }
 
+  /**
+   * The filed alert-bead inventory (open + closed), keyed on AlertRecord.id —
+   * one open bead per active instance, per docs/alert-policy.md §Bead
+   * emission. Every lifecycle outcome reaches it through the same
+   * observe/resolve sites that drive the registry.
+   */
+  getAlertBeads(): AlertBead[] {
+    return this.alertBeadSink.listBeads();
+  }
+
+  /** One filed bead by instance id, or undefined. */
+  getAlertBead(id: string): AlertBead | undefined {
+    return this.alertBeadSink.getBead(id);
+  }
+
+  /**
+   * Align the bead inventory with the registry: file missing active-instance
+   * beads, fold + close duplicate open beads, close orphaned ones. The boot
+   * catch-up after `restorePersistedAlerts()` (beads are process-local) and
+   * the repair pass for an inventory written by a non-deduplicating writer.
+   * Idempotent — a conforming inventory is left untouched.
+   */
+  reconcileAlertBeads(options?: ReconcileBeadsOptions): BeadReconciliation {
+    return this.alertBeadFiler.reconcileWithRegistry(this.alertManager.history(), options);
+  }
+
   // ─── Alert durability (docs/alert-policy.md §Durability) ──────────────────
 
   /**
@@ -786,7 +830,11 @@ export class InMemoryEventStore implements EventStore {
     reason?: string
   ): void {
     if (this.isAlertEventAlreadyFolded(event)) return;
-    this.alertManager.observe(kind, scope, { at: event.ts, reason });
+    const result = this.alertManager.observe(kind, scope, { at: event.ts, reason });
+    // Emit the outcome to the bead inventory at the same enforcement point:
+    // created/new-epoch file, deduplicated/escalated fold into the SAME open
+    // bead (docs/alert-policy.md §Bead emission).
+    this.alertBeadFiler.emitObservation(result, event.ts);
     const seq = event.sequence;
     if (seq != null && seq >= 0) {
       const key = this.alertWatermarkKey(event);
@@ -803,7 +851,10 @@ export class InMemoryEventStore implements EventStore {
     note: string
   ): void {
     if (this.isAlertEventAlreadyFolded(event)) return;
-    this.alertManager.resolve(kind, scope, { at: event.ts, note });
+    const resolved = this.alertManager.resolve(kind, scope, { at: event.ts, note });
+    // Close the instance's open bead with the resolution note (no-op when
+    // nothing was active — docs/alert-policy.md §Bead emission).
+    this.alertBeadFiler.emitResolution(resolved, event.ts);
     const seq = event.sequence;
     if (seq != null && seq >= 0) {
       const key = this.alertWatermarkKey(event);

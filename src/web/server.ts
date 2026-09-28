@@ -2001,6 +2001,26 @@ export function createWebServer(options: WebServerOptions): WebServer {
       });
     });
 
+    // The filed bead inventory behind the registry (docs/alert-policy.md
+    // §Bead emission): one open bead per active instance, keyed on
+    // AlertRecord.id — cooldown escalations fold into the same bead, so this
+    // can never show two open beads for one condition. Closed beads are the
+    // resolution/reconciliation history.
+    app.get('/api/alerts/beads', (_req: Request, res: Response) => {
+      const beads = store.getAlertBeads();
+      res.json({
+        open: beads.filter((b) => b.status === 'open'),
+        closed: beads.filter((b) => b.status === 'closed'),
+      });
+    });
+
+    // Fold a duplicate-laden bead inventory back to policy shape on demand —
+    // the same reconciliation the boot path runs after restore. Idempotent;
+    // a conforming inventory files and closes nothing.
+    app.post('/api/alerts/beads/reconcile', (_req: Request, res: Response) => {
+      res.json(store.reconcileAlertBeads());
+    });
+
     // ============================================
     // OOM Alert API Endpoints
     // ============================================

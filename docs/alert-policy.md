@@ -116,6 +116,26 @@ GET /api/alerts   →  { "active": AlertRecord[], "history": AlertRecord[] }
 is every instance including resolved epochs. Read-only, like every GET
 endpoint (docs/api-auth.md).
 
+## Bead emission
+
+The store emits each alert-manager lifecycle result through
+`src/alertBeadFiler.ts`. The filer keys the in-memory filed-bead inventory by
+the stable `AlertRecord.id` (`<kind>:<scope>#<epoch>`):
+
+- `created` and `new-epoch` file one open bead for that instance;
+- `deduplicated` and `escalated` fold evidence into that same open bead, so a
+  cooldown notification never creates a second bead;
+- resolution closes the instance bead with its resolution note; and
+- recurrence files the next epoch while leaving the closed epoch immutable.
+
+`GET /api/alerts/beads` exposes the open and closed filed-bead inventory.
+`POST /api/alerts/beads/reconcile` (authenticated) folds a legacy duplicate
+inventory down to one open bead per active instance, preserves the canonical
+evidence, and closes duplicate or orphaned rows with an explanatory note.
+The web service runs the same reconciliation after restoring the durable alert
+registry and before starting event ingestion, so boot replay cannot re-file a
+condition as a duplicate.
+
 ## Legacy reconciliation
 
 Inventories written **before** this policy — or imported from any
@@ -374,10 +394,10 @@ release gate.
 
 ## Future work
 
-The alert inventory is exposed over HTTP (`GET /api/alerts`, above). Not
-wired yet: rendering it in the TUI/web dashboards, and filing/closing the
-corresponding beads in a bead workspace. Both should key on
-`AlertRecord.identity` (dedup) and `AlertRecord.id` (the specific open/closed
-bead) so the UI inherits this policy rather than re-implementing it. Since
-§Durability, ids are stable across restarts — a filed bead stays keyed to its
-instance for the instance's whole life.
+The alert and filed-bead inventories are exposed over HTTP but are not yet
+rendered as a dedicated TUI/web dashboard panel. Any future UI should key on
+`AlertRecord.identity` (the condition) and `AlertRecord.id` (the specific
+open/closed instance) so it inherits this policy rather than re-implementing
+deduplication. Since §Durability, registry ids are stable across restarts;
+the web service re-files active instances into its process-local bead view at
+boot and reconciles it before ingest resumes.
