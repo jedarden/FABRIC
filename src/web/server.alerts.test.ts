@@ -33,6 +33,7 @@ afterAll(() => {
 });
 
 const BASE = 1_750_000_000_000;
+const AUTH_TOKEN = 'test-token';
 
 describe('GET /api/alerts reports the deduplicated alert inventory', () => {
   let store: InMemoryEventStore;
@@ -44,7 +45,7 @@ describe('GET /api/alerts reports the deduplicated alert inventory', () => {
     logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-alerts-logs-'));
     store = new InMemoryEventStore();
     resetCrossReferenceManager();
-    server = createWebServer({ port: 0, logPath: logDir, store });
+    server = createWebServer({ port: 0, logPath: logDir, store, authToken: AUTH_TOKEN });
     await new Promise<void>((resolve) => {
       server.on('start', () => resolve());
       server.start();
@@ -73,6 +74,29 @@ describe('GET /api/alerts reports the deduplicated alert inventory', () => {
     // The response is exactly the two inventory views — no per-observation rows.
     expect(Object.keys(body).sort()).toEqual(['active', 'history']);
     return body;
+  }
+
+  async function postNeedleEvent(
+    worker: string,
+    event: string,
+    ts: number,
+    data: Record<string, unknown> = {},
+  ): Promise<void> {
+    const res = await fetch(`http://localhost:${port}/api/events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${AUTH_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ts: new Date(ts).toISOString(),
+        event,
+        session: 'alert-e2e-session',
+        worker,
+        data,
+      }),
+    });
+    expect(res.status).toBe(201);
   }
 
   it('folds a burst of repeated observations into one active instance per worker', async () => {
@@ -135,5 +159,95 @@ describe('GET /api/alerts reports the deduplicated alert inventory', () => {
     const body = await getInventory();
     expect(body.active).toEqual([]);
     expect(body.history).toEqual([]);
+  });
+
+  it('enforces deduplication through POST /api/events and the filed-bead API', async () => {
+    const worker = 'w-http-alert';
+    const first = BASE;
+
+    // Different no-work signals for the same worker are one condition. The
+    // fourth observation is outside the cooldown, so it escalates the same
+    // instance instead of creating another one.
+    await postNeedleEvent(worker, 'worker.queue_empty', first);
+    await postNeedleEvent(worker, 'worker.exhausted', first + 5 * 60_000);
+    await postNeedleEvent(worker, 'worker.queue_empty', first + 10 * 60_000);
+    await postNeedleEvent(worker, 'worker.exhausted', first + 31 * 60_000);
+
+    const ongoing = await getInventory();
+    expect(ongoing.active).toHaveLength(1);
+    expect(ongoing.history).toHaveLength(1);
+    expect(ongoing.active[0]).toMatchObject({
+      id: 'no-work:w-http-alert#1',
+      identity: 'no-work:w-http-alert',
+      occurrences: 4,
+      notifications: 2,
+      status: 'active',
+    });
+
+    const beadResponse = await fetch(`http://localhost:${port}/api/alerts/beads`);
+    expect(beadResponse.status).toBe(200);
+    const ongoingBeads = (await beadResponse.json()) as {
+      open: Array<Record<string, unknown>>;
+      closed: Array<Record<string, unknown>>;
+    };
+    expect(ongoingBeads.open).toHaveLength(1);
+    expect(ongoingBeads.open[0]).toMatchObject({
+      id: 'no-work:w-http-alert#1',
+      occurrences: 4,
+      notifications: 2,
+      status: 'open',
+    });
+
+    // Resolution is idempotent at the live ingest boundary: the first claim
+    // closes the one open bead, and a duplicate claim does nothing.
+    await postNeedleEvent(worker, 'bead.claim.succeeded', first + 32 * 60_000, {
+      bead_id: 'fabric-http-claim',
+    });
+    await postNeedleEvent(worker, 'bead.claim.succeeded', first + 33 * 60_000, {
+      bead_id: 'fabric-http-claim',
+    });
+
+    const resolved = await getInventory();
+    expect(resolved.active).toEqual([]);
+    expect(resolved.history).toHaveLength(1);
+    expect(resolved.history[0]).toMatchObject({
+      id: 'no-work:w-http-alert#1',
+      status: 'resolved',
+      occurrences: 4,
+      resolutionNote: 'worker claimed a bead',
+    });
+
+    // A later no-work observation is a real recurrence: it opens epoch 2 and
+    // leaves epoch 1 immutable history.
+    await postNeedleEvent(worker, 'worker.queue_empty', first + 34 * 60_000);
+    const recurred = await getInventory();
+    expect(recurred.active).toHaveLength(1);
+    expect(recurred.active[0]).toMatchObject({
+      id: 'no-work:w-http-alert#2',
+      epoch: 2,
+      occurrences: 1,
+      notifications: 1,
+      status: 'active',
+    });
+    expect(recurred.history.find((alert) => alert.id === 'no-work:w-http-alert#1')).toMatchObject({
+      status: 'resolved',
+      occurrences: 4,
+      resolutionNote: 'worker claimed a bead',
+    });
+
+    const finalBeadResponse = await fetch(`http://localhost:${port}/api/alerts/beads`);
+    const finalBeads = (await finalBeadResponse.json()) as {
+      open: Array<Record<string, unknown>>;
+      closed: Array<Record<string, unknown>>;
+    };
+    expect(finalBeads.open).toHaveLength(1);
+    expect(finalBeads.open[0]).toMatchObject({ id: 'no-work:w-http-alert#2', status: 'open' });
+    expect(finalBeads.closed).toHaveLength(1);
+    expect(finalBeads.closed[0]).toMatchObject({
+      id: 'no-work:w-http-alert#1',
+      status: 'closed',
+      occurrences: 4,
+      closeNote: 'worker claimed a bead',
+    });
   });
 });

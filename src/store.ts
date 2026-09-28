@@ -396,6 +396,10 @@ export class InMemoryEventStore implements EventStore {
     this.errorGroupManager.clear();
     this.crossReferenceManager.clear();
     this.alertManager.clear();
+    // A reused store starts a fresh in-memory event stream. Retaining the
+    // previous generation's sequence watermarks would silently discard a new
+    // session's low-numbered events before they can recreate alert state.
+    this.alertFoldWatermarks.clear();
     // The bead inventory is the registry's emission — it resets with it, so
     // clear() cannot leave open beads for instances that no longer exist
     // (docs/alert-policy.md §Bead emission).

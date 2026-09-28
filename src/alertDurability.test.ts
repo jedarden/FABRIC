@@ -177,6 +177,21 @@ describe('alert state durability across restarts', () => {
       expect(records).toHaveLength(1); // ...durable snapshot survives
       expect(records[0].status).toBe('active');
     });
+
+    it('clear() resets fold watermarks when a store is reused', () => {
+      const store = newGen();
+      store.add(needleEvent('w-alpha', 9, 'worker.exhausted', T0));
+      store.clear();
+
+      // A new in-memory stream can restart its sequence at zero. The old
+      // generation's watermark must not suppress this first observation.
+      store.add(needleEvent('w-alpha', 0, 'worker.exhausted', T0 + 1_000));
+
+      expect(store.getActiveAlerts()).toMatchObject([
+        { id: 'no-work:w-alpha#1', occurrences: 1, status: 'active' },
+      ]);
+      store.clear();
+    });
   });
 
   describe('restart + replay — no duplicate epochs', () => {

@@ -379,7 +379,9 @@ npx vitest run
 reconciliation units (`legacy inventory reconciliation`, `AlertManager
 legacy restore and live reconciliation`), and 11 through the store path
 (`event store alert wiring`, `event store alert policy end to end`);
-`src/web/server.alerts.test.ts` owns the 3 HTTP-contract tests.
+`src/web/server.alerts.test.ts` owns the 4 HTTP-contract tests, including the
+authenticated `POST /api/events` → `GET /api/alerts` + `GET /api/alerts/beads`
+end-to-end lifecycle test.
 
 Contract → test ownership:
 
@@ -390,11 +392,11 @@ Contract → test ownership:
 | §2 One active instance — stuck | `folds repeated observations into the same stuck alert and tracks evidence` | `drives the full stuck cycle — detection, resume, and relapse as a new epoch` | — |
 | §2 Legacy inventory reconciliation | `audits a duplicate-laden inventory down to one active record per identity` + `folds duplicate evidence into the canonical record` + `never touches resolved history` + `is idempotent` + `derives identity and epoch for pre-policy rows` + `positions the canonical active record last` | `restoreAlertRecords reconciles legacy state and add() deduplicates into the survivor` | inherits upstream (reconciliation happens before the surface) |
 | §2 Reconciled registry dedup | `restore() reconciles a legacy snapshot and future observations deduplicate into the survivor` + `restore() preserves recurrence semantics` + `reconcileLegacyDuplicates() leaves a conforming registry untouched` | same store test, via `reconcileLegacyAlerts()` no-op | — |
-| §3 Cooldown suppress / escalate | `suppresses re-notification within the cooldown window` + `escalates an ongoing condition after cooldown without creating a new alert` | `suppresses re-notification within the cooldown and escalates after it on the same instance` | — |
-| §4 Resolution idempotent | `resolves the active instance exactly once` + `is idempotent — resolving with no active instance is a no-op` | `resolves exactly once when work arrives, and repeat claims are no-ops` + `claiming without a prior alert resolves nothing and files nothing` | `moves the instance to history on resolution and opens epoch 2 on recurrence` |
-| §5 Recurrence epoch | `a resolved condition can produce a new alert` + `supports repeated resolve/recurrence cycles with monotonic epochs` | `opens a fresh epoch per recurrence and never touches resolved history` | same test, epoch-2 assertions |
+| §3 Cooldown suppress / escalate | `suppresses re-notification within the cooldown window` + `escalates an ongoing condition after cooldown without creating a new alert` | `suppresses re-notification within the cooldown and escalates after it on the same instance` | authenticated `POST /api/events` lifecycle test proves the filed bead remains one open row |
+| §4 Resolution idempotent | `resolves the active instance exactly once` + `is idempotent — resolving with no active instance is a no-op` | `resolves exactly once when work arrives, and repeat claims are no-ops` + `claiming without a prior alert resolves nothing and files nothing` | authenticated `POST /api/events` lifecycle test closes the one bead and ignores a duplicate claim |
+| §5 Recurrence epoch | `a resolved condition can produce a new alert` + `supports repeated resolve/recurrence cycles with monotonic epochs` | `opens a fresh epoch per recurrence and never touches resolved history` | authenticated `POST /api/events` lifecycle test files epoch 2 while preserving closed epoch 1 |
 | Scope/kind isolation | `keeps conditions independent across kinds and workers` | `keeps workers independent — one claim only clears its own worker` | per-worker instances in the burst test |
-| Store reset | `reports full history across identities and clears cleanly` | `event store alert wiring: clear() resets alert state` | — |
+| Store reset | `reports full history across identities and clears cleanly` | `event store alert wiring: clear() resets alert state` + `clear() resets fold watermarks when a store is reused` | — |
 
 Re-run the two alert files after any change to `src/alertManager.ts`, the
 store's observation sites (`addEvent`/claim/stuck paths in `src/store.ts`),
