@@ -384,6 +384,53 @@ describe('FileHeatmap TUI integration (real store → real app → real componen
   });
 
   describe('data refresh', () => {
+    it('passes live sort and filter state through the app-to-store callbacks', () => {
+      const world = buildWorld();
+      const getHeatmap = vi.spyOn(world.store, 'getFileHeatmap');
+      const getStats = vi.spyOn(world.store, 'getFileHeatmapStats');
+      const getAnomalies = vi.spyOn(world.store, 'getFileAnomalies');
+
+      openHeatmap(world);
+      heatKey(world, ['s'])();
+      world.heatmap.setFilter('src/');
+      world.app.render();
+
+      const expectedOptions = {
+        sortBy: 'recent',
+        maxEntries: 100,
+        collisionsOnly: false,
+        directoryFilter: 'src/',
+      };
+      expect(getHeatmap).toHaveBeenCalledWith(expectedOptions);
+      expect(getStats).toHaveBeenCalled();
+      expect(getAnomalies).toHaveBeenCalledWith({});
+
+      getHeatmap.mockClear();
+      getStats.mockClear();
+      getAnomalies.mockClear();
+
+      const next = edit('w-alpha', 'src/new.ts', Date.now());
+      world.store.add(next);
+      world.app.addEvent(next);
+
+      expect(getHeatmap).toHaveBeenCalledWith(expectedOptions);
+      expect(getStats).toHaveBeenCalledTimes(1);
+      expect(getAnomalies).toHaveBeenCalledTimes(1);
+
+      screenKey(world, ['escape'])();
+      getHeatmap.mockClear();
+      getStats.mockClear();
+      getAnomalies.mockClear();
+
+      const hiddenEvent = edit('w-bravo', 'src/hidden.ts', Date.now() + 1);
+      world.store.add(hiddenEvent);
+      world.app.addEvent(hiddenEvent);
+
+      expect(getHeatmap).not.toHaveBeenCalled();
+      expect(getStats).not.toHaveBeenCalled();
+      expect(getAnomalies).not.toHaveBeenCalled();
+    });
+
     it('pulls newly arrived files into the rendered rows while the view is open', () => {
       const world = buildWorld();
       seedViaApp(world.store, world.app, series('w-alpha', 'work/first.ts', world.t0 + 1000, 1));
