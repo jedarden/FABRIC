@@ -347,11 +347,15 @@ empty-database no-op boot.
 
 ## Invariants (test-pinned)
 
-Pinned in `src/alertManager.test.ts` — the manager invariants directly, and
-the `event store alert policy end to end` block for each clause as it
-behaves through `InMemoryEventStore.add()` (duplicate observations, drifting
-reasons, cooldown escalation, idempotent resolution, recurrence, and the
-full stuck detect→resume→relapse cycle). The HTTP contract is pinned in
+The dedicated contract matrix in `src/alertManager.contract.test.ts` pins the
+public manager outcomes (`created`, `deduplicated`, `escalated`, and
+`new-epoch`) plus identity folding, cooldown, idempotent resolution,
+recurrence, and scope/kind isolation. Store integration coverage in
+`src/store.alerts.integration.test.ts` enters through `InMemoryEventStore.add()`
+and pins the event mappings for `worker.queue_empty`, `worker.exhausted`,
+`bead.claim.succeeded`, and stuck-worker detect→resume→relapse transitions.
+The broader regression coverage remains in `src/alertManager.test.ts`, which
+also exercises the policy through the store. The HTTP contract is pinned in
 `src/web/server.alerts.test.ts`:
 
 1. `alertIdentity(kind, scope)` is deterministic; kinds and scopes never
