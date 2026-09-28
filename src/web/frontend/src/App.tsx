@@ -1162,11 +1162,13 @@ const App: React.FC = () => {
         events={events}
       />
 
-      <Agentation
-        onSubmit={(markdown) => {
-          navigator.clipboard.writeText(markdown).catch(console.error);
-        }}
-      />
+      <div id="agentation-root">
+        <Agentation
+          onSubmit={(markdown) => {
+            navigator.clipboard.writeText(markdown).catch(console.error);
+          }}
+        />
+      </div>
     </div>
   );
 };

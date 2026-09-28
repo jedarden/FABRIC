@@ -154,6 +154,18 @@ if [ "$WEB_ASSET_CSS" -eq 0 ]; then fail "no hashed CSS bundle in dist/web/publi
 if ! grep -q '/assets/' "$SRC/dist/web/public/index.html"; then
   fail "index.html does not reference the built /assets/ bundles"
 fi
+# The Agentation package has a browser-facing module graph with bare React
+# specifiers. Keep the import map before the module entry point on every page
+# so a direct browser module load can resolve react and react-dom/client.
+IMPORTMAP_LINE="$(grep -n '<script type=\"importmap\">' "$SRC/src/web/frontend/index.html" | cut -d: -f1 || true)"
+MODULE_ENTRY_LINE="$(grep -n '<script type=\"module\"' "$SRC/src/web/frontend/index.html" | cut -d: -f1 || true)"
+[ -n "$IMPORTMAP_LINE" ] || fail "frontend index.html is missing the Agentation import map"
+[ -n "$MODULE_ENTRY_LINE" ] || fail "frontend index.html is missing its module entry point"
+[ "$IMPORTMAP_LINE" -lt "$MODULE_ENTRY_LINE" ] || fail "frontend index.html declares the Agentation import map after its module entry point"
+grep -q '"react": "https://esm.sh/react@19.2.4"' "$SRC/src/web/frontend/index.html" \
+  || fail "frontend index.html import map is missing the pinned React URL"
+grep -q '"react-dom/client": "https://esm.sh/react-dom@19.2.4/client"' "$SRC/src/web/frontend/index.html" \
+  || fail "frontend index.html import map is missing the pinned ReactDOM client URL"
 # Repository UI policy (Agentation): every web entry point must mount the
 # Agentation toolbar. The mount ships inside the React bundle (App renders
 # <Agentation/> and the toolbar roots at #agentation-root), so the built
@@ -446,6 +458,8 @@ for ENTRY in $(cd "$PKG/dist/web/public" && find . -name '*.html' | sed 's|^\./|
   if [ "$ENTRY" = "index.html" ]; then ENTRY_URL="/"; else ENTRY_URL="/$ENTRY"; fi
   ENTRY_HTML="$(curl -sf "http://127.0.0.1:$PORT$ENTRY_URL")" \
     || fail "fabric web: entry point $ENTRY not served at $ENTRY_URL"
+  printf '%s' "$ENTRY_HTML" | grep -q 'type="importmap"' \
+    || fail "fabric web: entry point $ENTRY is missing the Agentation import map"
   ENTRY_BUNDLES="$(printf '%s' "$ENTRY_HTML" | grep -oE '/assets/index-[^"]+\.js' | sort -u)"
   [ -n "$ENTRY_BUNDLES" ] || fail "fabric web: entry point $ENTRY references no built JS bundle"
   for ENTRY_BUNDLE in $ENTRY_BUNDLES; do

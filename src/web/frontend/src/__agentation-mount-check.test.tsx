@@ -1,9 +1,10 @@
 /**
  * Agentation mount verification (repository UI policy) — renders the real app
- * shell and asserts the Agentation toolbar mounts, checked as
- * `#agentation-root` OR the `data-agentation-root` attribute the installed
- * agentation version actually renders (via a React portal into document.body,
- * so it is looked up on `document`, never on the test container).
+ * shell and asserts the Agentation toolbar mounts at the required
+ * `#agentation-root` host. The installed Agentation version also renders its
+ * toolbar through a React portal with a `data-agentation-root` attribute, so
+ * both the host and the live toolbar are looked up on `document`, never on
+ * the test container.
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
@@ -55,16 +56,14 @@ describe('agentation mount check', () => {
     render(React.createElement(App));
     await waitFor(
       () => {
-        const root =
-          document.getElementById('agentation-root') ??
-          document.querySelector('[data-agentation-root]');
-        expect(root).not.toBeNull();
+        expect(document.getElementById('agentation-root')).not.toBeNull();
+        expect(document.querySelector('[data-agentation-root]')).not.toBeNull();
       },
       { timeout: 15_000 },
     );
     expect(
-      document.getElementById('agentation-root') ??
-        document.querySelector('[data-agentation-root]'),
+      document.getElementById('agentation-root'),
     ).not.toBeNull();
+    expect(document.querySelector('[data-agentation-root]')).not.toBeNull();
   }, 20_000);
 });

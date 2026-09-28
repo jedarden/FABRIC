@@ -392,6 +392,20 @@ describe('smoke release gate: Agentation mount verification (UI policy)', () => 
     expect(smoke).toMatch(/entry point \$ENTRY/);
   });
 
+  it('requires the Agentation import map before every browser module entry point', () => {
+    const index = readFileSync(join(repoRoot, 'src', 'web', 'frontend', 'index.html'), 'utf8');
+    const importMapOffset = index.indexOf('<script type="importmap">');
+    const moduleEntryOffset = index.indexOf('<script type="module"');
+
+    expect(importMapOffset).toBeGreaterThanOrEqual(0);
+    expect(moduleEntryOffset).toBeGreaterThan(importMapOffset);
+    expect(index).toContain('"react": "https://esm.sh/react@19.2.4"');
+    expect(index).toContain(
+      '"react-dom/client": "https://esm.sh/react-dom@19.2.4/client"',
+    );
+    expect(smoke).toContain("grep -q 'type=\"importmap\"'");
+  });
+
   it('checks the mount marker in the source-build artifacts before packaging', () => {
     expect(smoke).toMatch(
       /grep -q 'agentation-root' "\$SRC"\/dist\/web\/public\/assets\/index-\*\.js/,
