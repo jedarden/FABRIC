@@ -1984,6 +1984,24 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
 
     // ============================================
+    // Deduplicated Alert Inventory (docs/alert-policy.md)
+    // ============================================
+
+    // The alert inventory: one active instance per no-work/stuck condition,
+    // plus full instance history (resolved epochs included). Dedup is
+    // enforced upstream in the store's observation path — every observation
+    // folds into the identity's single active instance — so this surface can
+    // only ever report what that policy produced, never one row per
+    // observation. Keyed on AlertRecord.identity (the condition) and
+    // AlertRecord.id (the specific open/closed instance).
+    app.get('/api/alerts', (_req: Request, res: Response) => {
+      res.json({
+        active: store.getActiveAlerts(),
+        history: store.getAlertHistory(),
+      });
+    });
+
+    // ============================================
     // OOM Alert API Endpoints
     // ============================================
 

@@ -98,9 +98,30 @@ alerts.history();                     // every instance, resolved included
 The event store owns one `AlertManager` (`InMemoryEventStore.getActiveAlerts()`
 / `getAlertHistory()`), reset by `clear()` alongside the rest of the store.
 
+Every NEEDLE observation enters through `InMemoryEventStore.add()`, so the
+store's observation sites are the single enforcement point of this policy:
+there is no path to an alert bead that bypasses the manager, and the HTTP
+surface below can only report what the policy produced.
+
+## HTTP surface
+
+```
+GET /api/alerts   →  { "active": AlertRecord[], "history": AlertRecord[] }
+```
+
+`active` is the open-bead inventory — at most one instance per
+`kind:scope` identity, no matter how many observations arrived. `history`
+is every instance including resolved epochs. Read-only, like every GET
+endpoint (docs/api-auth.md).
+
 ## Invariants (test-pinned)
 
-Pinned in `src/alertManager.test.ts`:
+Pinned in `src/alertManager.test.ts` — the manager invariants directly, and
+the `event store alert policy end to end` block for each clause as it
+behaves through `InMemoryEventStore.add()` (duplicate observations, drifting
+reasons, cooldown escalation, idempotent resolution, recurrence, and the
+full stuck detect→resume→relapse cycle). The HTTP contract is pinned in
+`src/web/server.alerts.test.ts`:
 
 1. `alertIdentity(kind, scope)` is deterministic; kinds and scopes never
    collide; the reason text never changes identity.
@@ -116,7 +137,8 @@ Pinned in `src/alertManager.test.ts`:
 
 ## Future work
 
-Surfacing active alerts in the TUI/web dashboards and filing/closing the
-corresponding beads in a bead workspace are not wired yet; both should key on
+The alert inventory is exposed over HTTP (`GET /api/alerts`, above). Not
+wired yet: rendering it in the TUI/web dashboards, and filing/closing the
+corresponding beads in a bead workspace. Both should key on
 `AlertRecord.identity` (dedup) and `AlertRecord.id` (the specific open/closed
 bead) so the UI inherits this policy rather than re-implementing it.
