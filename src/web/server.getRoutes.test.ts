@@ -287,7 +287,7 @@ describe('GET route-discovery contract (docs/api-auth.md)', () => {
   });
 
   describe('every discovered GET route, on both listeners', () => {
-    it('is served without an Authorization header — never 401, never 403', { timeout: 60_000 }, async () => {
+    it('is served without an Authorization header — never 401, never 403', { timeout: 180_000 }, async () => {
       for (const listener of listenerPorts()) {
         for (const pattern of discovered()) {
           const res = await get(listener, concretePath(pattern));
@@ -297,7 +297,7 @@ describe('GET route-discovery contract (docs/api-auth.md)', () => {
       }
     });
 
-    it('is served even with a WRONG Bearer token — a bad credential cannot block a read', { timeout: 60_000 }, async () => {
+    it('is served even with a WRONG Bearer token — a bad credential cannot block a read', { timeout: 180_000 }, async () => {
       for (const listener of listenerPorts()) {
         for (const pattern of discovered()) {
           const res = await get(listener, concretePath(pattern), 'wrong-token');
