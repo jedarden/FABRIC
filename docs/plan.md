@@ -1389,6 +1389,7 @@ fabric logs --worker w-abc123           # Filter by worker
 - [x] Command palette (Cmd+K)
 - [x] File context panel (side panel)
 - [x] Focus mode with pinning
+- [x] Entrypoint inventory and Agentation mount verification ([web entrypoints](web-entrypoints.md))
 
 The web-display implementation is complete, but this phase is not a production
 readiness declaration. Before calling it complete operationally, run the

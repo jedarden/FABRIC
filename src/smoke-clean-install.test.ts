@@ -42,6 +42,7 @@ const SMOKE_SCRIPT = 'scripts/smoke-clean-install.sh';
 const smokePath = join(repoRoot, SMOKE_SCRIPT);
 const REGISTRY_SMOKE_SCRIPT = 'scripts/smoke-registry-install.sh';
 const registrySmokePath = join(repoRoot, REGISTRY_SMOKE_SCRIPT);
+const webEntrypointsDoc = readFileSync(join(repoRoot, 'docs', 'web-entrypoints.md'), 'utf8');
 
 const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
 const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
@@ -380,6 +381,14 @@ describe('smoke release gate: Agentation mount verification (UI policy)', () => 
     const entries = frontendEntryPoints();
     expect(entries.length).toBeGreaterThan(0);
     expect(entries).toContain('index.html');
+  });
+
+  it('keeps the documented entrypoint inventory aligned with Vite', () => {
+    for (const entry of frontendEntryPoints()) {
+      expect(webEntrypointsDoc).toContain(`\`src/web/frontend/${entry}\``);
+    }
+    expect(webEntrypointsDoc).toContain('e2e/agentation-mount.spec.ts');
+    expect(webEntrypointsDoc).toContain('src/web/frontend/src/__agentation-mount-check.test.tsx');
   });
 
   it('verifies the Agentation mount marker on every served entry point', () => {

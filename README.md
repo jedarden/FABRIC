@@ -35,6 +35,11 @@ Live browser dashboard at `localhost:3000`:
 - Timeline visualization
 - WebSocket-powered updates
 
+The web app currently has one Vite HTML entrypoint, `src/web/frontend/index.html`,
+served at `/`; client-side dashboard paths are SPA views using that same
+document. The entrypoint inventory and the required Agentation import-map and
+mount checks are documented in [`docs/web-entrypoints.md`](docs/web-entrypoints.md).
+
 ## Installation
 
 ```bash
