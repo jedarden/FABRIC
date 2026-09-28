@@ -149,6 +149,7 @@ npx vitest run tests/docs/tui-view-model-doc.test.ts
 
 ## Test Coverage
 
+- **`src/tui/fileHeatmap.integration.test.ts`:** 21 integration tests covering the real event-store → TUI app → FileHeatmap path, including live refresh, all four sort modes, mutually exclusive filters, collision/anomaly rows, worker labels, heat levels, and selection navigation
 - **`src/tui/components/FileHeatmap.test.ts`:** 51 tests covering UI component behavior
 - **`src/fileHeatmap.test.ts`:** 20 tests covering the store's heatmap aggregation logic
 - **`src/web/frontend/test/FileHeatmap.test.tsx`:** 31 tests covering web frontend
