@@ -217,6 +217,7 @@ interface FileHeatmapAccessor {
   getSortMode(): string;
   getCollisionFilter(): boolean;
   getAnomalyFilter(): boolean;
+  setFilter(filter: string): void;
 }
 
 /**
@@ -434,6 +435,25 @@ describe('FileHeatmap TUI integration (real store → real app → real componen
       const content = rendered(world);
       expect(content).toContain('Mods: 3');
       expect(rowFor(content, 'work/growing.ts')).toContain('{bold}  3{/}');
+    });
+
+    it('applies the directory filter to the real store on the next refresh', () => {
+      const world = buildWorld();
+      seedViaApp(world.store, world.app, [
+        ...series('w-alpha', 'src/live.ts', world.t0 + 1000, 2),
+        ...series('w-bravo', 'docs/notes.md', world.t0 + 3000, 2),
+      ]);
+      openHeatmap(world);
+
+      expect(rowFor(rendered(world), 'src/live.ts')).toBeDefined();
+      expect(rowFor(rendered(world), 'docs/notes.md')).toBeDefined();
+
+      world.heatmap.setFilter('src/');
+      world.app.render();
+
+      const filtered = rendered(world);
+      expect(rowFor(filtered, 'src/live.ts')).toBeDefined();
+      expect(rowFor(filtered, 'docs/notes.md')).toBeUndefined();
     });
   });
 

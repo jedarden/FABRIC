@@ -1614,6 +1614,27 @@ describe('FileHeatmap', () => {
       );
       expect(rowForPath(lastRenderedContent(), 'new.ts')).toBeDefined();
     });
+
+    it('renders only files matching the active directory filter after refresh', () => {
+      const allEntries = [
+        createMockEntry({ path: 'src/live.ts' }),
+        createMockEntry({ path: 'docs/notes.md' }),
+      ];
+      const getHeatmap = vi.fn(({ directoryFilter }: HeatmapOptions) =>
+        directoryFilter === 'src/' ? allEntries.filter((entry) => entry.path.startsWith('src/')) : allEntries
+      );
+
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+      expect(rowForPath(lastRenderedContent(), 'docs/notes.md')).toBeDefined();
+
+      fileHeatmap.setFilter('src/');
+      fileHeatmap.updateData(getHeatmap, createMockStats);
+
+      const content = lastRenderedContent();
+      expect(getHeatmap).toHaveBeenLastCalledWith(expect.objectContaining({ directoryFilter: 'src/' }));
+      expect(rowForPath(content, 'src/live.ts')).toBeDefined();
+      expect(rowForPath(content, 'docs/notes.md')).toBeUndefined();
+    });
   });
 
   // --- remaining documented-behavior pins (fabric-c0413489) ---
