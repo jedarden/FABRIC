@@ -1,8 +1,8 @@
 # FABRIC Gap Analysis
 
 **Generated:** 2026-03-07 (original analysis, bead `bd-muv`)
-**Last refreshed:** 2026-09-26 (bead `fabric-bd06ee99`)
-**Analysis bead lineage:** `bd-muv` → `fabric-0c9aeb03` ("Gap analysis: Compare implementation against plan.md and create beads for missing features", closed) → `fabric-bd06ee99` (this refresh)
+**Last refreshed:** 2026-09-28 (bead `fabric-9ca2871c`; work session 2026-09-27→28 UTC)
+**Analysis bead lineage:** `bd-muv` → `fabric-0c9aeb03` ("Gap analysis: Compare implementation against plan.md and create beads for missing features", closed) → `fabric-bd06ee99` (2026-09-26 refresh, closed) → `fabric-9ca2871c` (this refresh)
 
 This document compares the FABRIC implementation against docs/plan.md to identify missing features.
 
@@ -22,26 +22,26 @@ file is mapped explicitly below.
 
 ## Implementation Status Summary
 
-### Phase 1: Core Infrastructure ✅ COMPLETE
+### Phase 1: Core Infrastructure ✅ COMPLETE (one open defect, one open contract cluster)
 | Feature | File | Status |
 |---------|------|--------|
 | Log Tailer (single file) | src/tailer.ts | ✅ |
-| Directory Tailer (canonical source for `~/.needle/logs/`, hot-add) | src/directoryTailer.ts | ✅ (Phase 8 fix) |
+| Directory Tailer (canonical source for `~/.needle/logs/`, hot-add) | src/directoryTailer.ts | ✅ implemented — **open bug:** `fabric tui --source <dir>` startup replay busy-loops (root-caused, fix pending → owner `fabric-931136a0`) |
 | JSON Parser | src/parser.ts | ✅ |
-| Event Store (in-memory + SQLite event persistence) | src/store.ts | ✅ |
+| Event Store (in-memory + SQLite event persistence) | src/store.ts | ✅ implemented — maxEvents cap + liveness guard live (src/web/server.ts:342/379/2137); contract pins open → `fabric-13164cdc` |
 | Type Definitions | src/types.ts | ✅ |
 
-### Phase 2: TUI Display ✅ COMPLETE
+### Phase 2: TUI Display ✅ COMPLETE (open P1 defect + coverage gaps — see Current Gaps)
 | Feature | File | Status |
 |---------|------|--------|
 | Worker Grid | src/tui/components/WorkerGrid.ts | ✅ |
-| Activity Stream | src/tui/components/ActivityStream.ts | ✅ |
+| Activity Stream | src/tui/components/ActivityStream.ts | ✅ (per-line render amplification is half of the busy-loop bug → `fabric-931136a0`) |
 | Worker Detail | src/tui/components/WorkerDetail.ts | ✅ |
 | Command Palette | src/tui/components/CommandPalette.ts | ✅ |
-| Keyboard Navigation | src/tui/utils/keyboard.ts | ✅ |
-| Focus Mode | src/tui/app.ts | ✅ |
+| Keyboard Navigation | src/tui/utils/keyboard.ts | ✅ (r/R deconfliction landed b1e8567; `fabric-de6a9f72` closed) |
+| Focus Mode | src/tui/app.ts | ✅ (remaining view-machine coverage open → `fabric-becb1ab0`; `fabric-6dafdf52` closed 2026-09-27) |
 
-### Phase 3: Web Display ✅ COMPLETE
+### Phase 3: Web Display ✅ COMPLETE (2026-07→09 outage resolved; alert-dedup policy enforced)
 | Feature | File | Status |
 |---------|------|--------|
 | HTTP Server | src/web/server.ts | ✅ |
@@ -52,12 +52,23 @@ file is mapped explicitly below.
 | Fleet Summary Bar (Phase 9) | src/web/frontend/src/components/FleetSummaryBar.tsx | ✅ |
 | Focus Mode | src/web/frontend/src/App.tsx | ✅ |
 
+The live-service outage tracked by `fabric-166beca4` (dashboard dark since
+2026-07-09; root cause of the long darkness was the hetzner-ex44 → codinghome
+host migration, which no fabric systemd units survived) **closed 2026-09-14**.
+Live check 2026-09-28 (~03:40 UTC re-check): `fabric-web.service` active,
+`/api/health` → `status:"ok"` on :3000, OTLP :4318 listening, 113 files watched
+(fleet re-activated; 129 at the 2026-09-27 check, 19 during the overnight
+quiescent window). The alerting-pipeline item is resolved too:
+documented AlertManager deduplication is now enforced end to end —
+`fabric-c0e278ee` closed 2026-09-28 with `2b27660` (GET /api/alerts inventory +
+store-path policy tests). No open web-display items remain.
+
 ### Phase 4: Intelligence Features (Core) ✅ COMPLETE
 | Feature | File | Status |
 |---------|------|--------|
 | Cross-Reference Hyperlinking | src/crossReferenceManager.ts, src/tui/components/CrossReferencePanel.ts | ✅ |
 | Inline Diff View | src/tui/components/DiffView.ts | ✅ |
-| File Activity Heatmap | src/fileHeatmap.ts, src/tui/components/FileHeatmap.ts | ✅ |
+| File Activity Heatmap | src/fileHeatmap.ts, src/tui/components/FileHeatmap.ts | ✅ implemented — documented behavior contracts pinned (`0f8363b` batch + `fabric-aa4751af`; remainder closed via `fabric-c0413489` / `fabric-2f9fd906`, 2026-09-28) |
 | Cost & Token Tracking | src/tui/utils/costTracking.ts, web CostDashboard.tsx | ✅ |
 | Conversation Transcript | src/conversationParser.ts, src/tui/components/ConversationTranscript.ts | ✅ |
 
@@ -131,50 +142,98 @@ The two successors that carry their legacy ID in the title (`fabric-7a8aa0c9`,
 
 ---
 
-## Current Gaps (2026-09-26)
+## Current Gaps (2026-09-28)
 
-plan.md marks Phases 1–9 complete. The open frontier is **~100 open beads**, dominated
-by verification/coverage hardening rather than missing features. Grouped:
+plan.md marks Phases 1–9 complete. The bead store holds **95 open + 1 in_progress
+of 430 beads** (2026-09-28 UTC; 97 before the FileHeatmap contract pair closed),
+dominated by verification/coverage hardening, not missing
+features. This refresh reclassifies the frontier — the 2026-09-26 edition mixed
+bugs, missing features, and already-landed work under one "gaps" heading. Every
+outstanding item below is linked to **exactly one owning bead**.
 
-### 1. Feature gaps — single-file source assumptions (P2)
+Classification legend: **bug** = code defect on main · **feature** = documented
+behavior not yet built · **verification** = behavior exists, tests/docs must pin
+it · **bookkeeping** = work landed, bead must close on existing evidence ·
+**resolved** = fixed or recovered, kept for the record.
 
-The Phase 8 bug class ("append `/workers.log` to any directory path") has recurred
-twice in newer commands:
+### 1. Open bugs (code defects on main)
 
-| Bead | Feature | Description |
-|------|---------|-------------|
-| `fabric-32fe329b` (+ ~15 children, incl. `fabric-1913db1c`, `fabric-01a5f18a`) | `fabric digest --source` | digest is hardcoded to a single-file `workers.log`-style source; needs directory support routed through the shared resolver (src/pathResolver.ts), plus tests |
-| `fabric-931136a0` (+ `fabric-0386d35e`, `fabric-de6275b2`, `fabric-6d914c4c`) | `fabric tui --source` busy-loop | directory source busy-loops a CPU core instead of event/interval-driven watching; diagnosis + fix + regression coverage split across children |
+| Owning bead | Class | Defect | State |
+|------|-------|--------|-------|
+| `fabric-931136a0` (P1) | **bug** | `fabric tui --source <dir>` pins a core at ~100% and never paints on realistic directories | **Root-caused** — docs/notes/tui-directory-source-busy-loop.md (re-verified 2026-09-19 at `5bdb723`): full-history synchronous replay of every recently-modified file × O(100×) blessed render amplification per line (~44–54 ms/line), sequenced *before* the first paint. Diagnosis child `fabric-0386d35e` is complete in substance; fix child `fabric-de6275b2` is open (a prior attempt left `.beads/traces/fabric-931136a0/wip-01a0b114-*.patch`, 91 KB, review before rewriting); regression gate `fabric-6d914c4c` blocks close. Open audit children around the diagnosis: `fabric-675ead93` / `fabric-cdbc3e3a` / `fabric-d541b07d` (note audit), plus the repro-script chain `fabric-ac34599b` + `fabric-b58f7e44`. |
 
-### 2. Implemented in code, tracking beads still open (P3)
+### 2. Missing features (documented, not built)
 
-| Bead | Feature | Note |
-|------|---------|------|
-| `fabric-e91edf0c`, owner `fabric-f511a390` (+ Unravel children) | Digest AI narrative | src/digestAi.ts landed 2026-09-16 (plan.md §AI Session Digest); beads remain open for verification/ownership closure |
-| `fabric-92a4b7cb` | TUI heartbeat liveness indicator | collapse heartbeat events per worker |
-| `fabric-de6a9f72` | TUI `r`/`R` shortcut conflict | resolved — b1e8567 deconflicted the bindings (`r` re-renders, `R` alone toggles replay, DAG force-refresh moved to `C-r`); a707ec86 pinned the help-overlay text |
+| Owning bead | Class | Feature | Note |
+|------|-------|---------|------|
+| `fabric-92a4b7cb` (P1) | **feature** | Collapse `heartbeat.emitted` events into a per-worker liveness indicator in the TUI | 20 of the last 22 feed lines were heartbeats in a measured frame — the live view is unreadable without this. Split-child of `fabric-931136a0`; mechanically independent of the busy-loop fix. |
 
-### 3. Verification & coverage hardening (largest cluster, ~70 beads)
+No other missing features were identified against plan.md Phases 1–9. The
+single-file source bug class from the 2026-09-26 edition is **closed as a code
+matter** (see §3/§4): the last open member was the digest source, which landed.
+
+### 3. Resolved since the 2026-09-26 refresh (kept for the record)
+
+| Owning bead | Was | Resolution |
+|------|-----|------------|
+| `fabric-166beca4` (closed 2026-09-14) | **bug/ops** — live web dashboard dark since 2026-07-09, OPS-GATED | Root cause of the two-month darkness: the hetzner-ex44 → codinghome migration never reinstalled the fabric systemd units (the `Restart=on-failure` watchdog died with the old host). Code fixes shipped in `14e96e0` (ESM heap-snapshot writer, memory-pressure trigger, retention size cap). Service reinstalled on codinghome and verified live 2026-09-27: `fabric-web.service` active, `/api/health` `status:"ok"` (:3000), OTLP :4318 listening, 129 files watched. |
+| `fabric-de6a9f72` (closed) | **bug** — TUI `r`/`R` shortcut conflict | b1e8567 deconflicted the bindings (`r` re-renders, `R` alone toggles replay, DAG force-refresh → `C-r`); a707ec86 pinned the help-overlay text. |
+| `fabric-32fe329b` + children (still open) | **feature** — `fabric digest` hardcoded to a single-file `workers.log` source, no `--source` directory support | **Landed on main** — the code claim is no longer true. Evidence: digest declares `--source` (src/cli.ts:778), routes through the shared resolver (`resolveFromOptions` src/cli.ts:96, default `{kind:'directory', path:'~/.needle/logs'}`), and constructs `DirectoryTailer` for directory sources (src/cli.ts:826). Landed via `52640c8` (replay directory source), `35b44b5` (`-s` short flag), `fd6c1de` (docs). What remains is bookkeeping (§4), not a feature gap. |
+| `fabric-c0e278ee` (closed 2026-09-28) | **bug** (policy not enforced) — AlertManager dedup not applied to alert-bead creation | Shipped in `2b27660`: `GET /api/alerts` exposes the deduplicated inventory (one active instance per kind/scope identity + immutable resolved history), and store-path integration tests in src/alertManager.test.ts pin the policy clauses (duplicate observations fold into one active instance, reason changes keep one identity, cooldown suppresses then escalates, resolution is idempotent). |
+| `fabric-6dafdf52` (closed 2026-09-27) | **verification** — complete TUI view-state/overlay contract tests | Closed at epoch 5 after its contract batch landed; the committed full-suite baseline (3397 passed / 99 files, `a06b818` era) includes it. Remaining documented view-machine coverage continues under `fabric-becb1ab0`. |
+| `fabric-2fd06cd1` + `fabric-f05a227a`, `fabric-b7b48295` (all closed) | **verification** — clean-install smoke workflow + release-gate suite | Smoke workflow landed 2026-09-26; the release-gate suite landed in `0044710` (2026-09-27, owner bead `fabric-2fd06cd1`). |
+
+### 4. Implemented in code, tracking beads still open (bookkeeping + coverage)
+
+| Owning bead | Cluster | What actually remains |
+|------|---------|----------------------|
+| `fabric-32fe329b` (+ ~15 children: `fabric-01a5f18a`, `fabric-1913db1c`, `fabric-37cdb6da`, `fabric-ec0f6c7e`, `fabric-76cb8c06`, `fabric-b52c383e`, …) | digest `--source` | Feature is live (§3); children are test/documentation verifications — close them on the landed code, don't reimplement. |
+| `fabric-e91edf0c`, owner `fabric-f511a390` | Digest AI narrative | src/digestAi.ts landed 2026-09-16 (plan.md §AI Session Digest; `66ee920`); close on the documented fallback contract. Four `[Unravel]` proposals (`fabric-28421d4d`, `fabric-fdafee52`, `fabric-51d76530`, `fabric-6ef5794a`) target the *escalation-counter* dispatch infra (needle-e62f940a), not FABRIC code. |
+
+### 5. Verification & coverage hardening (largest cluster, ~63 beads)
 
 Contract/coverage work pinning documented behavior in tests — each bead small, the
-aggregate large:
+aggregate large. **The maxEvents enforcement named by this cluster is implemented,
+not missing:** `--max-events` parses (src/cli.ts:351) and propagates into the web
+server (`maxEventCount`, src/web/server.ts:123/166), the liveness endpoints report
+503 when the store exceeds the cap (src/web/server.ts:342/379), and the memory-bomb
+guard exits after 3 consecutive over-max checks (src/web/server.ts:2137-2143).
+What is open is *pinning those contracts in tests*:
 
-- **Coverage baseline artifacts** (`fabric-e166b9dd`, `fabric-fe89fbe4`, `fabric-f04ff738` + ~20 children): establish and document `artifacts/coverage-baseline/`.
-- **Memory / heap-snapshot contracts** (`fabric-c05c7990`, `fabric-d7bd9360`, `fabric-6734f908`, `fabric-b764daff`, `fabric-02fbe1ee`, `fabric-b8b13850`): retention, diff analysis, API endpoints, trigger/cooldown pins.
-- **Metrics & OTLP host-label contracts** (`fabric-0b557baa`, `fabric-96975906`, `fabric-86bfc356` + 3 siblings): `/api/metrics` types/help text, per-host separation, label escaping.
-- **CLI operational-option contracts** (`fabric-13164cdc`, `fabric-7666ce28`, `fabric-83cc1dea`, `fabric-c7fab6aa`, `fabric-2c20fd74`, `fabric-13c185d9`): `--max-events` liveness, `--heap-snapshots`/`--snapshot-interval` propagation, help-overlay keys.
+- **CLI operational-option contracts** — owner `fabric-13164cdc`, children `fabric-7666ce28` (help surface), `fabric-83cc1dea` (`--max-events` propagation + overload liveness), `fabric-2c20fd74` (3-strike guard exit + streak reset), `fabric-c7fab6aa` (snapshot options). An implementation already exists on main (commit `890f3ae`, src/cliOperationalOptions.test.ts) — children verify, then close.
+- **Coverage baseline artifacts** (`fabric-e166b9dd`, `fabric-fe89fbe4`, `fabric-f04ff738` + ~20 children): establish and document `artifacts/coverage-baseline/`. Several chains have degenerated into meta-verification (beads verifying that a README exists and is git-tracked: `fabric-77e760ed`, `fabric-7a492467`, `fabric-b888494b`, `fabric-e961550d`, `fabric-e45eb76d`, `fabric-0e134708`, …) — most are quarantined or deferred; batch-reconcile rather than dispatching one per epoch.
+- **Memory / heap-snapshot contracts** (`fabric-c05c7990`, `fabric-d7bd9360`, `fabric-6734f908`, `fabric-b764daff`, `fabric-b8b13850`): retention, diff analysis, API endpoints, trigger/cooldown pins.
+- **Metrics & OTLP host-label contracts** (`fabric-0b557baa`, owner `fabric-96975906`, children `fabric-37c4b812`, `fabric-45dc56ba`, `fabric-f0f1c757`, `fabric-86bfc356`): `/api/metrics` types/help text, per-host separation, label escaping.
+- **Component behavior contracts**: FileHeatmap documented behaviors are now fully
+  pinned — the `fabric-aa4751af` batch (`0f8363b`) plus `fabric-c0413489` and
+  `fabric-2f9fd906`, both **closed 2026-09-28** after their failure-count:3
+  escalations resolved as infra-only (declined splits; contract batches landed).
+  Remaining open: TUI view machine (`fabric-becb1ab0`; `fabric-6dafdf52` closed
+  2026-09-27, its batch is in the committed baseline).
 - **Retention-prune audit** (`fabric-0a4e421b`): tests vs documented count/age/size rules.
-- **Ingest-schema validation via synthetic logs** (`fabric-8abad6e9`, `fabric-f88573e2` + trace/catalog children): derive required-field lists from src/normalizer.ts and src/store.ts.
-- **Smoke & release gate** (`fabric-f05a227a`, `fabric-b7b48295`, owner `fabric-2fd06cd1`): authenticated web/OTLP smoke coverage; clean-install smoke workflow — script (`scripts/smoke-clean-install.sh`), README promise section, and the 16-test alignment gate (`src/smoke-clean-install.test.ts`, keeping README ↔ package.json ↔ smoke script ↔ `--help` consistent) all landed 2026-09-26.
+- **Ingest-schema validation via synthetic logs** (`fabric-8abad6e9`, owner `fabric-f88573e2` + trace/catalog children): derive required-field lists from src/normalizer.ts and src/store.ts.
 - **TUI shortcut documentation** (`fabric-6361cc78`, `fabric-5a449ea7`, `fabric-a90a6ab0`, `fabric-06fb6dc0`, `fabric-3e4e93b3`).
 
-### 4. Operational noise (P4)
+### 6. Operational noise (P4)
 
 - `fabric-3b8cdb99`, `fabric-6fba739d` — `[Pulse]` ENOENT when tests delete aged heap snapshots; symptom of the heap-snapshot test cluster above.
 
 ### Known future work recorded in plan.md (no bead)
 
 - Wiring the `>digest` command-palette trigger and the periodic/session-end triggers to the AI digest layer (they stay deterministic by design today; plan.md §AI Session Digest).
+
+### Verification results recorded by this refresh (2026-09-28 UTC)
+
+| Check | Result |
+|-------|--------|
+| `npx tsc --noEmit` | exit 0 — no type errors |
+| `npx vitest run` | **3571 passed / 2 skipped / 0 failed, 103 files**, exit 0 (~104 s) |
+| Committed-main baseline | superseded — the 3397/99-file reference (`a06b818` era) predates the alert-dedup suite (`2b27660`: 9 route tests + 9 store-path tests); the 3571/103 run above is the current full-suite reference |
+| Live service | `fabric-web.service` active; `/api/health` → `status:"ok"`, 10,000 events, **113** tailer files watched (fleet re-activated; 129 at the 2026-09-27 check, 19 quiescent overnight), :3000 + :4318 listening |
+
+The working tree at verification time differed from `main` only by this document
+and bead-checkpoint bookkeeping — neither is compiled or executed by the suite —
+so the results above are effectively committed-main results.
 
 ---
 
@@ -200,40 +259,58 @@ bd-muv / fabric-0c9aeb03 (2026-03-07 Gap Analysis) — CLOSED, all children reso
 ├── fabric-9ee4e460 (Focus Presets) ✅   [bd-2r0]
 └── fabric-abdf7fa7 (Theme Support) ✅   [bd-2ot]
 
-fabric-bd06ee99 (2026-09-26 refresh — this document)
-├── fabric-32fe329b (digest --source directory support) — open
-├── fabric-931136a0 (tui --source busy-loop) — open
-├── fabric-e91edf0c / fabric-f511a390 (digest AI closure) — open
-├── fabric-92a4b7cb (heartbeat liveness) — open
-├── fabric-de6a9f72 (r/R shortcut conflict) — resolved (b1e8567, a707ec86)
-└── verification & coverage hardening cluster (~70 beads) — open
+fabric-bd06ee99 (2026-09-26 refresh) — CLOSED
+fabric-9ca2871c (2026-09-27/28 refresh — this document) — closes with this refresh
+├── fabric-931136a0 (tui --source busy-loop) — open BUG, root-caused (failure-count:4)
+│   ├── fabric-0386d35e (diagnosis umbrella — substance complete, close on the note)
+│   │   ├── fabric-675ead93 / fabric-cdbc3e3a / fabric-d541b07d (note-audit children) — open
+│   │   └── fabric-ac34599b (repro-script hardening) + fabric-b58f7e44 (repro note) — open
+│   ├── fabric-de6275b2 (watcher fix) — open
+│   ├── fabric-6d914c4c (regression gate) — open
+│   └── fabric-92a4b7cb (heartbeat liveness) — open FEATURE
+├── fabric-c0e278ee (AlertManager dedup enforcement) — CLOSED 2026-09-28 (2b27660)
+├── fabric-32fe329b (digest --source) — open BOOKKEEPING (code landed: 52640c8, 35b44b5, fd6c1de)
+├── fabric-e91edf0c / fabric-f511a390 (digest AI closure) — open BOOKKEEPING (code landed: 66ee920)
+├── fabric-166beca4 (web outage) — CLOSED 2026-09-14 (service live, re-verified 2026-09-28)
+├── fabric-de6a9f72 (r/R conflict) — CLOSED (b1e8567, a707ec86)
+├── fabric-6dafdf52 (TUI view-state contracts) — CLOSED 2026-09-27 (batch in committed baseline)
+└── verification & coverage hardening cluster (~65 beads) — open
+    ├── fabric-13164cdc (CLI operational options incl. --max-events contracts)
+    ├── fabric-c0413489 / fabric-2f9fd906 (FileHeatmap behavior contracts) — CLOSED 2026-09-28
+    ├── fabric-becb1ab0 (documented TUI view machine — completion)
+    └── … (metrics, memory, ingest-schema, retention, coverage-baseline, TUI docs)
 ```
 
 ---
 
 ## Recommendations
 
-1. **Fix the single-file bug class once.** `fabric digest --source` (`fabric-32fe329b`)
-   and the `fabric tui --source` busy-loop (`fabric-931136a0`) are the same disease the
-   Phase 8 fix (plan.md `bd-0nd` epic) cured for `fabric tui`: hand-rolled source
-   resolution. Route both through the shared resolver (src/pathResolver.ts /
-   `resolveSource`) — `fabric-1913db1c` already scopes this for digest — and add
-   regression tests so the third recurrence is prevented, not just treated.
+1. **Land the TUI busy-loop fix — the only open product bug with user-visible
+   impact.** The diagnosis is done (docs/notes/tui-directory-source-busy-loop.md);
+   `fabric-de6275b2` should start from the reviewed WIP patch
+   (`.beads/traces/fabric-931136a0/wip-01a0b114-*.patch`) rather than from scratch,
+   apply the note's P1 (coalesce renders) before P2 (yielding replay), then let
+   `fabric-6d914c4c` pin the scheduling contract. The single-file source bug class
+   itself is closed at the resolver layer — the Phase 8 cure now covers
+   `tui`/`web`/`tail`/`digest`/`replay`; no third recurrence exists.
 
-2. **Batch the hardening cluster by subsystem.** The ~70 verification beads are
+2. **Close the bookkeeping beads on landed code.** `fabric-32fe329b` and its
+   digest-`--source` children should verify against the implemented resolver path
+   and close; `fabric-e91edf0c`/`fabric-f511a390` likewise for the digest AI layer.
+   Re-opening implementation work against already-landed code is how this store
+   grew meta-verification chains.
+
+3. **Batch the hardening cluster by subsystem.** The ~65 verification beads are
    individually trivial but churn-prone; work them per subsystem (metrics, memory,
    CLI options, ingest schema) so shared test helpers land once. Watch the
    escalation-counter behavior on re-dispatched beads (see the `[Unravel]` beads:
-   infra failures and declined splits are not content failures).
+   infra failures and declined splits are not content failures). The
+   coverage-baseline README chains are deep in quarantine/defer — reconcile them as
+   one batch instead of per-epoch redispatches.
 
-3. **Close the digest-AI tracking gap.** Code landed 2026-09-16; `fabric-e91edf0c`
-   and its owner `fabric-f511a390` should close on the existing implementation plus
-   the documented fallback contract (docs + src/digestAi.ts), rather than inviting
-   reimplementation.
-
-4. **TUI polish is cheap:** heartbeat liveness (`fabric-92a4b7cb`) and the `r`/`R`
-   conflict (`fabric-de6a9f72`) are user-visible and small; schedule them ahead of
-   the bulk hardening cluster.
+4. **TUI polish is cheap:** heartbeat liveness (`fabric-92a4b7cb`) is user-visible
+   and small; schedule it alongside the busy-loop fix since both touch the same
+   feed path.
 
 5. **Keep this document honest about eras.** New beads get `fabric-*` IDs via
    `bead` (bead-rs). Legacy `bd-*`/`bf-*` IDs in prose are history — map them, don't
@@ -241,17 +318,17 @@ fabric-bd06ee99 (2026-09-26 refresh — this document)
 
 ---
 
-## Files Reviewed (2026-09-26 refresh)
+## Files Reviewed (2026-09-28 refresh)
 
-- docs/plan.md (1738 lines; Phases 1–9 complete, ADR-1 multi-host collector)
-- src/types.ts, src/cli.ts, src/store.ts, src/historicalStore.ts
-- src/tailer.ts, src/directoryTailer.ts (source-resolution layer)
-- src/tui/app.ts and src/tui/components/ (all 21 components present)
-- src/tui/utils/ (costTracking, stuckDetection, fileAnomalyDetection, fuzzyMatch, prPreview, recoveryPlaybook, theme)
-- src/web/server.ts, src/web/frontend/src/App.tsx, src/web/frontend/src/components/ (31 components incl. TimelineView, FileContextPanel, BudgetAlertPanel, FleetSummaryBar, HistoricalSessionsPanel)
-- src/digestAi.ts, src/sessionDigest.ts
-- Bead store: `bead list --json` — 418 beads, 100 open/in_progress as of 2026-09-26
-- .beads/config.json (prefix `fabric`, created 2026-08-14)
+- docs/plan.md (Phases 1–9 complete, ADR-1 multi-host collector) — unchanged this refresh
+- src/cli.ts — digest `--source`/resolver path (lines 96–99, 775–830), `--max-events` parse/propagation (351, 404)
+- src/web/server.ts — maxEventCount overload responses (342, 379) and 3-strike liveness guard (2137–2143)
+- src/directoryTailer.ts, src/tailer.ts — startup replay path (busy-loop root-cause surface)
+- docs/notes/tui-directory-source-busy-loop.md — root-cause note, re-verified 2026-09-19 at `5bdb723`
+- docs/alert-policy.md — AlertManager policy (enforced end to end by closed `fabric-c0e278ee`)
+- Bead store: `bead list` — 95 open + 1 in_progress of 430 as of 2026-09-28 UTC; lineage beads `fabric-0c9aeb03`, `fabric-bd06ee99`, `fabric-166beca4`, `fabric-de6a9f72`, `fabric-aa4751af`, `fabric-6dafdf52`, `fabric-c0e278ee`, `fabric-c0413489`, `fabric-2f9fd906`, `fabric-2fd06cd1`/`fabric-f05a227a`/`fabric-b7b48295` confirmed closed
+- Live service: `systemctl --user is-active fabric-web.service` (active), `GET /api/health` (`status:"ok"`, 10,000 events, 113 tailer files watched), `ss -tln` (:3000, :4318)
+- Verification: `npx tsc --noEmit` (exit 0), `npx vitest run` (3571 passed / 2 skipped / 0 failed, 103 files, exit 0 — table above)
 
 ---
 
@@ -262,13 +339,25 @@ collector architecture. The 2026-03-07 gap list is **fully resolved: 12/12 gaps
 closed**, each traceable to a closed `fabric-*` successor bead and a verified
 implementation file on `main`.
 
-What remains is not planned-feature work but:
+Reconciled against the open bead store on 2026-09-28, what actually remains is:
 
-1. **Two recurrences of the single-file source bug** (digest `--source`, TUI busy-loop)
-2. **A large verification/coverage hardening frontier** (~70 small contract-test beads)
-3. **Small TUI polish** (heartbeat liveness; the `r`/`R` shortcut conflict is resolved — b1e8567)
-4. **Bookkeeping closures** (digest-AI tracking beads whose code already landed)
+1. **One open product bug:** the TUI directory-source busy-loop
+   (`fabric-931136a0`) — root-caused, fix + regression gate pending.
+2. **One small missing feature:** heartbeat liveness collapse (`fabric-92a4b7cb`).
+3. **A large verification/coverage hardening frontier** (~63 small contract-test
+   beads) — including the maxEvents contracts, whose enforcement itself is
+   already implemented.
+4. **Bookkeeping closures** (digest `--source` and digest-AI beads whose code
+   already landed).
+5. **Resolved and on record:** the web dashboard outage (`fabric-166beca4`,
+   closed 2026-09-14; re-verified live 2026-09-28), the `r`/`R` shortcut conflict
+   (`fabric-de6a9f72`), the alert-dedup policy gap (`fabric-c0e278ee`, closed
+   2026-09-28 via `2b27660`), the TUI view-state contract batch
+   (`fabric-6dafdf52`, closed 2026-09-27), the FileHeatmap behavior-contract pair
+   (`fabric-c0413489` / `fabric-2f9fd906`, closed 2026-09-28), and the
+   clean-install smoke / release-gate cluster (`fabric-2fd06cd1` + children, closed).
 
-All current gaps have corresponding open `fabric-*` beads. The next refresh of this
-document should confirm the single-file bug class is fixed at the resolver layer
-rather than patched per command.
+Every outstanding item above is linked to exactly one owning bead, and the
+2026-09-26 edition's last stale claim — digest lacking directory-tail support —
+is corrected: the resolver layer now backs `tui`, `web`, `tail`, `replay`, and
+`digest` alike.
