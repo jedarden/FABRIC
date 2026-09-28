@@ -81,7 +81,10 @@ of `HEAD`, an empty install directory, and a sandboxed `$HOME` with no
      parse, directory hot-add, graceful SIGINT, and identical `--help` output
      (the CLI reference documents `logs` as an alias of `tail`)
    - `fabric web` — `/api/health`, SPA assets served from the installed
-     package, graceful SIGINT, plus the `docs/api-auth.md` auth matrix over
+     package, the Agentation toolbar mount verified on every served HTML
+     entry point (workspace UI policy: every page mounts `#agentation-root`;
+     in-browser proof lives in the jsdom mount check and the e2e suite),
+     graceful SIGINT, plus the `docs/api-auth.md` auth matrix over
      **both** HTTP listeners (main + `--otlp-http`): an unset-token run
      (every POST accepted with no header — or a wrong one — and handlers
      really ingest) and a configured-token run (GETs open, missing token

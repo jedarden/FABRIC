@@ -22,12 +22,15 @@
 #                                              alias for tail"); --help equivalence
 #                                              checked in phase 4
 #                                fabric web    /api/health, SPA assets served from
-#                                              the installed package, graceful SIGINT,
-#                                              plus the docs/api-auth.md auth matrix
-#                                              over BOTH HTTP listeners (main +
-#                                              --otlp-http): open GETs, missing/
-#                                              wrong/valid token, malformed body,
-#                                              oversized body, unset-token mode, and
+#                                              the installed package, Agentation
+#                                              toolbar mount verified on every
+#                                              served HTML entry point, graceful
+#                                              SIGINT, plus the docs/api-auth.md
+#                                              auth matrix over BOTH HTTP
+#                                              listeners (main + --otlp-http):
+#                                              open GETs, missing/wrong/valid
+#                                              token, malformed body, oversized
+#                                              body, unset-token mode, and
 #                                              no-side-effect rejections
 #                                fabric tui    pty startup, graceful SIGINT
 #                                fabric replay pty startup on fixture logs, graceful
@@ -148,7 +151,14 @@ if [ "$WEB_ASSET_CSS" -eq 0 ]; then fail "no hashed CSS bundle in dist/web/publi
 if ! grep -q '/assets/' "$SRC/dist/web/public/index.html"; then
   fail "index.html does not reference the built /assets/ bundles"
 fi
-pass "dist/cli.js (with shebang) and web assets (js+css) generated"
+# Repository UI policy (Agentation): every web entry point must mount the
+# Agentation toolbar. The mount ships inside the React bundle (App renders
+# <Agentation/> and the toolbar roots at #agentation-root), so the built
+# bundle must carry the mount marker — a bundle without it renders a page
+# that looks complete and silently ships no toolbar.
+grep -q 'agentation-root' "$SRC"/dist/web/public/assets/index-*.js \
+  || fail "source build: web bundle does not carry the Agentation mount (agentation-root marker missing)"
+pass "dist/cli.js (with shebang) and web assets (js+css) generated; Agentation mount marker present"
 
 # --- Phase 3: package ---------------------------------------------------------
 
@@ -392,6 +402,32 @@ curl -sf "http://127.0.0.1:$OTLP_PORT/api/health" >/dev/null || fail "fabric web
 INDEX_HTML="$(curl -sf "http://127.0.0.1:$PORT/")" || fail "fabric web: GET / failed"
 printf '%s' "$INDEX_HTML" | grep -q '<div id="root">' || fail "fabric web: index served without React root"
 printf '%s' "$INDEX_HTML" | grep -q '/assets/' || fail "fabric web: index served without built asset references"
+
+# Agentation mount verification (repository UI policy): every web entry point
+# the installed package serves must load the Agentation toolbar. The smoke
+# runs no browser, so it verifies the served artifact instead: every shipped
+# HTML entry point, fetched over HTTP, must reference bundles carrying the
+# agentation-root mount marker. The in-browser mounting proof lives in
+# src/web/frontend/src/__agentation-mount-check.test.tsx (jsdom) and
+# e2e/agentation-mount.spec.ts (playwright).
+[ -d "$PKG/dist/web/public" ] || fail "installed package missing dist/web/public"
+ENTRY_COUNT=0
+for ENTRY in $(cd "$PKG/dist/web/public" && find . -name '*.html' | sed 's|^\./||' | sort); do
+  ENTRY_COUNT=$((ENTRY_COUNT + 1))
+  if [ "$ENTRY" = "index.html" ]; then ENTRY_URL="/"; else ENTRY_URL="/$ENTRY"; fi
+  ENTRY_HTML="$(curl -sf "http://127.0.0.1:$PORT$ENTRY_URL")" \
+    || fail "fabric web: entry point $ENTRY not served at $ENTRY_URL"
+  ENTRY_BUNDLES="$(printf '%s' "$ENTRY_HTML" | grep -oE '/assets/index-[^"]+\.js' | sort -u)"
+  [ -n "$ENTRY_BUNDLES" ] || fail "fabric web: entry point $ENTRY references no built JS bundle"
+  for ENTRY_BUNDLE in $ENTRY_BUNDLES; do
+    curl -sf "http://127.0.0.1:$PORT$ENTRY_BUNDLE" -o "$OUT_DIR/agentation-bundle-check.js" \
+      || fail "fabric web: entry point $ENTRY bundle $ENTRY_BUNDLE failed to load"
+    grep -q 'agentation-root' "$OUT_DIR/agentation-bundle-check.js" \
+      || fail "fabric web: entry point $ENTRY bundle $ENTRY_BUNDLE does not mount the Agentation toolbar (agentation-root marker missing)"
+  done
+done
+[ "$ENTRY_COUNT" -ge 1 ] || fail "fabric web: no HTML entry points found in dist/web/public"
+pass "fabric web: Agentation toolbar mount verified on $ENTRY_COUNT served entry point(s)"
 
 curl -sf "http://127.0.0.1:$PORT/api/summary" >/dev/null || fail "fabric web: GET /api/summary failed"
 

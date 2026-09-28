@@ -23,10 +23,14 @@
  * - every CLI invocation in the smoke must run under the sandboxed HOME, and
  *   every long-running process must have a graceful-SIGINT assertion
  * - the fixtures the smoke copies must exist
+ * - every web entry point the package ships must verify the Agentation
+ *   toolbar mount at the served-artifact level (workspace UI policy); the
+ *   in-browser mounting proof stays in the jsdom mount check and the
+ *   playwright spec
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
@@ -78,6 +82,30 @@ function readmeSmokeSection(): string {
 }
 
 const distCliBuilt = () => existsSync(join(repoRoot, 'dist', 'cli.js'));
+
+/**
+ * HTML entry points in the vite frontend root (vite.config.ts `root:`) — the
+ * source of the dist/web/public pages the server ships. One per page: each
+ * entry point wires the Agentation toolbar independently, so mount coverage
+ * is per entry point, never per repo (workspace UI policy).
+ */
+function frontendEntryPoints(): string[] {
+  const viteConfig = readFileSync(join(repoRoot, 'vite.config.ts'), 'utf8');
+  const root = viteConfig.match(/root:\s*'([^']+)'/)?.[1];
+  expect(root, 'vite.config.ts lost its root: declaration').toBeTruthy();
+  const found: string[] = [];
+  const walk = (dir: string, rel: string): void => {
+    for (const name of readdirSync(dir).sort()) {
+      if (name === 'node_modules') continue;
+      const full = join(dir, name);
+      const next = rel ? `${rel}/${name}` : name;
+      if (statSync(full).isDirectory()) walk(full, next);
+      else if (name.endsWith('.html')) found.push(next);
+    }
+  };
+  walk(join(repoRoot, root as string), '');
+  return found;
+}
 
 /**
  * Command names `fabric --help` documents, parsed from the real CLI output —
@@ -277,5 +305,57 @@ describe('smoke release gate: fixtures the runtime smoke depends on', () => {
     // The parse assertions name this fixture explicitly; if it is renamed the
     // smoke fails at runtime — catch it here instead.
     expect(existsSync(join(fixtures, 'alpha-d6288428.jsonl'))).toBe(true);
+  });
+});
+
+describe('smoke release gate: Agentation mount verification (UI policy)', () => {
+  // Workspace UI policy: every web page loads Agentation and mounts its
+  // toolbar as #agentation-root — verified by mounting, never by grepping a
+  // script tag, because the toolbar's module graph can fail silently while
+  // the page renders perfectly. The smoke runs no browser, so its web phase
+  // verifies the served artifact instead: every HTML entry point the
+  // installed package ships, fetched over HTTP, must reference bundles
+  // carrying the agentation-root mount marker. The in-browser mounting proof
+  // stays in the jsdom mount check and the playwright spec; the assertions
+  // here keep the smoke's artifact-level coverage from rotting the way the
+  // rest of the smoke contracts would without this gate.
+
+  it('discovers the vite frontend entry points the smoke must cover', () => {
+    const entries = frontendEntryPoints();
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries).toContain('index.html');
+  });
+
+  it('verifies the Agentation mount marker on every served entry point', () => {
+    // The loop enumerates every shipped *.html at runtime — a second entry
+    // point inherits coverage without further edits — and asserts each one
+    // is served, references bundles, and that every referenced bundle
+    // carries the mount marker.
+    expect(smoke).toContain("find . -name '*.html'");
+    expect(smoke).toContain("grep -q 'agentation-root'");
+    expect(smoke).toMatch(/entry point \$ENTRY/);
+  });
+
+  it('checks the mount marker in the source-build artifacts before packaging', () => {
+    expect(smoke).toMatch(
+      /grep -q 'agentation-root' "\$SRC"\/dist\/web\/public\/assets\/index-\*\.js/,
+    );
+  });
+
+  it('documents the Agentation mount verification in the README smoke section', () => {
+    expect(readmeSmokeSection()).toMatch(/Agentation/);
+  });
+
+  it('keeps the in-browser mount proofs the smoke comments point at', () => {
+    expect(
+      existsSync(
+        join(repoRoot, 'src', 'web', 'frontend', 'src', '__agentation-mount-check.test.tsx'),
+      ),
+      'jsdom Agentation mount check is missing',
+    ).toBe(true);
+    expect(
+      existsSync(join(repoRoot, 'e2e', 'agentation-mount.spec.ts')),
+      'playwright Agentation mount spec is missing',
+    ).toBe(true);
   });
 });
