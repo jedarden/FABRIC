@@ -331,6 +331,69 @@ describe('AlertBeadFiler.reconcileWithRegistry', () => {
     expect(sink.getBead('no-work:w-alpha#1')!.occurrences).toBe(8);
   });
 
+  it('does not recreate duplicate active beads after no-work and stuck reconciliation', () => {
+    let now = BASE;
+    const mgr = new AlertManager({ now: () => now });
+
+    const noWorkCanonical = record('no-work', 'w-alpha', BASE);
+    const stuckCanonical = record('stuck', 'w-alpha', BASE + MIN);
+    mgr.restore([
+      noWorkCanonical,
+      record('no-work', 'w-alpha', BASE + 2 * MIN, {
+        id: 'legacy-no-work-2',
+        epoch: 2,
+      }),
+      record('no-work', 'w-alpha', BASE + 3 * MIN, {
+        id: 'legacy-no-work-3',
+        epoch: 3,
+      }),
+      stuckCanonical,
+      record('stuck', 'w-alpha', BASE + 4 * MIN, {
+        id: 'legacy-stuck-2',
+        epoch: 2,
+      }),
+    ]);
+
+    seedOpenBead(sink, noWorkCanonical.id, noWorkCanonical.identity, BASE);
+    seedOpenBead(sink, 'legacy-no-work-2', noWorkCanonical.identity, BASE + 2 * MIN);
+    seedOpenBead(sink, 'legacy-no-work-3', noWorkCanonical.identity, BASE + 3 * MIN);
+    seedOpenBead(sink, stuckCanonical.id, stuckCanonical.identity, BASE + MIN);
+    seedOpenBead(sink, 'legacy-stuck-2', stuckCanonical.identity, BASE + 4 * MIN);
+
+    const report = filer.reconcileWithRegistry(mgr.history(), { at: BASE + 5 * MIN });
+    expect(report.duplicatesClosed).toBe(3);
+    expect(
+      sink
+        .listBeads()
+        .filter((bead) => bead.status === 'open')
+        .map((bead) => bead.id)
+        .sort()
+    ).toEqual([noWorkCanonical.id, stuckCanonical.id].sort());
+
+    for (const duplicateId of ['legacy-no-work-2', 'legacy-no-work-3', 'legacy-stuck-2']) {
+      expect(sink.getBead(duplicateId)).toMatchObject({
+        status: 'closed',
+        closeNote: expect.stringContaining('one open bead per active alert instance'),
+      });
+    }
+
+    // Repeated observations for either identity must fold into the canonical
+    // rows. This guards against the legacy pile returning on the next ingest
+    // pass after reconciliation.
+    for (let i = 0; i < 3; i++) {
+      now += MIN;
+      filer.emitObservation(mgr.observe('no-work', 'w-alpha', { at: now }), now);
+      filer.emitObservation(mgr.observe('stuck', 'w-alpha', { at: now }), now);
+    }
+
+    const open = sink.listBeads().filter((bead) => bead.status === 'open');
+    expect(open).toHaveLength(2);
+    expect(open.map((bead) => bead.id).sort()).toEqual(
+      [noWorkCanonical.id, stuckCanonical.id].sort()
+    );
+    expect(sink.listBeads()).toHaveLength(5);
+  });
+
   it('closes orphaned open beads whose identity has no active instance', () => {
     seedOpenBead(sink, 'no-work:w-gone#1', 'no-work:w-gone', BASE, { occurrences: 7 });
     seedOpenBead(sink, 'stuck:w-old#3', 'stuck:w-old', BASE);

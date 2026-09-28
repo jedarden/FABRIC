@@ -209,6 +209,22 @@ rebuilds through `InMemoryEventStore.add()` with §2 enforced from the first
 observation, and `reconcileLegacyAlerts` covers any older snapshot imported
 afterward.
 
+### Checkpoint audit (2026-09-28)
+
+The repository checkpoint was audited after the live reconciliation. It contains
+54 historical legacy alert rows: 52 `no-work` rows across five worker
+identities and two `stuck` rows across two worker identities. All 54 are closed;
+none remains an active legacy row. The previously closed rows retain their
+original close reasons, while the policy reconciliation path records an explicit
+canonical id and duplicate-close reason whenever it repairs a live inventory.
+
+The regression is pinned at the bead-filer boundary by
+`src/alertBeadFiler.test.ts`: a duplicate-laden snapshot containing both
+`no-work` and `stuck` identities is reconciled to the earliest-created active
+epoch, each duplicate is closed with the identity-policy reason, and repeated
+post-reconciliation observations continue updating those two canonical rows
+without creating another open row.
+
 ## Durability across restarts
 
 The lifecycle sections above define transitions *within* one process. This
