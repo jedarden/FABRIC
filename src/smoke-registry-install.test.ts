@@ -34,6 +34,8 @@ describe('post-publication registry install smoke', () => {
     expect(script).toContain('mktemp -d /tmp/fabric-registry-smoke.');
     expect(script).toContain('--prefix "$INSTALL"');
     expect(script).toContain('"$PACKAGE_SPEC"');
+    expect(script).toContain('EXPECTED_VERSION="${PACKAGE_SPEC#@needle/fabric@}"');
+    expect(script).toContain('package spec must use an exact semver version');
     expect(script).not.toContain('npm pack');
     expect(script).not.toContain('npm install -g');
   });
@@ -43,6 +45,7 @@ describe('post-publication registry install smoke', () => {
     expect(script).toContain('readlink -f "$BIN"');
     expect(script).toContain('"$BIN" --version');
     expect(script).toContain('"$BIN" --help');
+    expect(script).toContain('"$INSTALLED_VERSION" != "$EXPECTED_VERSION"');
     expect(script).toContain('dist/web/public/index.html');
     expect(script).toContain("-name 'index-*.js'");
     expect(script).toContain("-name 'index-*.css'");

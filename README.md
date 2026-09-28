@@ -74,6 +74,18 @@ The local `npm run smoke:clean-install` check remains useful for source and
 release-tarball behavior; it does not replace the post-publication registry
 check.
 
+### Repeatable release maintenance check
+
+After the release is published, run `npm run release:maintenance` from the
+release commit. The check validates package metadata and lockfile alignment,
+executes `npm run release:check`, inspects the generated package contents,
+installs that tarball into an isolated npm prefix, and runs the exact-version
+registry smoke for the package version. It never runs `npm publish`.
+
+Before publication, or when registry access is unavailable, use
+`npm run release:maintenance -- --skip-registry` for the local portions; the
+post-publication run without `--skip-registry` is still required.
+
 ### Source repository
 
 The canonical repository is **Forgejo**: `https://git.ardenone.com/jedarden/FABRIC`. Clone from it, and push to it — `origin` points there, and all development commits land on `main`.

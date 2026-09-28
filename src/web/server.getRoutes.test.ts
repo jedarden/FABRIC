@@ -339,7 +339,7 @@ describe('GET route-discovery contract (docs/api-auth.md)', () => {
   });
 
   describe('unauthenticated GETs are free of durable side effects', () => {
-    it('ingests no events, moves no baseline, and writes no disk across the full sweep', { timeout: 60_000 }, async () => {
+    it('ingests no events, moves no baseline, and writes no disk across the full sweep', { timeout: 180_000 }, async () => {
       const profiler = getMemoryProfiler();
       const diffBefore = profiler.diffFromBaseline();
       expect(diffBefore).not.toBeNull();

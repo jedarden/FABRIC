@@ -43,6 +43,11 @@ case "$PACKAGE_SPEC" in
   *) fail "package spec must target @needle/fabric@<version> (got: $PACKAGE_SPEC)" ;;
 esac
 
+EXPECTED_VERSION="${PACKAGE_SPEC#@needle/fabric@}"
+if [[ ! "$EXPECTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+  fail "package spec must use an exact semver version (got: $PACKAGE_SPEC)"
+fi
+
 for tool in node npm readlink find grep; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing required tool: $tool"
 done
@@ -84,6 +89,9 @@ if [ -z "$(find "$PKG/dist/web/public/assets" -maxdepth 1 -type f -name 'index-*
 fi
 
 INSTALLED_VERSION="$(node -p "require('$PKG/package.json').version")"
+if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
+  fail "registry resolved $PACKAGE_SPEC to installed version $INSTALLED_VERSION"
+fi
 VERSION_OUT="$("$BIN" --version)"
 if [ "$VERSION_OUT" != "$INSTALLED_VERSION" ]; then
   fail "fabric --version ($VERSION_OUT) does not match installed version ($INSTALLED_VERSION)"

@@ -22,6 +22,9 @@ The binary installs as `fabric` (or `fabric-node` if there's a naming conflict).
 >
 > The release gate and publication workflow are documented in README's
 > "Release and publication workflow" section.
+>
+> After publication, `npm run release:maintenance` repeats the metadata,
+> release-gate, package, tarball-install, and exact-version registry checks.
 
 ## Commands Overview
 
