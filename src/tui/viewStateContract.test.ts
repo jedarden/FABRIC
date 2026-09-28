@@ -42,7 +42,10 @@ const h = vi.hoisted(() => {
     const el: Record<string, any> = {
       options,
       content: options.content ?? '',
-      hidden: true,
+      // blessed boxes are visible when created unless explicitly hidden.
+      // Keep that distinction so help-overlay tests can assert visibility,
+      // not only that a box was allocated.
+      hidden: options.hidden ?? false,
       destroyed: false,
       setContentCalls: 0,
       setContent: (c: string) => {
@@ -400,6 +403,14 @@ function helpOverlays(): Array<Record<string, any>> {
   return h.state.boxes.filter(b => b.options && b.options.label === ' Help ');
 }
 
+function openHelpOverlay(): Record<string, any> {
+  press('?');
+  const openOverlays = helpOverlays().filter(overlay => !overlay.destroyed);
+  expect(openOverlays).toHaveLength(1);
+  expect(openOverlays[0].hidden).toBe(false);
+  return openOverlays[0];
+}
+
 function openHelpContent(): string {
   press('?');
   const overlays = helpOverlays();
@@ -720,31 +731,48 @@ describe('TUI view-state contract (docs/cli.md)', () => {
   describe('help overlay (?)', () => {
     it.each(VIEWS)('? opens and closes above $name without changing the active view', view => {
       press(view.keys[0]);
-      press('?');
-      expect(helpOverlays()).toHaveLength(1);
+      const overlay = openHelpOverlay();
       expectViewActive(view);
 
       press('?');
+      expect(overlay.destroyed).toBe(true);
       expect(helpOverlays().filter(o => !o.destroyed)).toHaveLength(0);
       expectViewActive(view);
     });
 
-    it('? creates a single overlay without changing the active view', () => {
-      press('?');
-      expect(helpOverlays()).toHaveLength(1);
+    it('? opens visibly above the default view without changing it', () => {
+      const overlay = openHelpOverlay();
       expectViewActive(null);
+      expect(overlay.content).toContain('Keyboard Shortcuts');
 
       // Entering a view while help is open keeps the overlay above it —
       // the still-open ? is the one that closes it (it toggles, so a
       // second ? never stacks a second overlay).
       press('H');
-      expect(helpOverlays()[0].destroyed).toBe(false);
+      expect(overlay.destroyed).toBe(false);
+      expect(overlay.hidden).toBe(false);
       expectViewActive(findView('heatmap'));
 
       press('?');
-      expect(helpOverlays()[0].destroyed).toBe(true);
+      expect(overlay.destroyed).toBe(true);
       // Closing help leaves the active view untouched.
       expectViewActive(findView('heatmap'));
+    });
+
+    it('keeps help visible after Escape when opened above a representative view', () => {
+      press('H');
+      const overlay = openHelpOverlay();
+      expectViewActive(findView('heatmap'));
+
+      press('escape');
+      // Escape still performs its normal view navigation, but it must not
+      // dismiss the non-view help overlay.
+      expectViewActive(null);
+      expect(overlay.destroyed).toBe(false);
+      expect(overlay.hidden).toBe(false);
+
+      press('?');
+      expect(overlay.destroyed).toBe(true);
     });
 
     it('? toggles: a second ? closes the overlay, a third reopens a fresh one', () => {
