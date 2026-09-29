@@ -583,8 +583,17 @@ export class FabricTuiApp {
       this.toggleXrefView();
     });
 
-    // Escape to close modals or return to default view
+    // Escape dismisses the topmost overlay before changing the underlying
+    // view. Help is a floating overlay, so it gets precedence over worker
+    // detail and view navigation; a second Escape can then dismiss detail or
+    // step back to the default view.
     this.screen.key(['escape'], () => {
+      if (this.helpOverlay) {
+        this.helpOverlay.destroy();
+        this.helpOverlay = undefined;
+        this.screen.render();
+        return;
+      }
       // First, hide worker detail if visible
       if (this.workerDetail.isVisible()) {
         this.workerDetail.hide();

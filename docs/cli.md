@@ -96,10 +96,11 @@ fabric tui --source ~/.needle/logs/ --otlp-grpc 0.0.0.0:4317
 
 The TUI is a view state machine: exactly one view is active at a time — the
 `default` view plus the twelve overlay views listed below. View-entry keys
-work from any view and `Escape` always steps back. The `?` help overlay is
-*not* a view: it floats above whichever view is active without changing it,
-and `?` is the only key that opens *or* closes it — `Escape` does not
-dismiss the overlay. The overlay is a quick summary, not an exact mirror of
+work from any view and `Escape` steps back after dismissing any floating
+overlay. The `?` help overlay is *not* a view: it floats above whichever view
+is active without changing it. `?` toggles it, while `Escape` dismisses it
+without changing the active view; a later `Escape` can then affect the view
+or another underlying overlay. The overlay is a quick summary, not an exact mirror of
 this reference: its Actions list carries only genuinely global keys, and
 the view-local ones are listed inside their views' own sections — including
 the conversation-transcript and cross-reference views. In particular `/`
@@ -112,10 +113,10 @@ neither is bound globally.
 | Key | Action |
 |-----|--------|
 | `q` / `Ctrl+C` | Quit FABRIC |
-| `?` | Toggle the help overlay — works in every view, does not change the active view, and `?` again is the only way to close it |
+| `?` | Toggle the help overlay — works in every view and does not change the active view |
 | `Tab` / `Shift+Tab` | Move panel focus to the next / previous panel |
-| `Enter` | Open the detail overlay for the worker selected in the worker grid (`Escape` closes it first) |
-| `Escape` | In order: close the worker detail overlay if it is open; otherwise return to the default view (no-op if already there). It never dismisses the help overlay, and when it closes the command palette the global step-back fires as well (see the palette section) |
+| `Enter` | Open the detail overlay for the worker selected in the worker grid (`Escape` closes it after any open help overlay) |
+| `Escape` | In order: close the help overlay if it is open; otherwise close the worker detail overlay; otherwise return to the default view (no-op if already there). When it closes the command palette, the global step-back also fires (see the palette section) |
 | `Ctrl+K` | Command palette (see below) |
 | `Ctrl+T` | Toggle dark / light theme |
 | `r` | Re-render the screen — view-local `r` actions (refresh, reset, ready tasks) fire alongside it |
@@ -252,9 +253,9 @@ focus presets (`preset:save`, `preset:list`, `preset:load:<name>`,
 `export:import`),
 jumps (`worker:<id>`, `bead:<id>`, `file:<pattern>`, `goto:<timestamp>`), and
 `help`, `pause`, `refresh`, `quit`. `Escape` closes the palette — and since
-blessed dispatches a key to every matching handler, the global `Escape`
-action also fires, so the active view steps back to the default view at the
-same time.
+blessed dispatches a key to every matching handler, the global `Escape` action
+also fires. If help is open, help has the first Escape instead; otherwise the
+active view steps back to the default view at the same time.
 
 #### Binding conflicts (known quirks)
 

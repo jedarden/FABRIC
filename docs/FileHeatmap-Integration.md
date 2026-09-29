@@ -22,7 +22,9 @@ this.fileHeatmap.getElement().hide();
 **Keys:** `H` and `h` (both cases bind the same toggle — see *H versus h* below)
 **Location:** `src/tui/app.ts`, `setupKeybindings()`
 - Toggles between default view and heatmap view: pressing `H`/`h` opens the heatmap; pressing the same key again closes it
-- `Escape` also returns to the default view from any overlay
+- `Escape` returns to the default view from any overlay after closing the help
+  overlay first when it is open; that first Escape leaves the underlying view
+  unchanged
 
 ### H versus h
 `H` and `h` are **both bound to the heatmap toggle** everywhere in the TUI —

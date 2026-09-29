@@ -4,11 +4,11 @@
  * Pins the CLI-documented behavior of the screen-level keys that must work
  * the same in every view, plus the overlays they interact with:
  *
- *   - `?` help overlay: opens above the current state, only `?` closes it,
- *     and it never changes the active view
- *   - Escape precedence: the worker detail overlay closes first, then the
- *     view steps back to the default view, and in the default view it is a
- *     no-op — it never dismisses the help overlay or the command palette
+ *   - `?` help overlay: opens above the current state, `?` toggles it closed,
+ *     Escape dismisses it before affecting the underlying state, and it never
+ *     changes the active view
+ *   - Escape precedence: help closes first, then worker detail, then the view
+ *     steps back to the default view, and in the default view it is a no-op
  *   - worker-detail dismissal: Enter opens it only for a selected worker,
  *     Escape closes it
  *   - command-palette dismissal at screen level: Ctrl+K toggles it (and
@@ -505,7 +505,7 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
       expect(helpOverlays()[1].destroyed).toBe(false);
     });
 
-    it('? is the only key that closes the overlay — view keys keep it open', () => {
+    it('view keys keep help open, while Escape closes it before stepping back', () => {
       press('?');
       const overlay = helpOverlays()[0];
 
@@ -514,18 +514,19 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
       expect(overlay.destroyed).toBe(false);
       expectViewActive(findView('heatmap'), 'heatmap with help open');
 
-      // …and stepping back leaves it open too.
+      // …but Escape first closes help and leaves the heatmap active.
       press('escape');
-      expect(overlay.destroyed).toBe(false);
-      expectDefaultView('back to default with help open');
-
-      press('?');
       expect(overlay.destroyed).toBe(true);
+      expectViewActive(findView('heatmap'), 'help closed before view back');
+
+      // A second Escape performs the underlying view step-back.
+      press('escape');
+      expectDefaultView('back to default after help closes');
     });
   });
 
   describe('Escape precedence', () => {
-    it('closes the worker detail first and leaves the view, help overlay, and palette untouched', () => {
+    it('closes help first, leaving detail and the view untouched', () => {
       press('D');
       press('?');
       press('C-k');
@@ -534,16 +535,16 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
       const palette = h.state.components.commandPalette;
 
       press('escape');
-      // First Escape closes only the detail…
-      expect(h.state.components.workerDetail.visible).toBe(false);
-      // …the view stays…
+      // First Escape closes only help…
+      expect(overlay.destroyed).toBe(true);
+      // …the detail and view stay…
+      expect(h.state.components.workerDetail.visible).toBe(true);
       expectViewActive(findView('dag'), 'dag after detail dismissal');
-      // …and neither floating overlay is touched.
-      expect(overlay.destroyed).toBe(false);
+      // …while the command palette is still independently open.
       expect(palette.visible).toBe(true);
     });
 
-    it('steps the view back on the second Escape and still spares the overlays', () => {
+    it('closes detail on the second Escape and steps the view back on the third', () => {
       press('D');
       press('?');
       press('C-k');
@@ -551,10 +552,13 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
       const overlay = helpOverlays()[0];
       const palette = h.state.components.commandPalette;
 
+      press('escape'); // help closes
+      expect(overlay.destroyed).toBe(true);
       press('escape'); // detail closes
+      expect(h.state.components.workerDetail.visible).toBe(false);
+      expectViewActive(findView('dag'), 'after detail dismissal');
       press('escape'); // view steps back
-      expectDefaultView('after second escape');
-      expect(overlay.destroyed).toBe(false);
+      expectDefaultView('after third escape');
       expect(palette.visible).toBe(true);
     });
 
@@ -571,17 +575,20 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
       expect(h.state.components.commandPalette.visible).toBe(false);
     });
 
-    it('never dismisses the help overlay, even with nothing else open', () => {
+    it('dismisses the help overlay before navigating, even with nothing else open', () => {
       press('?');
       const overlay = helpOverlays()[0];
 
       press('escape');
-      expect(overlay.destroyed).toBe(false);
-      expectDefaultView('help survives escape');
-
-      // ? remains the way out.
-      press('?');
       expect(overlay.destroyed).toBe(true);
+      expectDefaultView('help closes on escape');
+
+      // Repeated ? still opens and closes a fresh overlay.
+      press('?');
+      const second = helpOverlays()[1];
+      expect(second.destroyed).toBe(false);
+      press('?');
+      expect(second.destroyed).toBe(true);
     });
 
     it('never dismisses the command palette — closing it is the palette\'s own binding', () => {
@@ -890,4 +897,3 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
     });
   });
 });
-

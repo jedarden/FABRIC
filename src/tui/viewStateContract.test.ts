@@ -5,10 +5,11 @@
  * Shortcuts"): exactly one view is active at a time — the default view plus
  * twelve overlay views; view-entry keys work from any view and every view
  * key is a toggle; mutual exclusion holds for *every ordered pair* of
- * views, not just the forward chain; Escape closes the worker detail
- * overlay first and otherwise steps back to the default view from every
- * view; the `?` help overlay floats above any active view without changing
- * it, survives Escape, and only `?` opens or closes it; `r` re-renders in
+ * views, not just the forward chain; Escape closes help first, then the
+ * worker detail overlay, and otherwise steps back to the default view from
+ * every view; the `?` help overlay floats above any active view without
+ * changing it; `Escape` closes it before affecting the underlying view or navigation;
+ * `r` re-renders in
  * place everywhere while `R` is the only replay toggle; Ctrl+K toggles the
  * command palette above any view and Escape with the palette open still
  * steps back the view; view entry closes the file-context split and the
@@ -635,20 +636,61 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       expectViewActive(null);
     });
 
-    it.each(VIEWS)('never dismisses the help overlay opened above $name — only ? closes it', view => {
+    it.each(VIEWS)('Escape dismisses help above $name before stepping back the view', view => {
       press(view.keys[0]);
       press('?');
       const overlay = helpOverlays()[0];
       expect(overlay).toBeDefined();
 
       press('escape');
-      // The view still steps back…
+      // The first Escape closes only help and leaves the active view intact.
+      expectViewActive(view);
+      expect(overlay.destroyed).toBe(true);
+
+      // A second Escape can now perform the normal view step-back.
+      press('escape');
       expectViewActive(null);
-      // …but the overlay survives Escape.
-      expect(overlay.destroyed).toBe(false);
+    });
+
+    it('Escape closes help above the default view without changing it', () => {
+      const overlay = openHelpOverlay();
+      press('escape');
+      expect(overlay.destroyed).toBe(true);
+      expectViewActive(null);
+    });
+
+    it('Escape precedence is help, then worker detail, then view navigation', () => {
+      h.state.selectedWorker = WORKER;
+      press('H');
+      press('?');
+      press('enter');
+      const overlay = helpOverlays()[0];
+      expect(h.state.components.workerDetail.visible).toBe(true);
+
+      press('escape');
+      expect(overlay.destroyed).toBe(true);
+      expect(h.state.components.workerDetail.visible).toBe(true);
+      expectViewActive(findView('heatmap'));
+
+      press('escape');
+      expect(h.state.components.workerDetail.visible).toBe(false);
+      expectViewActive(findView('heatmap'));
+
+      press('escape');
+      expectViewActive(null);
+    });
+
+    it('? still toggles help repeatedly after Escape closes it', () => {
+      const first = openHelpOverlay();
+      press('escape');
+      expect(first.destroyed).toBe(true);
 
       press('?');
-      expect(overlay.destroyed).toBe(true);
+      const second = helpOverlays().filter(o => !o.destroyed);
+      expect(second).toHaveLength(1);
+      expect(second[0]).not.toBe(first);
+      press('?');
+      expect(second[0].destroyed).toBe(true);
       expect(helpOverlays().filter(o => !o.destroyed)).toHaveLength(0);
     });
   });
@@ -757,22 +799,6 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       expect(overlay.destroyed).toBe(true);
       // Closing help leaves the active view untouched.
       expectViewActive(findView('heatmap'));
-    });
-
-    it('keeps help visible after Escape when opened above a representative view', () => {
-      press('H');
-      const overlay = openHelpOverlay();
-      expectViewActive(findView('heatmap'));
-
-      press('escape');
-      // Escape still performs its normal view navigation, but it must not
-      // dismiss the non-view help overlay.
-      expectViewActive(null);
-      expect(overlay.destroyed).toBe(false);
-      expect(overlay.hidden).toBe(false);
-
-      press('?');
-      expect(overlay.destroyed).toBe(true);
     });
 
     it('? toggles: a second ? closes the overlay, a third reopens a fresh one', () => {
