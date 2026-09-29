@@ -449,6 +449,32 @@ describe('FileHeatmap TUI integration (real store → real app → real componen
       expect(content).toContain('Files: 2');
     });
 
+    it('updates collision state and collision statistics through the live event path', () => {
+      const world = buildWorld();
+      const first = edit('w-alpha', 'work/shared.ts', world.t0 + 1000);
+      seedViaApp(world.store, world.app, [first]);
+      openHeatmap(world);
+
+      expect(rowFor(rendered(world), 'work/shared.ts')).not.toContain('{red-fg}⚠{/}');
+      expect(rendered(world)).toContain('⚠ 0');
+
+      // A second worker touches the same file while the view is open. The
+      // tailer path is store.add(event) followed by app.addEvent(event), so
+      // this assertion proves the mounted view re-reads collision state from
+      // the real store rather than merely repainting its previous rows.
+      const second = edit('w-bravo', 'work/shared.ts', world.t0 + 2000);
+      world.store.add(second);
+      world.app.addEvent(second);
+
+      const refreshed = rendered(world);
+      expect(rowFor(refreshed, 'work/shared.ts')).toContain('{red-fg}⚠{/}');
+      expect(refreshed).toContain('⚠ 1');
+
+      heatKey(world, ['c'])();
+      expect(rowFor(rendered(world), 'work/shared.ts')).toBeDefined();
+      expect(rowFor(rendered(world), 'work/shared.ts')).toContain('{red-fg}⚠{/}');
+    });
+
     it('does not refresh while closed and re-pulls the store on reopen', () => {
       const world = buildWorld();
       seedViaApp(world.store, world.app, series('w-alpha', 'work/first.ts', world.t0 + 1000, 1));
@@ -464,6 +490,25 @@ describe('FileHeatmap TUI integration (real store → real app → real componen
 
       // Reopening re-pulls: the hidden panel must not have stale content.
       openHeatmap(world);
+      expect(rowFor(rendered(world), 'work/second.ts')).toBeDefined();
+    });
+
+    it('re-enters from another view with events that arrived while heatmap was hidden', () => {
+      const world = buildWorld();
+      seedViaApp(world.store, world.app, series('w-alpha', 'work/first.ts', world.t0 + 1000, 1));
+      openHeatmap(world);
+      expect(rowFor(rendered(world), 'work/first.ts')).toBeDefined();
+
+      // Switching overlays hides the heatmap without destroying the store.
+      screenKey(world, ['D', 'd'])();
+      const [second] = series('w-bravo', 'work/second.ts', world.t0 + 60000, 1);
+      world.store.add(second);
+      world.app.addEvent(second);
+      expect(rowFor(rendered(world), 'work/second.ts')).toBeUndefined();
+
+      // Returning to the heatmap must pull the current store snapshot.
+      openHeatmap(world);
+      expect(rowFor(rendered(world), 'work/first.ts')).toBeDefined();
       expect(rowFor(rendered(world), 'work/second.ts')).toBeDefined();
     });
 
