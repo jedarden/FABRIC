@@ -162,6 +162,7 @@ vi.mock('./components/ErrorGroupPanel.js', () => ({
     show = vi.fn();
     hide = vi.fn();
     focus = vi.fn();
+    isDetailVisible = vi.fn(() => false);
     updateGroups = vi.fn();
   },
 }));
@@ -211,6 +212,7 @@ vi.mock('./components/SemanticNarrativePanel.js', () => ({
     show = vi.fn();
     hide = vi.fn();
     focus = vi.fn();
+    isDetailVisible = vi.fn(() => false);
     updateAggregated = vi.fn();
   },
 }));
@@ -220,6 +222,7 @@ vi.mock('./components/WorkerAnalyticsPanel.js', () => ({
     show = vi.fn();
     hide = vi.fn();
     focus = vi.fn();
+    isDetailVisible = vi.fn(() => false);
     setMetrics = vi.fn();
   },
 }));

@@ -516,6 +516,18 @@ describe('SemanticNarrativePanel', () => {
   });
 
   describe('key bindings', () => {
+    it('Enter opens detail and Escape returns to the list before leaving the view', () => {
+      panel.setNarrative(createMockNarrative());
+      const binding = (name: string) => mockListInstance.key.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes(name)
+      )?.[1] as (() => void) | undefined;
+
+      binding('enter')?.();
+      expect(panel.isDetailVisible()).toBe(true);
+      binding('escape')?.();
+      expect(panel.isDetailVisible()).toBe(false);
+    });
+
     it('should bind up/k keys to selectPrevious', () => {
       const keyCalls = mockListInstance.key.mock.calls;
       expect(keyCalls.some((call: unknown[]) =>

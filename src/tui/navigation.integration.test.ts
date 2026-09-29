@@ -34,6 +34,7 @@ const harness = vi.hoisted(() => {
 
   class Panel {
     visible = false;
+    detailVisible = false;
     element = new Element();
     show = vi.fn(() => {
       this.visible = true;
@@ -70,10 +71,19 @@ const harness = vi.hoisted(() => {
     setFilter = vi.fn();
     togglePause = vi.fn();
     scrollToTimestamp = vi.fn();
-    isVisible = vi.fn(() => false);
+    isVisible = vi.fn(() => this.visible);
+    isDetailVisible = vi.fn(() => this.detailVisible);
     setWorker = vi.fn();
     setRecentEvents = vi.fn();
-    toggle = vi.fn();
+    toggle = vi.fn(() => {
+      if (this.visible) this.hide();
+      else this.show();
+    });
+    /** Dispatch the focused panel's documented detail keys. */
+    dispatchLocalKey = vi.fn((key: string) => {
+      if (key === 'enter') this.detailVisible = true;
+      if (key === 'escape' && this.detailVisible) this.detailVisible = false;
+    });
     addSuggestions = vi.fn();
     clearSuggestions = vi.fn();
   }
@@ -242,6 +252,74 @@ describe('TUI navigation view state machine', () => {
 
     const escape = getHandler(['escape']);
     escape();
+    expectOnlyViewVisible(app, 'default');
+  });
+
+  const detailViews = [
+    { mode: 'errors' as const, panel: 'errorGroupPanel', key: ['E', 'e'], label: 'error-group' },
+    { mode: 'narrative' as const, panel: 'semanticNarrativePanel', key: ['N'], label: 'narrative' },
+    { mode: 'analytics' as const, panel: 'workerAnalyticsPanel', key: ['A'], label: 'analytics' },
+  ];
+
+  it.each(detailViews)(
+    'opens the documented $label detail with Enter and closes it before the view',
+    detail => {
+      const app = new FabricTuiApp(new InMemoryEventStore());
+      app.start();
+      getHandler(detail.key)();
+
+      const panel = (app as unknown as Record<string, {
+        dispatchLocalKey: (key: string) => void;
+        isDetailVisible: () => boolean;
+      }>)[detail.panel];
+      panel.dispatchLocalKey('enter');
+      expect(panel.isDetailVisible()).toBe(true);
+
+      // Blessed sends Escape to the screen first, then to the focused panel.
+      // The screen handler must leave the view alone so the panel can close
+      // its detail layer; only the following Escape steps back from the view.
+      getHandler(['escape'])();
+      expectOnlyViewVisible(app, detail.mode);
+      expect(panel.isDetailVisible()).toBe(true);
+      panel.dispatchLocalKey('escape');
+      expect(panel.isDetailVisible()).toBe(false);
+
+      getHandler(['escape'])();
+      expectOnlyViewVisible(app, 'default');
+    }
+  );
+
+  it('closes the palette before a detail layer and only then leaves the view', () => {
+    const app = new FabricTuiApp(new InMemoryEventStore());
+    app.start();
+    getHandler(['N'])();
+
+    const narrative = (app as unknown as Record<string, {
+      dispatchLocalKey: (key: string) => void;
+      isDetailVisible: () => boolean;
+    }>).semanticNarrativePanel;
+    const palette = (app as unknown as Record<string, {
+      isVisible: () => boolean;
+    }>).commandPalette;
+
+    narrative.dispatchLocalKey('enter');
+    getHandler(['C-k'])();
+    expect(palette.isVisible()).toBe(true);
+    expect(narrative.isDetailVisible()).toBe(true);
+
+    // The palette has focus and is the topmost layer.
+    getHandler(['escape'])();
+    expect(palette.isVisible()).toBe(false);
+    expect(narrative.isDetailVisible()).toBe(true);
+    expectOnlyViewVisible(app, 'narrative');
+
+    // The next Escape reaches the detail layer, not the full-screen view.
+    getHandler(['escape'])();
+    expectOnlyViewVisible(app, 'narrative');
+    narrative.dispatchLocalKey('escape');
+    expect(narrative.isDetailVisible()).toBe(false);
+
+    getHandler(['escape'])();
     expectOnlyViewVisible(app, 'default');
   });
 });

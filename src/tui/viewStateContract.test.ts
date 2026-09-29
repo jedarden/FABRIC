@@ -11,8 +11,8 @@
  * changing it; `Escape` closes it before affecting the underlying view or navigation;
  * `r` re-renders in
  * place everywhere while `R` is the only replay toggle; Ctrl+K toggles the
- * command palette above any view and Escape with the palette open still
- * steps back the view; view entry closes the file-context split and the
+ * command palette above any view and Escape dismisses it before stepping back
+ * the view; view entry closes the file-context split and the
  * default view never restores it; and the help text's key claims match the
  * keys actually bound at the screen level — the transcript and
  * cross-reference toggles are accounted for, and the view-local `/`
@@ -89,6 +89,7 @@ const h = vi.hoisted(() => {
     };
     panel.focus = () => {};
     panel.isVisible = () => panel.visible;
+    panel.isDetailVisible = () => false;
     panel.getElement = () => ({
       show: panel.show,
       hide: panel.hide,
@@ -755,16 +756,14 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       expectViewActive(view);
     });
 
-    it.each(VIEWS)('$name: Escape while the palette is open still steps back the view', view => {
-      // docs/cli.md: closing the palette with Escape also fires the global
-      // Escape action, so the active view steps back at the same time. (The
-      // palette's own close is the component's binding on its input element
-      // — below the screen level this file pins, so only the step-back is
-      // asserted here.)
+    it.each(VIEWS)('$name: Escape while the palette is open dismisses it before stepping back the view', view => {
       const palette = h.state.components.commandPalette;
       press(view.keys[0]);
       press('C-k');
       expect(palette.visible).toBe(true);
+      press('escape');
+      expect(palette.visible).toBe(false);
+      expectViewActive(view);
       press('escape');
       expectViewActive(null);
     });

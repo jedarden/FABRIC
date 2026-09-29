@@ -741,6 +741,22 @@ describe('ErrorGroupPanel', () => {
   });
 
   describe('key bindings', () => {
+    it('Enter opens detail and Escape collapses it before hiding the view', () => {
+      errorGroupPanel.updateGroups([createMockGroup({ id: 'eg-keyboard' })]);
+      mockBoxInstance.hide.mockClear();
+
+      const binding = (name: string) => mockListInstance.key.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call?.[0]) && call[0].includes(name)
+      )?.[1] as (() => void) | undefined;
+
+      binding('enter')?.();
+      expect(errorGroupPanel.isDetailVisible()).toBe(true);
+
+      binding('escape')?.();
+      expect(errorGroupPanel.isDetailVisible()).toBe(false);
+      expect(mockBoxInstance.hide).not.toHaveBeenCalled();
+    });
+
     it('should bind up and k keys to selectPrevious', () => {
       expect(mockListInstance.key).toHaveBeenCalledWith(['up', 'k'], expect.any(Function));
     });

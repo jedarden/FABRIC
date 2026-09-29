@@ -144,6 +144,11 @@ export class CrossReferencePanel {
     this.setEntity(entity || null);
   }
 
+  /** Whether the panel is showing a secondary links view. */
+  isDetailVisible(): boolean {
+    return this.viewMode !== 'links';
+  }
+
   /**
    * Refresh the display
    */

@@ -270,6 +270,11 @@ export class SemanticNarrativePanel {
     this.render();
   }
 
+  /** Whether the panel is showing a selected segment or full narrative. */
+  isDetailVisible(): boolean {
+    return this.viewMode !== 'list';
+  }
+
   /**
    * Toggle full narrative view
    */

@@ -584,9 +584,9 @@ export class FabricTuiApp {
     });
 
     // Escape dismisses the topmost overlay before changing the underlying
-    // view. Help is a floating overlay, so it gets precedence over worker
-    // detail and view navigation; a second Escape can then dismiss detail or
-    // step back to the default view.
+    // view. Help, the command palette, and worker detail get precedence over
+    // view navigation; view-local detail handlers get the same opportunity
+    // before a later Escape steps back to the default view.
     this.screen.key(['escape'], () => {
       if (this.helpOverlay) {
         this.helpOverlay.destroy();
@@ -594,11 +594,30 @@ export class FabricTuiApp {
         this.screen.render();
         return;
       }
-      // First, hide worker detail if visible
+
+      // The command palette owns keyboard focus while it is open.  Let its
+      // focused input consume Escape before touching any overlay underneath
+      // it; blessed dispatches the same key to the screen first and to the
+      // focused element afterwards.
+      if (this.commandPalette.isVisible()) {
+        this.commandPalette.hide();
+        return;
+      }
+
+      // First, hide worker detail if visible.
       if (this.workerDetail.isVisible()) {
         this.workerDetail.hide();
         return;
       }
+
+      // View-local detail modes (error groups, narrative, analytics, and
+      // cross references) have their own Escape handlers.  The screen-level
+      // handler runs first, so stop here and allow the focused panel to
+      // collapse its detail mode before a later Escape leaves the view.
+      if (this.hasOpenViewDetail()) {
+        return;
+      }
+
       // Then, return to default view if in another view
       if (this.viewMode !== 'default') {
         this.setViewMode('default');
@@ -1635,6 +1654,27 @@ export class FabricTuiApp {
     this.workerDetail.setWorker(worker);
     this.workerDetail.setRecentEvents(events);
     this.workerDetail.show();
+  }
+
+  /**
+   * Whether the focused full-screen view currently owns a detail sub-view.
+   *
+   * These components consume Escape locally.  The screen-level handler must
+   * recognize that state before applying the view-level step-back behavior.
+   */
+  private hasOpenViewDetail(): boolean {
+    switch (this.viewMode) {
+      case 'errors':
+        return this.errorGroupPanel.isDetailVisible();
+      case 'narrative':
+        return this.semanticNarrativePanel.isDetailVisible();
+      case 'analytics':
+        return this.workerAnalyticsPanel.isDetailVisible();
+      case 'xref':
+        return this.crossReferencePanel.isDetailVisible();
+      default:
+        return false;
+    }
   }
 
   /**

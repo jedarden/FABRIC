@@ -124,7 +124,12 @@ export class ErrorGroupPanel {
     });
 
     this.list.key(['escape'], () => {
-      this.hide();
+      if (this.isDetailVisible()) {
+        this.expandedGroupId = undefined;
+        this.render();
+      } else {
+        this.hide();
+      }
     });
 
     // Allow scrolling in detail box
@@ -327,6 +332,11 @@ export class ErrorGroupPanel {
    */
   getSelected(): ErrorGroup | undefined {
     return this.groups[this.selectedIndex];
+  }
+
+  /** Whether an error group's detail view is currently expanded. */
+  isDetailVisible(): boolean {
+    return this.expandedGroupId !== undefined;
   }
 
   /**

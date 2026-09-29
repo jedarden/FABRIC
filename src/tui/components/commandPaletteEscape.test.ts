@@ -7,9 +7,8 @@
  *
  *   - `Escape` on the palette input closes the palette *without* submitting:
  *     no `onSubmit` call, no recent-commands entry. docs/cli.md: closing the
- *     palette with Escape also fires the global Escape action (blessed
- *     dispatches a key to every matching handler), so the active view steps
- *     back at the same time — that screen-level half is pinned in
+ *     palette with Escape is handled by the focused palette before the
+ *     screen-level step-back action — that ordering is pinned in
  *     `src/tui/viewStateContract.test.ts` and
  *     `src/tui/globalKeySemantics.test.ts`; this file holds the component
  *     half.

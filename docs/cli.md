@@ -116,7 +116,7 @@ neither is bound globally.
 | `?` | Toggle the help overlay — works in every view and does not change the active view |
 | `Tab` / `Shift+Tab` | Move panel focus to the next / previous panel |
 | `Enter` | Open the detail overlay for the worker selected in the worker grid (`Escape` closes it after any open help overlay) |
-| `Escape` | In order: close the help overlay if it is open; otherwise close the worker detail overlay; otherwise return to the default view (no-op if already there). When it closes the command palette, the global step-back also fires (see the palette section) |
+| `Escape` | In order: close the help overlay if it is open; otherwise close the focused command palette; otherwise close the worker or view-local detail; otherwise return to the default view (no-op if already there) |
 | `Ctrl+K` | Command palette (see below) |
 | `Ctrl+T` | Toggle dark / light theme |
 | `r` | Re-render the screen — view-local `r` actions (refresh, reset, ready tasks) fire alongside it |
@@ -209,7 +209,7 @@ while staying in the view — `r` resets playback without leaving the view
 (the global re-render fires alongside the reset).
 
 **Error groups** (`E`): `↑`/`↓`/`j`/`k` navigate groups · `Enter` / `Space`
-expand / collapse detail.
+expand / collapse detail · `Escape` collapses detail before leaving the view.
 
 **Session digest** (`G`): `1`–`5` switch tabs (Summary / Beads / Files /
 Errors / Workers) · `e` export JSON · `m` export Markdown · `t` export text ·
@@ -222,20 +222,23 @@ Errors / Workers) · `e` export JSON · `m` export Markdown · `t` export text �
 refresh · `c` clear history.
 
 **Semantic narrative** (`N`): `↑`/`↓`/`j`/`k` navigate segments · `Enter` /
-`Space` toggle detail · `f` full narrative · `r` refresh.
+`Space` toggle detail · `f` full narrative · `r` refresh · `Escape` returns to
+the list before leaving the view.
 
 **Worker analytics** (`A`): `↑`/`↓`/`j`/`k` navigate workers · `←`/`→`
 pick comparison workers (arrow keys only — the former `h`/`l` aliases were
 removed so lowercase `h` stays the heatmap toggle; see *Binding conflicts*)
 · `Enter` / `Space` toggle detail · `a` aggregated view · `c` comparison
-mode · `s` cycle sort mode · `r` refresh.
+mode · `s` cycle sort mode · `r` refresh · `Escape` returns to the list before
+leaving the view.
 
 **Conversation transcript** (`T`): `/` search · `n`/`N` next/previous match ·
 `t` toggle nearest tool call · `c` collapse all tool calls · `e` expand all ·
 `x` export Markdown · `j`/`k` scroll.
 
 **Cross references** (`X`): `↑`/`↓`/`j`/`k` navigate · `Enter` follow the
-selected reference · `s` toggle stats · `l` toggle links · `r` refresh.
+selected reference · `s` toggle stats · `l` toggle links · `r` refresh ·
+`Escape` returns to links before leaving a secondary view.
 
 **Budget dashboard** (`B`): `a` acknowledge alert · `r` refresh cost data ·
 `s` budget settings.
@@ -252,10 +255,10 @@ focus presets (`preset:save`, `preset:list`, `preset:load:<name>`,
 `preset:delete:<name>`), exports (`export` / `export:file`, `export:link`,
 `export:import`),
 jumps (`worker:<id>`, `bead:<id>`, `file:<pattern>`, `goto:<timestamp>`), and
-`help`, `pause`, `refresh`, `quit`. `Escape` closes the palette — and since
-blessed dispatches a key to every matching handler, the global `Escape` action
-also fires. If help is open, help has the first Escape instead; otherwise the
-active view steps back to the default view at the same time.
+`help`, `pause`, `refresh`, `quit`. `Escape` closes the focused palette first.
+The underlying worker/detail overlay or view remains in place; a later
+`Escape` dismisses that layer before the active view steps back to the default.
+If help is open, help has the first Escape instead.
 
 #### Binding conflicts (known quirks)
 

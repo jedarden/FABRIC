@@ -377,6 +377,11 @@ export class WorkerAnalyticsPanel {
     this.render();
   }
 
+  /** Whether the panel is showing a non-list analytics sub-view. */
+  isDetailVisible(): boolean {
+    return this.viewMode !== 'list';
+  }
+
   /**
    * Toggle aggregated view
    */

@@ -7,8 +7,9 @@
  *   - `?` help overlay: opens above the current state, `?` toggles it closed,
  *     Escape dismisses it before affecting the underlying state, and it never
  *     changes the active view
- *   - Escape precedence: help closes first, then worker detail, then the view
- *     steps back to the default view, and in the default view it is a no-op
+ *   - Escape precedence: help closes first, then the command palette, then
+ *     worker/view-local detail, then the view steps back to default; in the
+ *     default view it is a no-op
  *   - worker-detail dismissal: Enter opens it only for a selected worker,
  *     Escape closes it
  *   - command-palette dismissal at screen level: Ctrl+K toggles it (and
@@ -166,6 +167,7 @@ const h = vi.hoisted(() => {
     };
     panel.focus = () => {};
     panel.isVisible = () => panel.visible;
+    panel.isDetailVisible = () => false;
     panel.getElement = () => ({
       show: panel.show,
       hide: panel.hide,
@@ -544,7 +546,7 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
       expect(palette.visible).toBe(true);
     });
 
-    it('closes detail on the second Escape and steps the view back on the third', () => {
+    it('closes palette, then detail, before stepping the view back', () => {
       press('D');
       press('?');
       press('C-k');
@@ -554,12 +556,14 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
 
       press('escape'); // help closes
       expect(overlay.destroyed).toBe(true);
+      press('escape'); // palette closes
+      expect(palette.visible).toBe(false);
+      expectViewActive(findView('dag'), 'after palette dismissal');
       press('escape'); // detail closes
       expect(h.state.components.workerDetail.visible).toBe(false);
       expectViewActive(findView('dag'), 'after detail dismissal');
       press('escape'); // view steps back
       expectDefaultView('after third escape');
-      expect(palette.visible).toBe(true);
     });
 
     it('is a no-op in the default view: nothing re-renders and no overlay changes', () => {
@@ -591,17 +595,18 @@ describe('TUI global key semantics (docs/cli.md "Global keys")', () => {
       expect(second.destroyed).toBe(true);
     });
 
-    it('never dismisses the command palette — closing it is the palette\'s own binding', () => {
+    it('dismisses the command palette before stepping back the view', () => {
       const palette = h.state.components.commandPalette;
+      press('D');
       press('C-k');
       expect(palette.visible).toBe(true);
 
       press('escape');
-      // The screen-level Escape handler does not touch the palette; the
-      // palette closes itself from its input element (pinned at component
-      // level below).
-      expect(palette.visible).toBe(true);
-      expectDefaultView('palette survives escape');
+      expect(palette.visible).toBe(false);
+      expectViewActive(findView('dag'), 'palette closes before view back');
+
+      press('escape');
+      expectDefaultView('view backs up after palette closes');
     });
   });
 
