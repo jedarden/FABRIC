@@ -28,7 +28,10 @@ The current checks deliberately cover different failure modes:
   application shell in jsdom and waits for both the host and Agentation's
   mounted portal marker.
 - `e2e/agentation-mount.spec.ts` discovers every `*.html` entrypoint below the
-  Vite root and verifies the mounted toolbar in a real browser.
+  Vite root and verifies the mounted toolbar in a real browser. It also loads
+  `/` and the representative `/workers` client-side route, checks the required
+  React import map and its ordering before the module entrypoint, and asserts
+  that the deep-link fallback serves the exact same document as `/`.
 - `scripts/smoke-clean-install.sh` fetches every packaged HTML entrypoint and
   checks its referenced bundle for the mount marker; this is the artifact
   check used by the clean-install smoke, not a substitute for mounting.

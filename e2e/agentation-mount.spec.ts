@@ -14,6 +14,7 @@ import { join } from 'node:path';
  */
 
 const frontendRoot = join(process.cwd(), 'src/web/frontend');
+const REPRESENTATIVE_CLIENT_ROUTE = '/workers';
 
 function htmlEntryPoints(dir: string, prefix = ''): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -38,4 +39,48 @@ test.describe('Agentation mount', () => {
       await expect(page.locator('[data-agentation-root]')).toBeAttached();
     });
   }
+
+  test('serves the same entrypoint for the root and a client-side route', async ({ page, request }) => {
+    const rootResponse = await request.get('/');
+    const routeResponse = await request.get(REPRESENTATIVE_CLIENT_ROUTE);
+    expect(rootResponse.status()).toBe(200);
+    expect(routeResponse.status()).toBe(200);
+    expect(await routeResponse.text()).toBe(await rootResponse.text());
+
+    const pageErrors: Error[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error));
+
+    await page.goto('/');
+    const importMap = await page.locator('script[type="importmap"]').textContent();
+    expect(importMap).not.toBeNull();
+    expect(JSON.parse(importMap as string)).toMatchObject({
+      imports: {
+        react: 'https://esm.sh/react@19.2.4',
+        'react-dom': 'https://esm.sh/react-dom@19.2.4',
+        'react-dom/client': 'https://esm.sh/react-dom@19.2.4/client',
+      },
+    });
+
+    const scriptOrder = await page.evaluate(() => {
+      const scripts = [...document.querySelectorAll('script')];
+      const importMapIndex = scripts.findIndex((script) => script.type === 'importmap');
+      const moduleEntryIndex = scripts.findIndex(
+        (script) => script.type === 'module' && script.src.includes('/assets/'),
+      );
+      return { importMapIndex, moduleEntryIndex };
+    });
+    expect(scriptOrder.importMapIndex).toBeGreaterThanOrEqual(0);
+    expect(scriptOrder.moduleEntryIndex).toBeGreaterThan(scriptOrder.importMapIndex);
+
+    const assertMounted = async () => {
+      await expect(page.locator('#agentation-root')).toBeAttached({ timeout: 15_000 });
+      await expect(page.locator('[data-agentation-root]')).toBeAttached({ timeout: 15_000 });
+    };
+    await assertMounted();
+
+    await page.goto(REPRESENTATIVE_CLIENT_ROUTE);
+    await assertMounted();
+    expect(page.url()).toContain(REPRESENTATIVE_CLIENT_ROUTE);
+    expect(pageErrors).toEqual([]);
+  });
 });
