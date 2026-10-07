@@ -1591,7 +1591,7 @@ export class FabricTuiApp {
 
       // Update header
       this.headerBox.setContent(' FABRIC - Budget Dashboard');
-      this.footerBox.setContent(' [a] Acknowledge  [r] Refresh  [s] Settings  [Esc] Back  [?] Help  [q] Quit');
+      this.footerBox.setContent(' [a] Acknowledge  [r] Refresh  [s] Reserved (no action)  [Esc] Back  [?] Help  [q] Quit');
     } else {
       // Hide special views
       this.fileHeatmap.getElement().hide();
@@ -2107,7 +2107,7 @@ Budget Dashboard:
   B       - Toggle budget dashboard view
   a       - Acknowledge alert
   r       - Refresh cost data
-  s       - Open budget settings
+  s       - Reserved (no action)
   Esc     - Return to default view
 
 Theme:

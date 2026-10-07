@@ -1003,5 +1003,14 @@ describe('TUI view-state contract (docs/cli.md)', () => {
       // …with the documented Escape behavior of every overlay view.
       expect(content).toContain('Esc     - Return to default view');
     });
+
+    it('does not advertise the budget settings no-op as a working action', () => {
+      const content = openHelpContent();
+      expect(content).toMatch(/^  s       - Reserved \(no action\)$/m);
+      expect(content).not.toContain('Open budget settings');
+
+      press('B');
+      expect(footerBox().content).toContain('[s] Reserved (no action)');
+    });
   });
 });

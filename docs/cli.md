@@ -181,8 +181,10 @@ when another panel has focus.
 | `Ctrl+F` | Toggle the file-context split panel; `{` / `}` shrink / grow the pane |
 | `p` (activity stream focused) | Pause / resume the activity stream |
 
-All default-view focus keys (`F`, `p`, `P`, `[`, `]`, `Ctrl+F`, `{`, `}`) are
-no-ops outside the default view.
+The screen-level actions for the default-view controls (`F`, `p`, `P`, `[`,
+`]`, `Ctrl+F`, `{`, `}`) are inactive outside the default view. `p` and
+`Ctrl+F` can still reach a focused widget's local action (for example,
+play/pause or paging), as described in *Binding conflicts*.
 
 The worker grid's arrows or `j`/`k` select workers; `g`/`G` select the first
 or last worker. The activity stream scrolls with arrows or `j`/`k`; while it
@@ -251,7 +253,7 @@ no sort key. `t` shows the tree, `b` top blockers, `r` ready tasks, and
 `↑`/`↓`/`j`/`k`; `g`/`G` jump to first/last.
 
 **Session replay** (`R`): `Space` / `p` play/pause · `←`/`→` (or `b`/`n`) step
-backward/forward · `↑`/`↓` speed down/up · `1`–`5` set 0.5x / 1x / 2x / 5x /
+backward/forward · `↑`/`↓` speed up/down · `1`–`5` set 0.5x / 1x / 2x / 5x /
 10x · `Home`/`End` jump to start/end · `e`/`E`/`m` export (file / base64 /
 Markdown) · `i` import. The footer shows the live transport state
 (`READY`/`PLAYING`/`PAUSED`/`ENDED`) and current speed. Use `Home` to rewind
@@ -321,7 +323,7 @@ Fuzzy-searchable commands: view entry (`heatmap`, `dag`, `replay`, `errors`,
 `transcript`, `xref`), filters (`filter:worker:…`, `filter:level:…`,
 `filter:last:…`, `clear` — the palette also suggests `filter:bead:…`, but no
 handler is wired for it yet, so selecting it is a no-op), theme
-(`theme` / `theme:toggle`, `theme:dark`, `theme:light`),
+(`theme:toggle`, `theme:dark`, `theme:light`),
 focus presets (`preset:save`, `preset:list`, `preset:load:<name>`,
 `preset:delete:<name>`), exports (`export` / `export:file`, `export:link`,
 `export:import`),
