@@ -181,24 +181,50 @@ recent-files list — those two fire *in addition to* the preset save / cycle
 above, because blessed dispatches a key to every matching handler. `{` / `}`
 resize the pane.
 
-**Filtering** in the default view runs through the command palette (`Ctrl+K`):
-`filter:worker:<id>`, `filter:level:<debug|info|warn|error>`,
-`filter:last:<duration>` (e.g. `5m`, `1h`), and `clear` to reset. Filters set
-at startup with `--worker` / `--level` show as a `FILTER:` badge in the
-header. There is no global `/` or `f` filter key — `/` searches only inside
-the conversation transcript, and the footer's `/` Search hint is not
-currently bound in the default view.
+**Activity-stream filtering** is available from the command palette
+(`Ctrl+K`) in any view. `filter:worker:<id>` and
+`filter:level:<debug|info|warn|error>` replace the current interactive filter
+with that worker or level. `filter:last:<duration>` (for example, `5m`, `1h`,
+or `30s`) adds or updates the lower time bound on the current interactive
+filter. These commands filter the activity stream only. Choose `clear` to
+remove all interactive filter fields, including the time bound. Startup
+`--worker` / `--level` options are applied before events reach the TUI and show
+as a `FILTER:` header badge; `clear` cannot undo those options, so restart
+without them to see the full source again.
 
-**File heatmap** (`H`): `s` cycle sort mode · `c` filter to files with
-collisions · `a` show anomalies only · `↑`/`↓`/`j`/`k` navigate · `g`/`G`
-jump to first/last. Inside this view `g`/`G` are exclusively the heatmap's
-first/last navigation — the digest toggle does not fire here; reach the
-digest with `Escape` then `G`, or the command palette's `digest` command
-(see *Binding conflicts*).
+There is no global `/` search or `f` filter. `/` opens search only in the
+conversation transcript; elsewhere the generic footer's `/` Search hint is
+not bound.
 
-**Task dependency DAG** (`D`): `t` tree · `b` top blockers · `r` ready tasks
-· `s` statistics · `f` cycle filters · `C-r` force refresh · `↑`/`↓`/`j`/`k`
-navigate · `g`/`G` jump to first/last.
+**File heatmap** (`H` or `h`): lowercase `s` cycles sorting in this order:
+modifications (default), recent, workers, collisions, then back to
+modifications; four presses of `s` return to the default sort. Lowercase `c`
+toggles collisions-only files; lowercase `a` toggles anomalies-only. These
+filters are exclusive: either key clears the other mode, and pressing `a` again
+returns to the ordinary file list. If collisions-only is active, press `a`
+twice to return to all files; if anomalies-only is active, press `a` once.
+Heatmap filter and sort state remains when you leave and re-enter with
+`Escape` and `H`/`h`. The TUI has no directory-search control; `a` and `c`
+only change anomaly/collision mode. In this view lowercase `c` also
+fires the global Collision Alerts toggle, so the filter changes and the screen
+switches to Collision Alerts. Press `Escape`, then `H`/`h` to return. If the
+heatmap is still collisions-only, use `a` twice to clear that filter without
+another view switch. Navigate with
+`↑`/`↓`/`j`/`k`; `g`/`G` jump to first/last. Inside this view `g`/`G` are
+exclusively the heatmap's first/last navigation — the digest toggle does not
+fire here; reach the digest with `Escape` then `G`, or the command palette's
+`digest` command (see *Binding conflicts*).
+
+**Task dependency DAG** (`D` or `d`): lowercase `f` filters the graph. From a
+fresh launch, its first press shows blocked tasks, the second shows
+in-progress tasks, and the third combines in-progress with critical-path-only.
+Further presses refresh the same combined filter instead of advancing or
+clearing it. There is currently no keyboard reset for this filter: `Escape`
+or `D`/`d` leaves the DAG, but re-entering preserves the filter; restart FABRIC
+to restore all tasks. Lowercase `s` opens the statistics sub-view; the DAG has
+no sort key. `t` shows the tree, `b` top blockers, `r` ready tasks, and
+`C-r` forces a refresh without changing the filter. Navigate with
+`↑`/`↓`/`j`/`k`; `g`/`G` jump to first/last.
 
 **Session replay** (`R`): `Space` / `p` play/pause · `←`/`→` (or `b`/`n`) step
 backward/forward · `↑`/`↓` speed down/up · `1`–`5` set 0.5x / 1x / 2x / 5x /
@@ -208,8 +234,11 @@ Markdown) · `i` import. The footer shows the live transport state
 while staying in the view — `r` resets playback without leaving the view
 (the global re-render fires alongside the reset).
 
-**Error groups** (`E`): `↑`/`↓`/`j`/`k` navigate groups · `Enter` / `Space`
-expand / collapse detail · `Escape` collapses detail before leaving the view.
+**Error groups** (`E` or `e`): there is no interactive filter or sort key in
+this view; `f`, `s`, and `/` do not filter, sort, or search error groups.
+`↑`/`↓`/`j`/`k` navigate all groups · `Enter` / `Space` expand / collapse
+detail · `Escape` collapses an expanded detail first, then a later `Escape`
+returns to the default view.
 
 **Session digest** (`G`): `1`–`5` switch tabs (Summary / Beads / Files /
 Errors / Workers) · `e` export JSON · `m` export Markdown · `t` export text ·
@@ -225,16 +254,27 @@ refresh · `c` clear history.
 `Space` toggle detail · `f` full narrative · `r` refresh · `Escape` returns to
 the list before leaving the view.
 
-**Worker analytics** (`A`): `↑`/`↓`/`j`/`k` navigate workers · `←`/`→`
-pick comparison workers (arrow keys only — the former `h`/`l` aliases were
-removed so lowercase `h` stays the heatmap toggle; see *Binding conflicts*)
-· `Enter` / `Space` toggle detail · `a` aggregated view · `c` comparison
-mode · `s` cycle sort mode · `r` refresh · `Escape` returns to the list before
-leaving the view.
+**Worker analytics** (`A`): lowercase `s` cycles sort order: beads completed
+(default, highest first), error rate (lowest first), cost per bead (lowest
+first), and efficiency (highest first), then back to beads. Sort state
+persists when you leave and re-enter; four presses of `s` return to the default
+sort. `↑`/`↓`/`j`/`k` navigate workers · `←`/`→` pick comparison workers
+(arrow keys only — the former `h`/`l` aliases were removed so lowercase `h`
+stays the heatmap toggle; see *Binding conflicts*) · `Enter` / `Space` toggle
+detail · `a` aggregated view · `c` comparison mode · `r` refresh · `Escape`
+returns from a detail/sub-view to the list before a later `Escape` leaves the
+view. Lowercase `c` also fires the global Collision Alerts toggle, so it
+switches away while changing the analytics panel to comparison mode; see
+*Binding conflicts*.
 
-**Conversation transcript** (`T`): `/` search · `n`/`N` next/previous match ·
-`t` toggle nearest tool call · `c` collapse all tool calls · `e` expand all ·
-`x` export Markdown · `j`/`k` scroll.
+**Conversation transcript** (`T`): `/` opens the search input; type a query and
+press `Enter` to highlight matching transcript entries while keeping the full
+transcript visible. `n`/`N` move to the next/previous match; `/` starts another
+search, and submitting an empty query clears the highlights. `Escape` closes
+an open search input and steps back to the default view. Uppercase `N` also
+enters Semantic Narrative, so it changes views while moving to the previous
+match (see *Binding conflicts*). `t` toggles the nearest tool call · `c`
+collapses all tool calls · `e` expands all · `x` exports Markdown · `j`/`k` scroll.
 
 **Cross references** (`X`): `↑`/`↓`/`j`/`k` navigate · `Enter` follow the
 selected reference · `s` toggle stats · `l` toggle links · `r` refresh ·
