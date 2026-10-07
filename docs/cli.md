@@ -156,7 +156,17 @@ Semantics:
 
 #### Per-view keys
 
-Per-view keys act on the focused view element; the view takes focus on entry.
+Screen-level shortcuts work regardless of focus. A view's component shortcuts
+go to the focused widget; entering a full-screen view focuses its main widget.
+In scrollable widgets that enable Blessed's `keys` and `vi` options, arrows or
+`j`/`k` move one row or line, `Ctrl+U`/`Ctrl+D` move half a page, and
+`Ctrl+B`/`Ctrl+F` move a full page. On lists, those movements change the
+selection; on text panels, they scroll the content. `g`/`G` move to the first
+or last list item, or the top or bottom of a scrollable box, unless that view
+defines its own `g`/`G` action. `PageUp`/`PageDown` are custom-bound only in
+the file-context panel, where they scroll by the visible file-pane height.
+`Tab`/`Shift+Tab` change the focused widget, so use them before a local action
+when another panel has focus.
 
 **Default view** (worker grid + activity stream):
 
@@ -174,12 +184,26 @@ Per-view keys act on the focused view element; the view takes focus on entry.
 All default-view focus keys (`F`, `p`, `P`, `[`, `]`, `Ctrl+F`, `{`, `}`) are
 no-ops outside the default view.
 
-**File-context split** (opened with `Ctrl+F`) binds its own keys while the
-panel has focus: `o` / `O` open the current file in `$EDITOR`, `↑`/`↓`/`j`/`k`
-scroll the file, `PageUp`/`PageDown` page it, and `[` / `]` walk the
-recent-files list — those two fire *in addition to* the preset save / cycle
-above, because blessed dispatches a key to every matching handler. `{` / `}`
-resize the pane.
+The worker grid's arrows or `j`/`k` select workers; `g`/`G` select the first
+or last worker. The activity stream scrolls with arrows or `j`/`k`; while it
+has focus, `p` pauses or resumes it. `p` on the worker grid instead pins the
+selected worker. `Ctrl+C` is the global quit key.
+
+**Worker detail overlay** (opened by `Enter` when a worker is selected):
+`Escape` hides it after any help or command-palette overlay is dismissed. It
+has no detail-specific action keys; when the detail box has focus, the shared
+scroll aliases above move through its content. Opening the overlay does not
+explicitly move focus to it, so use `Tab`/`Shift+Tab` if scroll keys still act
+on the widget underneath.
+
+**File-context split** (opened with `Ctrl+F`) does not take focus when it
+opens. Use `Tab`/`Shift+Tab` to focus it; its local keys are `o` / `O` to open
+the current file in `$EDITOR`, `↑`/`↓`/`j`/`k` to scroll a line, and
+`PageUp`/`PageDown` to scroll by one visible pane height. `[` / `]` walk the
+recent-files list and also save / cycle focus presets, because the global and
+panel handlers both receive the key. `{` / `}` resize the pane. `Ctrl+F` also
+pages down in the focused scrollable widget while the global handler toggles
+the split.
 
 **Activity-stream filtering** is available from the command palette
 (`Ctrl+K`) in any view. `filter:worker:<id>` and
@@ -242,13 +266,17 @@ returns to the default view.
 
 **Session digest** (`G`): `1`–`5` switch tabs (Summary / Beads / Files /
 Errors / Workers) · `e` export JSON · `m` export Markdown · `t` export text ·
-`j`/`k` scroll.
+`j`/`k` scroll. Arrow keys scroll too; the shared `Ctrl+U`/`Ctrl+D` and
+`Ctrl+B`/`Ctrl+F` aliases page through the focused content.
 
 **Collision alerts** (`C`): `↑`/`↓`/`j`/`k` navigate alerts · `Enter` /
 `Space` acknowledge the selected alert · `a` acknowledge all.
 
 **Git integration** (`I`): `s` status · `d` diff · `p` PR preview · `r`
-refresh · `c` clear history.
+refresh · `c` clear history. Press `d` or `p` again to return to status.
+Scroll status, diff, and preview content with arrows or `j`/`k`; `Ctrl+U` /
+`Ctrl+D` page half a screen and `Ctrl+B` / `Ctrl+F` page a full screen.
+`Escape` exits the Git view to the default view under the global lifecycle.
 
 **Semantic narrative** (`N`): `↑`/`↓`/`j`/`k` navigate segments · `Enter` /
 `Space` toggle detail · `f` full narrative · `r` refresh · `Escape` returns to
@@ -281,7 +309,10 @@ selected reference · `s` toggle stats · `l` toggle links · `r` refresh ·
 `Escape` returns to links before leaving a secondary view.
 
 **Budget dashboard** (`B`): `a` acknowledge alert · `r` refresh cost data ·
-`s` budget settings.
+`s` is reserved for settings, but the app does not provide a settings callback,
+so it currently has no effect. The panel acknowledges the first unacknowledged
+alert with `a`; scroll its content with arrows or `j`/`k` and page with the
+shared `Ctrl+U`/`Ctrl+D` or `Ctrl+B`/`Ctrl+F` bindings.
 
 #### Command palette (`Ctrl+K`)
 
@@ -302,19 +333,28 @@ If help is open, help has the first Escape instead.
 
 #### Binding conflicts (known quirks)
 
-Several lowercase keys are registered both as a global view toggle and as an
-in-view action. Blessed dispatches a key to **all** matching handlers, so
-both fire — the local action runs and the global toggle switches views:
+Several keys are registered both globally and as a focused-widget action.
+Blessed dispatches a key to **all** matching handlers, so both fire — the
+local action runs and the global action also takes effect:
 
 | Key | Global effect | Local effect (focused view) |
 |-----|---------------|------------------------------|
 | `r` | Re-renders the screen (never switches views) | Reset in replay, ready-tasks sub-view in DAG, refresh in git, narrative, analytics, xref, budget — every local `r` action is itself a refresh, so the combined effect is a data refresh plus a re-render |
-| `g` / `G` | Toggles session digest — **except in the heatmap view, where the toggle is suppressed** (deconflicted, see below) | Jump to top/bottom in worker grid and DAG; in the heatmap view the jump to first/last file is the *only* effect |
+| `g` / `G` | Toggles session digest — **except in the heatmap view, where the toggle is suppressed** (deconflicted, see below) | First/last or top/bottom navigation in focused scrollable lists and boxes (including worker grid, activity stream, and DAG) |
 | `d` | Enters the DAG | Diff sub-view in git integration |
 | `e` / `E` | Enters error groups | Export in digest (`e`) and replay (`e` file, `E` base64), expand-all in transcript |
 | `c` | Enters collision alerts | Collisions-only filter in heatmap, comparison mode in analytics, collapse-all in transcript, clear history in git |
 | `p` | Pin selected worker (default view only) | Pause activity stream, play/pause replay, PR preview in git |
 | `N` | Enters semantic narrative | Previous search match in transcript |
+| `Enter` | Opens worker detail for the selected worker | Expand error detail, acknowledge a collision, toggle narrative/analytics detail, follow a cross-reference, or submit transcript search |
+| `Ctrl+F` | Toggles the file-context split in the default view | Pages down in the focused widget when it has vi paging enabled |
+| `Ctrl+C` | Quits FABRIC | The activity stream also registers a clear handler, but quit runs first |
+
+The `g`/`G` row also applies to any focused scrollable list or text box with
+Blessed's `vi` keys enabled: its first/last or top/bottom navigation runs
+alongside the session-digest toggle. Only the heatmap suppresses the global
+toggle. In the activity stream and other text panels, `Ctrl+U`/`Ctrl+D` and
+`Ctrl+B`/`Ctrl+F` page content as described above.
 
 The `r` / `R` pair is deconflicted: `r` re-renders, `R` toggles session replay,
 and the DAG view's force refresh moved from `R` to `C-r` so it cannot collide
