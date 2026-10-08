@@ -142,7 +142,7 @@ neither is bound globally.
 
 #### Views — entry and exit
 
-| View | Header | Entry key(s) |
+| View | Header | Enter with |
 |------|--------|--------------|
 | Default (worker grid + activity stream) | `FABRIC - Worker Activity Monitor` | startup; `Escape` after open overlays/details are dismissed; same key as the active view |
 | File heatmap | `FABRIC - File Heatmap` | `H` / `h` |
