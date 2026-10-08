@@ -98,10 +98,14 @@ fabric tui --source ~/.needle/logs/ --otlp-grpc 0.0.0.0:4317
 and activity stream.
 
 The TUI is a view state machine: exactly one view is active at a time — the
-`default` view plus the twelve overlay views listed below. View-entry keys
-work from any view and `Escape` steps back after dismissing any floating
-overlay. The `?` help overlay is *not* a view: it floats above whichever view
-is active without changing it. `?` toggles it, while `Escape` dismisses it
+`default` view plus the twelve overlay views listed below. An overlay's entry
+key opens it from Default or switches directly to it from another view, except
+that `G` / `g` do not enter Session Digest while File Heatmap is active; there
+they remain heatmap navigation keys. Pressing the active view's entry key
+again returns to Default. After help, the command palette, worker detail, and
+view-local details have been dismissed, `Escape` also returns an active view
+to Default. The `?` help overlay is *not* a view: it floats above whichever
+view is active without changing it. `?` toggles it, while `Escape` dismisses it
 without changing the active view; a later `Escape` can then affect the view
 or another underlying overlay. The overlay is a quick summary, not an exact mirror of
 this reference: its Actions list carries only genuinely global keys, and
@@ -138,31 +142,34 @@ neither is bound globally.
 
 #### Views — entry and exit
 
-| View | Header | Enter with |
-|------|--------|------------|
-| Default (worker grid + activity stream) | `FABRIC - Worker Activity Monitor` | startup, `Escape`, or toggling a view off |
-| File heatmap | `FABRIC - File Heatmap` | `H` or `h` |
-| Task dependency DAG | `FABRIC - Task Dependency DAG` | `D` or `d` |
-| Session replay | `FABRIC - Session Replay` | `R` |
-| Error groups | `FABRIC - Error Groups` | `E` or `e` |
-| Session digest | `FABRIC - Session Digest` | `G` or `g` (anywhere but the heatmap view — see *Binding conflicts*) |
-| Collision alerts | `FABRIC - Collision Alerts` | `C` or `c` |
-| Git integration | `FABRIC - Git Integration` | `I` |
-| Semantic narrative | `FABRIC - Semantic Narrative` | `N` |
-| Worker analytics | `FABRIC - Worker Analytics` | `A` |
-| Conversation transcript | `FABRIC - Conversation Transcript` | `T` |
-| Cross references | `FABRIC - Cross References` | `X` |
-| Budget dashboard | `FABRIC - Budget Dashboard` | `B` |
+| View | Header | Entry key(s) |
+|------|--------|--------------|
+| Default (worker grid + activity stream) | `FABRIC - Worker Activity Monitor` | startup; `Escape` after open overlays/details are dismissed; same key as the active view |
+| File heatmap | `FABRIC - File Heatmap` | `H` / `h` |
+| Task dependency DAG | `FABRIC - Task Dependency DAG` | `D` / `d` |
+| Session replay | `FABRIC - Session Replay` | `R` (uppercase only) |
+| Error groups | `FABRIC - Error Groups` | `E` / `e` |
+| Session digest | `FABRIC - Session Digest` | `G` / `g`, except while File Heatmap is active |
+| Collision alerts | `FABRIC - Collision Alerts` | `C` / `c` |
+| Git integration | `FABRIC - Git Integration` | `I` (uppercase only) |
+| Semantic narrative | `FABRIC - Semantic Narrative` | `N` (uppercase only) |
+| Worker analytics | `FABRIC - Worker Analytics` | `A` (uppercase only) |
+| Conversation transcript | `FABRIC - Conversation Transcript` | `T` (uppercase only) |
+| Cross references | `FABRIC - Cross References` | `X` (uppercase only) |
+| Budget dashboard | `FABRIC - Budget Dashboard` | `B` (uppercase only) |
 
 Semantics:
 
 - **Entry** hides the default worker grid and activity stream, closes the
   file-context split if it is open, moves keyboard focus to the view,
   refreshes its data, and rewrites the header and footer to the view's hints.
-- **Views are mutually exclusive.** Pressing another view's key while a view
-  is open switches directly to that view.
-- **Exit** = press the view's key again (every view key is a toggle), press
-  `Escape`, or press a different view's key.
+- **Views are mutually exclusive.** Pressing another view's entry key while a
+  view is open switches directly to that view, except `G` / `g` in File
+  Heatmap, where those keys only navigate to the first / last file. To switch
+  from File Heatmap to Session Digest, press `Escape` and then `G` / `g`.
+- **Same-key toggle-off** returns the active view to Default. `Escape` also
+  returns to Default after any open overlays or view-local details are
+  dismissed; pressing another view's entry key switches directly to it.
 - **Returning to the default view** shows the worker grid and the activity
   stream again (the stream back at full width). The file-context split is
   *not* restored automatically — entry closed it — so reopen it with
