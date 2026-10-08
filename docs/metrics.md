@@ -38,7 +38,8 @@ Everything in this section is pinned end-to-end by `src/multiHostMetrics.integra
 - **Label precedence** — `needle.host` beats `service.instance.id` in every placement combination (resource × record level: the full matrix is pinned on `/v1/logs`, `/v1/traces`, and `/v1/metrics`), and the losing attribute never becomes a series in any host-labeled metric family (`fabric_event_count`, `fabric_ingest_rate_per_second`, `fabric_active_workers`) — nor appears anywhere else in the exposition text.
 - **Missing attributes** — OTLP/HTTP and OTLP/gRPC events carrying no record- or resource-level host attribute, legacy JSONL events over `POST /api/events`, and files tailed from the logs directory all fall back to the local hostname; no exposition series carries an empty or nullish host label.
 - **Label escaping** — hostile host strings (embedded quotes, backslashes, newlines) render as valid, round-trippable exposition; a hostile label never breaks the scrape.
-- **Per-host separation** — the same worker ID on two hosts produces one active worker per host, and events from different hosts never merge into one series.
+- **Per-host active-worker separation** — `keeps a shared worker ID active independently on both ingested hosts` sends events for the same worker ID from two OTLP hosts through ingest to `GET /api/metrics` and asserts one active-worker series per host.
+- **Cross-host series separation** — `keeps cross-host events in distinct series for every host-labeled metric` checks each host-labeled family listed above. Event count, ingest rate, and active-worker series retain both remote host labels without duplicate series; `fabric_tailer_files_watched` remains the documented local-host-only series.
 
 Supporting suites: `src/normalizerHostExtraction.test.ts` (pure host-extraction functions), `src/web/server.metrics.test.ts` (exposition shape), `src/otlpE2E.integration.test.ts` and `src/otlpHttpReceiver.test.ts` (receiver contract).
 

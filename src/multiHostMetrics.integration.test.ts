@@ -111,6 +111,13 @@ function sampleValue(metrics: Map<string, ParsedMetric>, name: string, host: str
   return sample!.value;
 }
 
+/** Host-labeled metric families listed by the multi-host contract in docs. */
+function documentedHostLabeledMetrics(): string[] {
+  const doc = fs.readFileSync(new URL('../docs/metrics.md', import.meta.url), 'utf-8');
+  const section = doc.split('**Metrics with `host` label:**')[1]?.split('**Host Label Resolution:**')[0] ?? '';
+  return [...section.matchAll(/`(fabric_[a-z0-9_]+)\{host="\.\.\."\}`/g)].map(match => match[1]);
+}
+
 /** Sample value or undefined — for polling and absence checks. */
 function findHostSample(metrics: Map<string, ParsedMetric>, name: string, host: string): ParsedSample | undefined {
   return metrics.get(name)?.samples.find(s => s.labels.host === host);
@@ -1196,66 +1203,94 @@ describe('multi-host metrics — per-host separation (end-to-end)', () => {
     vi.unstubAllEnvs();
   });
 
-  it('keeps identical worker ids and aggregates separate across three ingest sources', async () => {
+  it('keeps a shared worker ID active independently on both ingested hosts', async () => {
     vi.stubEnv('HOSTNAME', 'ingest-local');
     const server = await startServer();
     try {
-      // host-a via OTLP: 2 events, 1 worker
+      // The same worker ID arrives from each host via OTLP/HTTP ingest.
       await postOtlp(server, '/v1/logs', otlpLogsPayload(
         { 'needle.host': 'sep-host-a' },
-        [{ attrs: NO_HOST, workerId: 'w-shared' }, { attrs: NO_HOST, workerId: 'w-shared' }],
+        [{ attrs: NO_HOST, workerId: 'w-shared' }],
       ));
-      // host-b via OTLP: 1 event, the SAME worker id — must not merge with host-a
       await postOtlp(server, '/v1/logs', otlpLogsPayload(
         { 'needle.host': 'sep-host-b' },
         [{ attrs: NO_HOST, workerId: 'w-shared' }],
       ));
-      // local via legacy JSONL: 2 events, 2 workers
-      for (const worker of ['w-l1', 'w-l2']) {
-        const res = await server.fetchJson('/api/events', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ts: new Date().toISOString(),
-            event: 'worker.started',
-            worker,
-            session: `sess-${worker}`,
-            data: {},
-          }),
-        });
-        expect(res.status).toBe(201);
-      }
 
       const { metrics } = await server.metrics();
 
-      // Three series each, with exact per-host values.
-      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(3);
-      expect(sampleValue(metrics, 'fabric_event_count', 'sep-host-a')).toBe(2);
+      // Each host has its own event and active-worker series.
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(2);
+      expect(sampleValue(metrics, 'fabric_event_count', 'sep-host-a')).toBe(1);
       expect(sampleValue(metrics, 'fabric_event_count', 'sep-host-b')).toBe(1);
-      expect(sampleValue(metrics, 'fabric_event_count', 'ingest-local')).toBe(2);
 
-      // Identical worker id on two hosts → one worker per host, not 2 on one.
+      // Identical worker IDs on two hosts produce one active worker per host.
+      expect(metrics.get('fabric_active_workers')!.samples).toHaveLength(2);
       expect(sampleValue(metrics, 'fabric_active_workers', 'sep-host-a')).toBe(1);
       expect(sampleValue(metrics, 'fabric_active_workers', 'sep-host-b')).toBe(1);
-      expect(sampleValue(metrics, 'fabric_active_workers', 'ingest-local')).toBe(2);
 
-      // Rate series exist for every host, and nowhere else.
-      for (const host of ['sep-host-a', 'sep-host-b', 'ingest-local']) {
+      // The scrape has a rate series for each host as well.
+      for (const host of ['sep-host-a', 'sep-host-b']) {
         expect(findHostSample(metrics, 'fabric_ingest_rate_per_second', host)).toBeDefined();
       }
+    } finally {
+      await server.stop();
+    }
+  });
 
-      // Hostless metrics stay unlabeled and single-sample.
-      for (const name of ['fabric_status', 'fabric_uptime_seconds', 'fabric_websocket_clients',
-        'fabric_dedup_dropped_total', 'fabric_process_resident_memory_bytes']) {
-        const samples = metrics.get(name)!.samples;
-        expect(samples, name).toHaveLength(1);
-        expect(samples[0].labels, name).toEqual({});
+  it('keeps cross-host events in distinct series for every host-labeled metric', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    try {
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'sep-host-a' },
+        [
+          { attrs: NO_HOST, workerId: 'w-a1' },
+          { attrs: NO_HOST, workerId: 'w-a2' },
+        ],
+      ));
+      await postOtlp(server, '/v1/logs', otlpLogsPayload(
+        { 'needle.host': 'sep-host-b' },
+        [{ attrs: NO_HOST, workerId: 'w-b1' }],
+      ));
+
+      const { metrics } = await server.metrics();
+      const documented = documentedHostLabeledMetrics().sort();
+      expect(documented).toEqual([
+        'fabric_active_workers',
+        'fabric_event_count',
+        'fabric_ingest_rate_per_second',
+        'fabric_tailer_files_watched',
+      ]);
+
+      const emittedHostLabeled = [...metrics]
+        .filter(([, metric]) => metric.samples.some(sample => sample.labels.host !== undefined))
+        .map(([name]) => name)
+        .sort();
+      expect(emittedHostLabeled).toEqual(documented);
+
+      // Every emitted host-labeled family has unique series identities. The
+      // event aggregates carry both remote hosts; the tailer gauge is local-only.
+      for (const name of emittedHostLabeled) {
+        const hostSamples = metrics.get(name)!.samples.filter(sample => sample.labels.host !== undefined);
+        const identities = hostSamples.map(sample => JSON.stringify(
+          Object.entries(sample.labels).sort(([a], [b]) => a.localeCompare(b)),
+        ));
+        expect(new Set(identities).size, `${name} duplicate series`).toBe(hostSamples.length);
+
+        if (name === 'fabric_tailer_files_watched') {
+          expect(hostSamples).toHaveLength(1);
+          expect(hostSamples[0].labels.host).toBe('ingest-local');
+        } else {
+          expect(hostSamples).toHaveLength(2);
+          expect(hostSamples.map(sample => sample.labels.host).sort()).toEqual(['sep-host-a', 'sep-host-b']);
+        }
       }
 
-      // The local tailer gauge is labeled with the local host only.
-      const tailer = metrics.get('fabric_tailer_files_watched')!;
-      expect(tailer.samples).toHaveLength(1);
-      expect(tailer.samples[0].labels).toEqual({ host: 'ingest-local' });
+      expect(sampleValue(metrics, 'fabric_event_count', 'sep-host-a')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_event_count', 'sep-host-b')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'sep-host-a')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'sep-host-b')).toBe(1);
     } finally {
       await server.stop();
     }
