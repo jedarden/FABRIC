@@ -481,6 +481,59 @@ describe('digest command (integration)', () => {
       }
     }, 10000);
 
+    test('completes the --source file workflow end to end', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'fabric-digest-file-e2e-'));
+      const filePath = join(tempDir, 'workflow-events.jsonl');
+      const events = [
+        {
+          ts: 1709337600000,
+          worker: 'digest-file-e2e-worker',
+          level: 'info',
+          msg: 'Started complete source workflow',
+          bead: 'fabric-source-e2e',
+        },
+        {
+          ts: 1709337601000,
+          worker: 'digest-file-e2e-worker',
+          level: 'info',
+          msg: 'Updated a file from source workflow',
+          tool: 'Edit',
+          path: 'src/source-workflow.ts',
+        },
+      ];
+
+      try {
+        writeFileSync(filePath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`, 'utf8');
+
+        const result = spawnSync(
+          'node',
+          [DIST_CLI, 'digest', '--source', filePath],
+          { cwd: process.cwd(), encoding: 'utf-8', env: process.env },
+        );
+        const stdout = String(result.stdout ?? '');
+        const stderr = String(result.stderr ?? '');
+
+        // A successful process and clean diagnostics verify that the file was
+        // consumed without an ingestion or digest-generation error.
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(0);
+        expect(stderr).not.toMatch(/(?:error|failed|tailer)/i);
+
+        // The resolver reports both the detected kind and the exact input path.
+        expect(stderr).toContain(`FABRIC Digest - Analyzing: ${filePath} (file)`);
+
+        // The digest contains the events loaded from this file, not unrelated
+        // workers or files from the default source.
+        expect(stderr).toContain('Loaded 2 events');
+        expect(stdout).toContain('| Total Events | 2 |');
+        expect(stdout).toContain('| Active Workers | 1 |');
+        expect(stdout).toContain('| digest-file-e2e-worker | 2 | 1 | 1 | 0 |');
+        expect(stdout).toContain('| src/source-workflow.ts | 1 | 1 | Edit |');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }, 10000);
+
     test('correctly processes file source and shows kind=file', () => {
       const alphaLog = join(FIXTURES_DIR, 'alpha-d6288428.jsonl');
       if (!existsSync(alphaLog)) {
