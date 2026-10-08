@@ -19,18 +19,22 @@
  * normalizerHostExtraction.test.ts pins the pure extraction functions and
  * server.metrics.test.ts pins the exposition shape; this file pins the
  * contract end-to-end over the real ingest surfaces (OTLP/HTTP receiver,
- * POST /api/events, DirectoryTailer → recordEvent wiring) into GET /api/metrics,
- * including label escaping for hostile host strings.
+ * POST /api/events, DirectoryTailer → recordEvent wiring, and OTLP/gRPC →
+ * recordEvent wiring) into GET /api/metrics, including label escaping for
+ * hostile host strings.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import * as grpc from '@grpc/grpc-js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as protobuf from 'protobufjs';
 import { createWebServer, WebServer } from './web/server.js';
 import { InMemoryEventStore } from './store.js';
 import { ServerMetrics } from './serverMetrics.js';
 import { DirectoryTailer } from './directoryTailer.js';
+import { OtlpGrpcReceiver, loadProtoRoot } from './otlpGrpcReceiver.js';
 import { resetCrossReferenceManager } from './crossReferenceManager.js';
 import { getLocalHostname } from './hostname.js';
 import type { LogEvent } from './types.js';
@@ -287,6 +291,41 @@ async function waitFor(probe: () => Promise<boolean>, what: string): Promise<voi
 }
 
 const NO_HOST: Attrs = {};
+
+const GRPC_LOGS_PATH = '/opentelemetry.proto.collector.logs.v1.LogsService/Export';
+const GRPC_LOGS_REQUEST = 'opentelemetry.proto.collector.logs.v1.ExportLogsServiceRequest';
+const GRPC_LOGS_RESPONSE = 'opentelemetry.proto.collector.logs.v1.ExportLogsServiceResponse';
+
+async function exportGrpcLogs(
+  port: number,
+  logRecords: Array<Record<string, unknown>>,
+  resourceAttributes: Array<Record<string, unknown>> = [],
+): Promise<void> {
+  const root: protobuf.Root = await loadProtoRoot();
+  const requestType = root.lookupType(GRPC_LOGS_REQUEST);
+  const responseType = root.lookupType(GRPC_LOGS_RESPONSE);
+  const client = new grpc.Client(`127.0.0.1:${port}`, grpc.credentials.createInsecure());
+
+  await new Promise<void>((resolve, reject) => {
+    client.makeUnaryRequest(
+      GRPC_LOGS_PATH,
+      (message: Record<string, unknown>) => Buffer.from(requestType.encode(requestType.create(message)).finish()),
+      (buffer: Buffer) => responseType.decode(new Uint8Array(buffer)),
+      {
+        resourceLogs: [{
+          resource: { attributes: resourceAttributes },
+          scopeLogs: [{ logRecords }],
+        }],
+      },
+      new grpc.Metadata(),
+      (error: grpc.ServiceError | null) => {
+        client.close();
+        if (error) reject(error);
+        else resolve();
+      },
+    );
+  });
+}
 
 // ─── OTLP ingest → per-host metrics ─────────────────────────────────────────
 
@@ -839,7 +878,7 @@ describe('multi-host metrics — missing attributes and legacy JSONL sources', (
     vi.unstubAllEnvs();
   });
 
-  it('OTLP events without any host attribute are attributed to the local hostname', async () => {
+  it('OTLP/HTTP events without record- or resource-level host attributes use the local hostname', async () => {
     vi.stubEnv('HOSTNAME', 'ingest-local');
     const server = await startServer();
     try {
@@ -941,6 +980,63 @@ describe('multi-host metrics — missing attributes and legacy JSONL sources', (
       await rawServer.stop();
       fs.rmSync(logDir, { recursive: true, force: true });
     }
+  });
+
+  it('OTLP/gRPC events without record- or resource-level host attributes use the local hostname in exposition', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const server = await startServer();
+    const receiver = new OtlpGrpcReceiver({ address: '127.0.0.1:0' });
+    const received: LogEvent[] = [];
+    receiver.on('event', (event: LogEvent) => {
+      received.push(event);
+      // This is the production cli.ts wiring: gRPC events enter both the
+      // store and the per-host metrics tracker before exposition.
+      server.store.add(event);
+      server.recordEvent(event.host, event.worker);
+    });
+
+    try {
+      const boundAddress = await receiver.start();
+      const grpcPort = Number(boundAddress.split(':').at(-1));
+      expect(grpcPort).toBeGreaterThan(0);
+
+      await exportGrpcLogs(grpcPort, [{
+        timeUnixNano: String(Date.now() * 1_000_000),
+        attributes: kvAttrs({
+          event_type: 'worker.started',
+          'needle.worker.id': 'w-grpc-fallback',
+          'needle.session.id': 'sess-grpc-fallback',
+          'needle.sequence': '1',
+        }),
+      }]);
+
+      await waitFor(async () => received.length === 1, 'gRPC event to reach the metrics wiring');
+      expect(received[0].host).toBe('ingest-local');
+
+      const { metrics } = await server.metrics();
+      expect(sampleValue(metrics, 'fabric_event_count', 'ingest-local')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'ingest-local')).toBe(1);
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+    } finally {
+      await receiver.stop();
+      await server.stop();
+    }
+  });
+
+  it('never emits an empty, undefined, or null host label', () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const metrics = new ServerMetrics();
+    metrics.recordEvent(undefined, 'w-no-host-1');
+    metrics.recordEvent(null as unknown as string, 'w-no-host-2');
+    metrics.recordEvent('', 'w-no-host-3');
+
+    const { metrics: parsed, raw } = parsePrometheus(metrics.toPrometheus(metrics.snapshot()));
+    for (const name of ['fabric_event_count', 'fabric_ingest_rate_per_second', 'fabric_active_workers']) {
+      const samples = parsed.get(name)!.samples;
+      expect(samples).toHaveLength(1);
+      expect(samples[0].labels.host).toBe('ingest-local');
+    }
+    expect(raw).not.toMatch(/host="(?:|undefined|null)"/);
   });
 });
 
