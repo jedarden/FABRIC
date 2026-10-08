@@ -799,6 +799,77 @@ describe('native event API conformance (docs/events-api.md)', () => {
   // ── Content type variants and empty bodies ────────────────────
 
   describe('content type variants and empty bodies (both routes)', () => {
+    it.each([
+      {
+        name: 'single route with missing Content-Type',
+        route: '/api/events',
+        body: JSON.stringify(canonicalEvent()),
+        contentType: undefined,
+        expected: {
+          error: 'Invalid request body',
+          message: 'Expected JSON object',
+        },
+      },
+      {
+        name: 'single route with an incorrect Content-Type',
+        route: '/api/events',
+        body: JSON.stringify(canonicalEvent()),
+        contentType: 'text/plain',
+        expected: {
+          error: 'Invalid request body',
+          message: 'Expected JSON object',
+        },
+      },
+      {
+        name: 'batch route with missing Content-Type',
+        route: '/api/events/batch',
+        body: JSON.stringify([canonicalEvent()]),
+        contentType: undefined,
+        expected: {
+          error: 'Invalid request body',
+          message: 'Expected JSON array of events',
+        },
+      },
+      {
+        name: 'batch route with an incorrect Content-Type',
+        route: '/api/events/batch',
+        body: JSON.stringify([canonicalEvent()]),
+        contentType: 'text/plain',
+        expected: {
+          error: 'Invalid request body',
+          message: 'Expected JSON array of events',
+        },
+      },
+      {
+        name: 'single route with an empty JSON body',
+        route: '/api/events',
+        body: '',
+        contentType: 'application/json',
+        expected: {
+          error: 'Missing required field',
+          message: 'Field "ts" is required',
+        },
+      },
+      {
+        name: 'batch route with an empty JSON body',
+        route: '/api/events/batch',
+        body: '',
+        contentType: 'application/json',
+        expected: {
+          error: 'Invalid request body',
+          message: 'Expected JSON array of events',
+        },
+      },
+    ])('$name returns its documented 400 without side effects', async ({ route, body, contentType, expected }) => {
+      const res = await post(route, body, { contentType, token: AUTH_TOKEN });
+
+      expect(res.status, route).toBe(400);
+      expect(await res.json(), route).toEqual(expected);
+      expect(store.size).toBe(0);
+      expect(await hostEventCount('fleet-remote-1')).toBeNull();
+      expect(await hostEventCount(getLocalHostname())).toBe('0');
+    });
+
     it('accepts the charset-annotated JSON content type', async () => {
       const res = await post('/api/events', JSON.stringify(jsonlEvent()), {
         contentType: 'application/json; charset=utf-8',
