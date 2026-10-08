@@ -436,6 +436,51 @@ describe('digest command (integration)', () => {
       }
     }, 10000);
 
+    test('includes events from a temporary --source file in digest output', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'fabric-digest-file-output-'));
+      const filePath = join(tempDir, 'known-events.jsonl');
+      const knownEvents = [
+        {
+          ts: 1709337600000,
+          worker: 'digest-file-output-worker',
+          level: 'info',
+          msg: 'Started output digest test',
+          bead: 'fabric-file-output',
+        },
+        {
+          ts: 1709337601000,
+          worker: 'digest-file-output-worker',
+          level: 'info',
+          msg: 'Completed output digest test',
+          bead: 'fabric-file-output',
+        },
+        {
+          ts: 1709337602000,
+          worker: 'digest-file-output-worker',
+          level: 'info',
+          msg: 'Updated output fixture',
+          tool: 'Edit',
+          path: 'src/output-fixture.ts',
+        },
+      ];
+
+      try {
+        writeFileSync(filePath, `${knownEvents.map((event) => JSON.stringify(event)).join('\n')}\n`, 'utf8');
+
+        const { stdout, stderr } = execCaptureStderr(
+          `node "${DIST_CLI}" digest --source "${filePath}"`,
+        );
+
+        expect(stderr).toContain('Loaded 3 events');
+        expect(stdout).toContain('| Total Events | 3 |');
+        expect(stdout).toContain('| Active Workers | 1 |');
+        expect(stdout).toContain('| fabric-file-output | digest-file-output-worker |');
+        expect(stdout).toContain('| src/output-fixture.ts | 1 | 1 | Edit |');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }, 10000);
+
     test('correctly processes file source and shows kind=file', () => {
       const alphaLog = join(FIXTURES_DIR, 'alpha-d6288428.jsonl');
       if (!existsSync(alphaLog)) {
