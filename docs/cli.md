@@ -120,7 +120,18 @@ neither is bound globally.
 | `Ctrl+K` | Command palette (see below) |
 | `Ctrl+T` | Toggle dark / light theme |
 | `r` | Re-render the screen — view-local `r` actions (refresh, reset, ready tasks) fire alongside it |
-| `R` | Toggle the session replay view — uppercase only; `r` always re-renders and never switches views |
+| `H` / `h` | Toggle the File Heatmap view: enter it from another view, or return to Default if it is already active |
+| `D` / `d` | Toggle the Task Dependency DAG view: enter it from another view, or return to Default if it is already active |
+| `R` | Toggle the Session Replay view — uppercase only; `r` re-renders and never switches views |
+| `E` / `e` | Toggle the Error Groups view: enter it from another view, or return to Default if it is already active |
+| `G` / `g` | Toggle the Session Digest view, except in File Heatmap, where `g` / `G` navigate to the first / last file |
+| `C` / `c` | Toggle the Collision Alerts view: enter it from another view, or return to Default if it is already active |
+| `I` | Toggle the Git Integration view: enter it from another view, or return to Default if it is already active |
+| `N` | Toggle the Semantic Narrative view: enter it from another view, or return to Default if it is already active |
+| `A` | Toggle the Worker Analytics view: enter it from another view, or return to Default if it is already active |
+| `B` | Toggle the Budget Dashboard view: enter it from another view, or return to Default if it is already active |
+| `T` | Toggle the Conversation Transcript view: enter it from another view, or return to Default if it is already active |
+| `X` | Toggle the Cross References view: enter it from another view, or return to Default if it is already active |
 
 #### Views — entry and exit
 
