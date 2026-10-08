@@ -9,11 +9,83 @@
  * - resolveFromOptions: 4 paths (source priority, file option, default behavior)
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, rmdirSync, mkdtempSync, rmSync, copyFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
+import { resolveFromOptions, resolveSource } from './pathResolver.js';
+
+const DIST_CLI = join(process.cwd(), 'dist', 'cli.js');
+const FIXTURES_DIR = join(process.cwd(), 'tests', 'fixtures', 'needle-logs');
+const TEMP_DIR = join(process.cwd(), 'tmp', 'path-resolution-tests');
+
+describe('exported path resolver functions', () => {
+  let root: string;
+  let homeDir: string;
+  let logsDir: string;
+  let logFile: string;
+
+  beforeEach(() => {
+    mkdirSync(TEMP_DIR, { recursive: true });
+    root = mkdtempSync(join(TEMP_DIR, 'resolver-unit-'));
+    homeDir = join(root, 'home');
+    logsDir = join(homeDir, 'logs');
+    logFile = join(homeDir, 'worker.jsonl');
+    mkdirSync(logsDir, { recursive: true });
+    writeFileSync(logFile, '{}\n', 'utf8');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(root, { recursive: true, force: true });
+    try {
+      rmdirSync(TEMP_DIR);
+    } catch {
+      // Another path-resolution test may still have files in the shared temp directory.
+    }
+  });
+
+  test('resolves tilde and absolute sources as directories or files', () => {
+    expect(resolveSource('~/logs', homeDir)).toEqual({ kind: 'directory', path: logsDir });
+    expect(resolveSource('~/worker.jsonl', homeDir)).toEqual({ kind: 'file', path: logFile });
+    expect(resolveSource(logsDir, homeDir)).toEqual({ kind: 'directory', path: logsDir });
+    expect(resolveSource(logFile, homeDir)).toEqual({ kind: 'file', path: logFile });
+  });
+
+  test('reports a missing source and exits with status 1', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null): never => {
+      throw new Error(`process.exit(${code})`);
+    });
+
+    expect(() => resolveSource(join(root, 'missing.jsonl'), homeDir)).toThrow('process.exit(1)');
+    expect(error).toHaveBeenCalledWith(`Error: Source path does not exist: ${join(root, 'missing.jsonl')}`);
+  });
+
+  test('prefers a validated source over the legacy file option', () => {
+    expect(resolveFromOptions(logsDir, logFile, homeDir)).toEqual({ kind: 'directory', path: logsDir });
+  });
+
+  test('expands tilde paths supplied through the legacy file option', () => {
+    expect(resolveFromOptions(undefined, '~/worker.jsonl', homeDir)).toEqual({ kind: 'file', path: logFile });
+  });
+
+  test('preserves a legacy file path without tilde expansion', () => {
+    expect(resolveFromOptions(undefined, logFile, homeDir)).toEqual({ kind: 'file', path: logFile });
+  });
+
+  test('uses the default log directory when neither option is supplied', () => {
+    expect(resolveFromOptions(undefined, undefined, homeDir)).toEqual({
+      kind: 'directory',
+      path: `${homeDir}/.needle/logs`,
+    });
+    expect(resolveFromOptions('', '', homeDir)).toEqual({
+      kind: 'directory',
+      path: `${homeDir}/.needle/logs`,
+    });
+  });
+});
 
 /**
  * These tests verify the path resolution logic by running the digest command
@@ -24,10 +96,6 @@ import { execSync } from 'node:child_process';
  */
 
 describe('path resolution logic - digest command', () => {
-  const DIST_CLI = join(process.cwd(), 'dist', 'cli.js');
-  const FIXTURES_DIR = join(process.cwd(), 'tests', 'fixtures', 'needle-logs');
-  const TEMP_DIR = join(process.cwd(), 'tmp', 'path-resolution-tests');
-
   beforeEach(() => {
     // Create temp directory for test files
     if (!existsSync(TEMP_DIR)) {

@@ -143,7 +143,7 @@ export class SessionDigestGenerator {
 
       // Look for completion indicators
       if (this.isBeadCompletion(event)) {
-        const startTime = beadStartTimes.get(beadId) || event.ts;
+        const startTime = beadStartTimes.get(beadId)!;
         completions.push({
           beadId,
           workerId: event.worker,
