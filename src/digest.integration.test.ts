@@ -387,6 +387,55 @@ describe('digest command (integration)', () => {
       }
     }, 10000);
 
+    test('processes and parses events from a temporary --source file', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'fabric-digest-file-source-'));
+      const filePath = join(tempDir, 'sample-events.jsonl');
+      const sampleEvents = [
+        {
+          ts: 1709337600000,
+          worker: 'digest-file-worker',
+          level: 'info',
+          msg: 'Started digest test',
+          bead: 'fabric-file-input',
+        },
+        {
+          ts: 1709337601000,
+          worker: 'digest-file-worker',
+          level: 'info',
+          msg: 'Completed digest test',
+          bead: 'fabric-file-input',
+        },
+        {
+          ts: 1709337602000,
+          worker: 'digest-file-worker',
+          level: 'info',
+          msg: 'Updated test fixture',
+          tool: 'Edit',
+          path: 'src/example.ts',
+        },
+      ];
+
+      try {
+        writeFileSync(filePath, `${sampleEvents.map((event) => JSON.stringify(event)).join('\n')}\n`, 'utf8');
+
+        const { stdout, stderr } = execCaptureStderr(
+          `node "${DIST_CLI}" digest --source "${filePath}"`,
+        );
+
+        expect(stderr).toContain(`FABRIC Digest - Analyzing: ${filePath} (file)`);
+        expect(stderr).toContain('Loaded 3 events');
+        expect(stderr).not.toMatch(/Tailer error|Failed to generate digest/);
+
+        // These assertions verify that all three file events were parsed into the digest.
+        expect(stdout).toContain('| Total Events | 3 |');
+        expect(stdout).toContain('| Active Workers | 1 |');
+        expect(stdout).toContain('| fabric-file-input | digest-file-worker |');
+        expect(stdout).toContain('| src/example.ts | 1 | 1 | Edit |');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }, 10000);
+
     test('correctly processes file source and shows kind=file', () => {
       const alphaLog = join(FIXTURES_DIR, 'alpha-d6288428.jsonl');
       if (!existsSync(alphaLog)) {
