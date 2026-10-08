@@ -64,10 +64,13 @@ describe('digest command (integration)', () => {
   describe('with --source directory', () => {
     test('reads from all per-worker JSONL files', () => {
       // Run digest command with --source pointing to fixtures directory
-      const stdout = execSync(
-        `node ${DIST_CLI} digest --source ${FIXTURES_DIR}`,
-        { encoding: 'utf-8', cwd: process.cwd() }
+      const { stdout, stderr } = execCaptureStderr(
+        `node ${DIST_CLI} digest --source "${FIXTURES_DIR}"`
       );
+
+      // --source should resolve to the exact input directory.
+      expect(stderr).toContain(`Analyzing: ${FIXTURES_DIR} (directory)`);
+      expect(stderr).toContain('Loaded 8 events');
 
       // Should contain both workers from fixtures
       expect(stdout).toContain('alpha-d6288428');
