@@ -785,22 +785,28 @@ describe('multi-host metrics — OTLP resource attributes promoted onto every re
     }
   });
 
-  it('promotes the resource needle.host onto every span in one payload (/v1/traces)', async () => {
+  it('promotes resource needle.host to every span while the span value wins a duplicate (/v1/traces)', async () => {
     vi.stubEnv('HOSTNAME', 'ingest-local');
     const server = await startServer();
     try {
       await postOtlp(server, '/v1/traces', otlpSpansPayload(
         { 'needle.host': 'promo-spans-host' },
-        [{ workerId: 'w-promo-s1' }, { workerId: 'w-promo-s2' }],
+        [
+          { attrs: { 'needle.host': 'promo-span-host' }, workerId: 'w-promo-s1' },
+          { workerId: 'w-promo-s2' },
+        ],
       ));
 
       const { metrics } = await server.metrics();
-      // Two spans normalize to started + finished each → 4 events, all on
-      // the resource host.
-      expect(sampleValue(metrics, 'fabric_event_count', 'promo-spans-host')).toBe(4);
-      expect(sampleValue(metrics, 'fabric_active_workers', 'promo-spans-host')).toBe(2);
+      // The resource host reaches the span without an override, while the
+      // span-level duplicate wins for the first span. Both derived events
+      // retain their winning host label.
+      expect(sampleValue(metrics, 'fabric_event_count', 'promo-spans-host')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'promo-spans-host')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_event_count', 'promo-span-host')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'promo-span-host')).toBe(1);
       expect(findHostSample(metrics, 'fabric_event_count', 'ingest-local')).toBeUndefined();
-      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(2);
     } finally {
       await server.stop();
     }
