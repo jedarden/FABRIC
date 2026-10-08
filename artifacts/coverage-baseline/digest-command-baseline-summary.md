@@ -2,7 +2,7 @@
 
 **Baseline recorded:** 2026-07-29
 **Summary corrected:** 2026-09-13 (fixed branch-count typo, restored line metrics, added digest-scope totals)
-**Baseline refreshed:** 2026-09-17 (fresh full-suite run, same aggregation convention — see "Refresh history")
+**Baseline refreshed:** 2026-10-08 (fresh full-suite run, same aggregation convention — see "Refresh history")
 **Project:** FABRIC (Flow Analysis & Bead Reporting Interface Console)
 **Command scope:** `fabric digest` — session digest generation and its path-resolution logic
 
@@ -29,12 +29,12 @@ the wrong one:
 
 | Metric   | Covered | Total | Percentage |
 |----------|---------|-------|------------|
-| Lines       | 937   | 2,419 | 38.74% |
-| Branches    | 233   |   697 | 33.43% |
-| Functions   |  85   |   205 | 41.46% |
-| Statements  | 419   | 1,348 | 31.08% |
+| Lines       | 1,920 | 2,482 | 77.36% |
+| Branches    | 265   |   714 | 37.11% |
+| Functions   | 104   |   208 | 50.00% |
+| Statements  | 527   | 1,376 | 38.30% |
 
-Refreshed 2026-09-17 from a full-suite `npm run test:coverage` run, aggregated
+Refreshed 2026-10-08 from a full-suite `npm run test:coverage` run, aggregated
 from the per-file counts in `digest-command-baseline-coverage.json`. Line
 coverage is derived from the `statementMap` (a line counts as covered when any
 statement on it executed); the raw istanbul JSON does not carry a separate line
@@ -96,36 +96,56 @@ Every covered count is identical; every total grew. The percentage drift is
 entirely new uncovered code entering the six digest files — **no absolute
 coverage regression** since the original baseline.
 
+### 2026-10-08 refresh
+
+Method: full-suite `npm run test:coverage` (v8 provider, 114 test files, 3,739
+passing tests, 2 skipped), aggregated with the same `statementMap` convention.
+The current report increased covered counts because the full suite now exercises
+more of the CLI digest path, including the command's source-resolution flow.
+
+| Metric     | Covered 09-17 → 10-08 | Total 09-17 → 10-08 | Percentage 09-17 → 10-08 |
+|------------|----------------------|--------------------|-------------------------|
+| Lines      | 937 → 1,920 (↑983)   | 2,419 → 2,482       | 38.74% → 77.36%         |
+| Branches   | 233 → 265 (↑32)      |   697 →   714       | 33.43% → 37.11%         |
+| Functions  |  85 → 104 (↑19)      |   205 →   208       | 41.46% → 50.00%         |
+| Statements | 419 → 527 (↑108)     | 1,348 → 1,376       | 31.08% → 38.30%         |
+
+The command exited non-zero after all tests passed because the configured 50%
+thresholds remain aspirational: v8's native summary reported 38.29% statements,
+37.11% branches, 50.00% functions, and 39.38% lines. The committed comparison
+baseline uses the statement-map convention above, not v8's native line count.
+
 Two measurement notes for future comparisons:
 
 - **v8 native counting disagrees with this convention.** The `npm run
   test:coverage` text summary counts lines/statement boundaries its own way and
-  reported Lines 31.71% (393/1,239) for the same run stored here (937/2,419 =
-  38.74% under the statementMap convention). Both are "correct"; they count
-  different things. Compare against this baseline only via the statementMap
-  convention, which is what `src/coverageBaseline.test.ts` enforces.
-- **The 50% thresholds in `vitest.config.ts` currently fail.** On both the
-  2026-07-29 recording and the 2026-09-17 refresh, digest-scope coverage
-  (31–41% by v8 native counting) sits below the configured 50% thresholds, so
+  reported Lines 39.38% (497/1,262) for the 2026-10-08 run stored here
+  (1,920/2,482 = 77.36% under the statementMap convention). Both are
+  "correct"; they count different things. Compare against this baseline only
+  via the statementMap convention, which is what `src/coverageBaseline.test.ts`
+  enforces.
+- **The 50% thresholds in `vitest.config.ts` currently fail.** The 2026-10-08
+  run reached 50.00% only for functions; statements (38.29%), branches
+  (37.11%), and lines (39.38%) remain below the configured thresholds, so
   `npm run test:coverage` exits non-zero after all tests pass. The thresholds
   are aspirational; a non-zero coverage exit is not a test failure.
 
 ## Analysis Notes
 
-- The digest-command scope sits far below overall project coverage because the
-  scoped run exercised only digest-related tests; `src/cli.ts` carries every
-  other CLI command, none of which those tests touch. This is expected, not a
-  regression signal. (In the 2026-09-17 run `src/cli.ts` and
-  `src/pathResolver.ts` contributed 0 covered lines to the istanbul aggregate —
-  their logic is pinned instead by the component-level tests referenced above.)
-- Within the digest scope, function coverage (41.46%) leads branch coverage
-  (33.43%) — the gap is untested branch arms (error paths, option variants),
+- The digest-command scope remains below overall project coverage because
+  `src/cli.ts` carries every CLI command, while the configured report includes
+  the whole file. The 2026-10-08 full suite now exercises more CLI lines, but
+  `src/pathResolver.ts` remains a separately exported helper with 0 direct
+  instrumented coverage; the command's actual resolver in `src/cli.ts` is
+  covered through the child-process integration tests.
+- Within the digest scope, function coverage (50.00%) leads branch coverage
+  (37.11%) — the gap is untested branch arms (error paths, option variants),
   the usual place to look for improvement.
 - Path resolution itself is fully covered at the code-path level; regressions
   there are a test failure, not a coverage drift.
-- The 2026-09-17 refresh left every covered count unchanged, so improvement
-  work since 2026-07-29 has gone into new code and non-digest surfaces. Closing
-  the digest-scope gap means covering the branch arms inside
+- The 2026-10-08 refresh increased covered counts, primarily through broader
+  CLI integration exercise. Closing the remaining digest-scope gap means
+  covering the branch arms inside
   `src/tui/components/SessionDigest.ts` and `src/analytics.ts`, which hold most
   of the uncovered totals.
 

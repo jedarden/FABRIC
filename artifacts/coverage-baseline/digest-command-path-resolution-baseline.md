@@ -1,6 +1,6 @@
 # Digest Command Path Resolution - Baseline Coverage Analysis
 
-**Date:** 2026-07-29  
+**Date:** 2026-10-08 (component revalidated during the fresh full-suite run)
 **Project:** FABRIC  
 **Command:** `fabric digest`  
 **Component:** Path Resolution Logic (`src/cli.ts`)
@@ -11,7 +11,11 @@ This document establishes baseline coverage metrics for the digest command's pat
 
 ## Coverage Metrics
 
-### Overall Project Coverage
+### Historical Overall Project Coverage
+
+The project-wide figures below remain the historical 2026-07-29 recording in
+`metrics.json`; the current digest-scope report is summarized in the main
+baseline document.
 - **Statements:** 69.19% (9,676/13,983)
 - **Branches:** 61.91% (5,169/8,348)  
 - **Functions:** 66.27% (1,586/2,393)
@@ -162,6 +166,6 @@ This baseline provides a solid foundation for ensuring future changes to path re
 5. 🔄 **Documentation:** Update this baseline when adding new path resolution features
 
 ---
-**Analysis Command:** `npm run test:coverage -- src/pathResolver.test.ts`  
-**Report Generated:** 2026-07-29  
+**Analysis Command:** `npm run test:coverage` (full suite; 15 path-resolution tests passing)
+**Report Generated:** 2026-10-08
 **Status:** ✅ Baseline established - 100% path coverage maintained

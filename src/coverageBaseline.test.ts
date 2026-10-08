@@ -54,14 +54,14 @@ const DIGEST_SCOPE_FILES = [
 
 /**
  * Frozen baseline values (recorded 2026-07-29, corrected 2026-09-13,
- * refreshed 2026-09-17: covered counts unchanged, totals grew with the
- * codebase — see "Refresh history" in the baseline summary).
+ * refreshed 2026-09-17 and 2026-10-08 — see "Refresh history" in the
+ * baseline summary).
  */
 const BASELINE_DIGEST_SCOPE = {
-  lines: { covered: 937, total: 2419, pct: 38.74 },
-  branches: { covered: 233, total: 697, pct: 33.43 },
-  functions: { covered: 85, total: 205, pct: 41.46 },
-  statements: { covered: 419, total: 1348, pct: 31.08 },
+  lines: { covered: 1920, total: 2482, pct: 77.36 },
+  branches: { covered: 265, total: 714, pct: 37.11 },
+  functions: { covered: 104, total: 208, pct: 50.00 },
+  statements: { covered: 527, total: 1376, pct: 38.30 },
 };
 
 const BASELINE_OVERALL_PROJECT = {
