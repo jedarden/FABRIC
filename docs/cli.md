@@ -94,6 +94,9 @@ fabric tui --source ~/.needle/logs/ --otlp-grpc 0.0.0.0:4317
 
 ### Keyboard Shortcuts
 
+**Startup screen:** The TUI opens in the Default view, showing the worker grid
+and activity stream.
+
 The TUI is a view state machine: exactly one view is active at a time — the
 `default` view plus the twelve overlay views listed below. View-entry keys
 work from any view and `Escape` steps back after dismissing any floating
@@ -116,7 +119,7 @@ neither is bound globally.
 | `?` | Toggle the help overlay — works in every view and does not change the active view |
 | `Tab` / `Shift+Tab` | Move panel focus to the next / previous panel |
 | `Enter` | Open the detail overlay for the worker selected in the worker grid (`Escape` closes it after any open help overlay) |
-| `Escape` | In order: close the help overlay if it is open; otherwise close the focused command palette; otherwise close the worker or view-local detail; otherwise return to the default view (no-op if already there) |
+| `Escape` | Dismiss layers in order: help overlay, command palette, worker detail, then any open view-local detail mode (expanded error-group detail, narrative detail/full view, analytics detail/sub-view, or a cross-reference sub-view). Once those are closed, a later `Escape` returns an active overlay view to Default. In the bare Default view, `Escape` does nothing. |
 | `Ctrl+K` | Command palette (see below) |
 | `Ctrl+T` | Toggle dark / light theme |
 | `r` | Re-render the screen — view-local `r` actions (refresh, reset, ready tasks) fire alongside it |
@@ -180,6 +183,9 @@ the file-context panel, where they scroll by the visible file-pane height.
 when another panel has focus.
 
 **Default view** (worker grid + activity stream):
+
+This is the screen shown at startup. After an overlay view's details and other
+overlays are dismissed, `Escape` returns here.
 
 | Key | Action |
 |-----|--------|
