@@ -50,6 +50,8 @@ interface ParseResult {
   metrics: Map<string, ParsedMetric>;
   /** Sample lines that did not parse — must be empty for a valid exposition. */
   unparsed: string[];
+  /** Metric families that declared HELP more than once. */
+  duplicateFamilies: string[];
   raw: string;
 }
 
@@ -65,6 +67,7 @@ function unescapeLabelValue(v: string): string {
 function parsePrometheus(text: string): ParseResult {
   const metrics = new Map<string, ParsedMetric>();
   const unparsed: string[] = [];
+  const duplicateFamilies: string[] = [];
   let current: ParsedMetric | undefined;
 
   for (const line of text.split('\n')) {
@@ -73,6 +76,7 @@ function parsePrometheus(text: string): ParseResult {
     if (line.startsWith('#')) {
       const help = line.match(/^# HELP (\S+)/);
       if (help) {
+        if (metrics.has(help[1])) duplicateFamilies.push(help[1]);
         current = { samples: [] };
         metrics.set(help[1], current);
         continue;
@@ -97,7 +101,7 @@ function parsePrometheus(text: string): ParseResult {
     current.samples.push({ labels, value: parseFloat(sample[3]) });
   }
 
-  return { metrics, unparsed, raw: text };
+  return { metrics, unparsed, duplicateFamilies, raw: text };
 }
 
 /** Value of the sample of a metric carrying a given host label (throws if absent). */
@@ -135,6 +139,7 @@ interface ServerHandle {
   store: InMemoryEventStore;
   otlpUrl: string;
   fetchText: (p: string) => Promise<string>;
+  metricsResponse: () => Promise<{ status: number; contentType: string | null; text: string }>;
   fetchJson: (p: string, init?: RequestInit) => Promise<{ status: number; body: any }>;
   metrics: () => Promise<ParseResult>;
   /** Ingest stamp, matching src/cli.ts's tailer wiring. */
@@ -159,15 +164,24 @@ async function startServer(): Promise<ServerHandle> {
   expect(otlpPort).toBeGreaterThan(0);
 
   const base = `http://127.0.0.1:${port}`;
+  const metricsResponse = async () => {
+    const response = await fetch(`${base}/api/metrics`);
+    return {
+      status: response.status,
+      contentType: response.headers.get('content-type'),
+      text: await response.text(),
+    };
+  };
   return {
     store,
     otlpUrl: `http://127.0.0.1:${otlpPort}`,
     fetchText: async (p) => await (await fetch(`${base}${p}`)).text(),
+    metricsResponse,
     fetchJson: async (p, init) => {
       const res = await fetch(`${base}${p}`, init);
       return { status: res.status, body: await res.json() };
     },
-    metrics: async () => parsePrometheus(await (await fetch(`${base}/api/metrics`)).text()),
+    metrics: async () => parsePrometheus((await metricsResponse()).text),
     recordEvent: (host?: string, workerId?: string) => server.recordEvent(host, workerId),
     stop: async () => {
       await new Promise<void>((resolve) => {
@@ -1043,53 +1057,134 @@ describe('multi-host metrics — missing attributes and legacy JSONL sources', (
 // ─── Label escaping ─────────────────────────────────────────────────────────
 
 describe('multi-host metrics — label escaping', () => {
-  const HOSTILE_HOSTS = ['quote"host', 'back\\slash', 'new\nline-host'];
+  const HOSTILE_HOSTS = [
+    { name: 'double quotes', value: 'quote"host', escaped: 'quote\\"host' },
+    { name: 'backslashes', value: 'back\\slash', escaped: 'back\\\\slash' },
+    { name: 'newlines', value: 'new\nline-host', escaped: 'new\\nline-host' },
+  ] as const;
+  const HOST_LABEL_FAMILIES = [
+    'fabric_event_count',
+    'fabric_ingest_rate_per_second',
+    'fabric_active_workers',
+  ] as const;
 
-  it('renders hostile host strings as valid, round-trippable label values', () => {
+  function expectDirectExposition(host: string, escapedHost: string): ParseResult {
     const metrics = new ServerMetrics();
-    for (const host of HOSTILE_HOSTS) metrics.recordEvent(host, 'w-escape');
+    metrics.recordEvent(host, 'w-escape');
 
-    const { unparsed, raw } = parsePrometheus(metrics.toPrometheus(metrics.snapshot()));
+    const parsed = parsePrometheus(metrics.toPrometheus(metrics.snapshot()));
 
-    // The exposition must stay parseable — an escaped quote or newline in a
-    // label must not terminate the sample line early.
-    expect(unparsed).toEqual([]);
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.duplicateFamilies).toEqual([]);
+    expect(parsed.raw).toContain(`fabric_event_count{host="${escapedHost}"} 1`);
+    expect(parsed.raw).not.toContain(host);
+    expect(sampleValue(parsed.metrics, 'fabric_event_count', host)).toBe(1);
+    expect(sampleValue(parsed.metrics, 'fabric_active_workers', host)).toBe(1);
+    return parsed;
+  }
 
-    const eventCountLines = raw.split('\n').filter(l => l.startsWith('fabric_event_count{'));
-    expect(eventCountLines.map(l => l.replace(/ \d+$/, '')).sort()).toEqual([
-      'fabric_event_count{host="back\\\\slash"}',
-      'fabric_event_count{host="new\\nline-host"}',
-      'fabric_event_count{host="quote\\"host"}',
-    ]);
-
-    // And the parsed label values round-trip to the original host strings.
-    const parsed = parsePrometheus(metrics.toPrometheus(metrics.snapshot())).metrics;
-    for (const host of HOSTILE_HOSTS) {
-      expect(sampleValue(parsed, 'fabric_event_count', host)).toBe(1);
-      expect(sampleValue(parsed, 'fabric_active_workers', host)).toBe(1);
-    }
+  it('escapes embedded double quotes in host labels', () => {
+    const hostile = HOSTILE_HOSTS[0];
+    expectDirectExposition(hostile.value, hostile.escaped);
   });
 
-  it('survives the full OTLP → /api/metrics round trip', async () => {
+  it('escapes embedded backslashes in host labels', () => {
+    const hostile = HOSTILE_HOSTS[1];
+    expectDirectExposition(hostile.value, hostile.escaped);
+  });
+
+  it('escapes embedded newlines in host labels', () => {
+    const hostile = HOSTILE_HOSTS[2];
+    const parsed = expectDirectExposition(hostile.value, hostile.escaped);
+    // A line feed in a label value must be encoded as the two characters \\n+    // so the sample remains one physical exposition line.
+    expect(parsed.raw.split('\n').filter(line => line.startsWith('fabric_event_count{'))).toHaveLength(1);
+  });
+
+  async function expectScrapeForHosts(
+    server: ServerHandle,
+    hosts: readonly string[],
+  ): Promise<ParseResult> {
+    const response = await server.metricsResponse();
+    expect(response.status).toBe(200);
+    expect(response.contentType).toContain('text/plain');
+    expect(response.text.endsWith('\n')).toBe(true);
+
+    const parsed = parsePrometheus(response.text);
+    expect(parsed.unparsed).toEqual([]);
+    // One HELP/TYPE block is required per family even when a family has
+    // several hostile host series; repeated HELP blocks break Prometheus.
+    expect(parsed.duplicateFamilies).toEqual([]);
+    for (const family of HOST_LABEL_FAMILIES) {
+      expect(parsed.metrics.get(family)?.samples.map(sample => sample.labels.host).sort())
+        .toEqual([...hosts].sort());
+    }
+    return parsed;
+  }
+
+  it('preserves quote, backslash, and newline host labels through OTLP ingest', async () => {
     const server = await startServer();
     try {
       await postOtlp(server, '/v1/logs', otlpLogsPayload(
-        { 'needle.host': 'quote"host' },
-        [{ attrs: NO_HOST, workerId: 'w-q1' }],
-      ));
-      await postOtlp(server, '/v1/logs', otlpLogsPayload(
-        { 'needle.host': 'back\\slash' },
-        [{ attrs: NO_HOST, workerId: 'w-q2' }],
+        NO_HOST,
+        HOSTILE_HOSTS.map((host, index) => ({
+          attrs: { 'needle.host': host.value },
+          workerId: `w-otlp-escape-${index}`,
+        })),
       ));
 
-      const { unparsed, metrics } = await server.metrics();
-      expect(unparsed).toEqual([]);
-      expect(sampleValue(metrics, 'fabric_event_count', 'quote"host')).toBe(1);
-      expect(sampleValue(metrics, 'fabric_event_count', 'back\\slash')).toBe(1);
-      // Each hostile host kept its own series — no merging, no line-breakage.
-      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(2);
+      const parsed = await expectScrapeForHosts(server, HOSTILE_HOSTS.map(host => host.value));
+      for (const host of HOSTILE_HOSTS) {
+        expect(sampleValue(parsed.metrics, 'fabric_event_count', host.value)).toBe(1);
+        expect(sampleValue(parsed.metrics, 'fabric_active_workers', host.value)).toBe(1);
+      }
     } finally {
       await server.stop();
+    }
+  });
+
+  it('preserves quote, backslash, and newline host labels through JSONL ingest', async () => {
+    vi.stubEnv('HOSTNAME', 'ingest-local');
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fabric-multihost-escaping-jsonl-'));
+    const server = await startServer();
+    let tailer: DirectoryTailer | undefined;
+    try {
+      tailer = new DirectoryTailer({ directory: logDir });
+      tailer.on('event', (event: LogEvent) => {
+        server.store.add(event);
+        server.recordEvent(event.host, event.worker);
+      });
+      tailer.start();
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      fs.writeFileSync(
+        path.join(logDir, 'hostile-hosts.jsonl'),
+        HOSTILE_HOSTS.map((host, index) => JSON.stringify({
+          ts: new Date().toISOString(),
+          event: 'worker.started',
+          timestamp: new Date().toISOString(),
+          event_type: 'worker.started',
+          worker_id: `w-jsonl-escape-${index}`,
+          session_id: `sess-jsonl-escape-${index}`,
+          sequence: index + 1,
+          host: host.value,
+          data: {},
+        })).join('\n') + '\n',
+      );
+
+      await waitFor(async () => {
+        const parsed = await server.metrics();
+        return HOSTILE_HOSTS.every(host => findHostSample(parsed.metrics, 'fabric_event_count', host.value)?.value === 1);
+      }, 'hostile JSONL hosts to reach the metrics wiring');
+
+      const parsed = await expectScrapeForHosts(server, HOSTILE_HOSTS.map(host => host.value));
+      for (const host of HOSTILE_HOSTS) {
+        expect(sampleValue(parsed.metrics, 'fabric_event_count', host.value)).toBe(1);
+        expect(sampleValue(parsed.metrics, 'fabric_active_workers', host.value)).toBe(1);
+      }
+    } finally {
+      tailer?.stop();
+      await server.stop();
+      fs.rmSync(logDir, { recursive: true, force: true });
     }
   });
 });
