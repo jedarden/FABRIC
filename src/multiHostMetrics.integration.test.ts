@@ -441,7 +441,7 @@ describe('multi-host metrics — host-label precedence (end-to-end)', () => {
     vi.unstubAllEnvs();
   });
 
-  it('needle.host wins over service.instance.id; the loser never becomes a series', async () => {
+  it('resource-level needle.host beats resource-level service.instance.id (logs)', async () => {
     const server = await startServer();
     try {
       await postOtlp(server, '/v1/logs', otlpLogsPayload(
@@ -758,27 +758,28 @@ describe('multi-host metrics — OTLP resource attributes promoted onto every re
     vi.unstubAllEnvs();
   });
 
-  it('promotes the resource needle.host onto every log record in one payload (/v1/logs)', async () => {
+  it('promotes resource needle.host to every log record while the record value wins a duplicate (/v1/logs)', async () => {
     vi.stubEnv('HOSTNAME', 'ingest-local');
     const server = await startServer();
     try {
       await postOtlp(server, '/v1/logs', otlpLogsPayload(
         { 'needle.host': 'promo-logs-host' },
         [
-          { attrs: NO_HOST, workerId: 'w-promo-1' },
+          { attrs: { 'needle.host': 'promo-record-host' }, workerId: 'w-promo-1' },
           { attrs: NO_HOST, workerId: 'w-promo-2' },
           { attrs: NO_HOST, workerId: 'w-promo-3' },
         ],
       ));
 
       const { metrics } = await server.metrics();
-      // All three records landed on the resource host — promotion is
-      // per-record, not first-record-only — and nothing fell through to
-      // the local hostname.
-      expect(sampleValue(metrics, 'fabric_event_count', 'promo-logs-host')).toBe(3);
-      expect(sampleValue(metrics, 'fabric_active_workers', 'promo-logs-host')).toBe(3);
+      // The resource host reaches both records without an override, while
+      // the record-level duplicate wins for the first record.
+      expect(sampleValue(metrics, 'fabric_event_count', 'promo-logs-host')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'promo-logs-host')).toBe(2);
+      expect(sampleValue(metrics, 'fabric_event_count', 'promo-record-host')).toBe(1);
+      expect(sampleValue(metrics, 'fabric_active_workers', 'promo-record-host')).toBe(1);
       expect(findHostSample(metrics, 'fabric_event_count', 'ingest-local')).toBeUndefined();
-      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(1);
+      expect(metrics.get('fabric_event_count')!.samples).toHaveLength(2);
     } finally {
       await server.stop();
     }
