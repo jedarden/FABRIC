@@ -123,6 +123,20 @@ describe('path resolution logic - digest command', () => {
   });
 
   describe('resolveSource function coverage', () => {
+    test('resolves file path: resolved.kind is file and resolved.path matches input', () => {
+      const inputFile = join(TEMP_DIR, 'digest-source-file.jsonl');
+
+      try {
+        writeFileSync(inputFile, '{"ts":1709337600,"worker":"path-resolution","level":"info","msg":"test"}\n', 'utf8');
+
+        const { stderr } = runDigestCommand(`--source "${inputFile}"`, DIST_CLI);
+
+        expect(stderr).toContain(`FABRIC Digest - Analyzing: ${inputFile} (file)`);
+      } finally {
+        if (existsSync(inputFile)) unlinkSync(inputFile);
+      }
+    }, 10000);
+
     test('path 1: tilde expansion with directory', () => {
       /**
        * Code path: source.startsWith('~') → true → stat.isDirectory() → true
