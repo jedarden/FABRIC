@@ -41,6 +41,44 @@ execution for minutes (small dirs) to hours (real log dirs). Because
 cannot appear until the entire storm drains — which is why the screen stays
 blank while one core burns.
 
+## Four diagnostic answers
+
+1. **Which loop burns the CPU, and why does it scale?** The CPU-burning loop is
+   the synchronous `for` over lines in `LogTailer.readNewContent()` at
+   `src/tailer.ts:179-183`, entered from `src/tailer.ts:158-188` while
+   `DirectoryTailer.start()` activates files at
+   `src/directoryTailer.ts:162-164`. It processes every replayed line without
+   yielding, and each iteration emits one event into the render storm described
+   below. The total startup work has the multiplicative shape
+   **files-within-4h-window × events-per-file × per-line render cost**:
+   `F_recent × E_file × C_line`, with `F_recent` capped by
+   `maxActiveFiles` (200). The directory scan is also O(directory entries), but
+   that is the short secondary cost; the minutes-to-hours cost is the replay
+   product.
+
+2. **Why does `-f <single file>` sleep correctly?** Single-file mode constructs
+   `LogTailer` with `lines: 50` at `src/cli.ts:128-136`, so
+   `readExistingLines()` at `src/tailer.ts:119-135` replays only the last 50
+   lines and then returns. It has no `startPosition`, so it does not enter the
+   catch-up path at `src/tailer.ts:111-113`. The directory path instead sets
+   `position: 0` for each recently modified file and synchronously replays all
+   of its history. After either bounded startup replay, `fs.watch` delivers
+   live events one at a time, so the single-file path yields between events and
+   appears idle when no new lines arrive.
+
+3. **Is the missing render scan cost or a starved render loop?** Neither. The
+   `readdirSync`/`statSync` scan at `src/directoryTailer.ts:136-158` takes
+   seconds even for the large directory, and the TUI has no periodic render
+   loop (`options.refreshInterval` at `src/tui/app.ts:105-106` is never read).
+   The first paint is simply sequenced after the unbounded synchronous replay
+   (`src/cli.ts:239-241`), so that replay monopolizes the main thread before
+   any frame can be drawn.
+
+4. **Can the evidence be reproduced?** Yes. The commands in
+   [Reproducing](#reproducing) generate a safe synthetic directory, launch the
+   same startup path, pause it through the Node inspector, count heartbeat
+   ticks, and instrument `dist/` to produce the per-event amplification table.
+
 ## The synchronous chain (file:line, verified on main)
 
 Startup order — tailer first, first paint second:
@@ -232,6 +270,123 @@ rm -rf "$REPRO_DIR"
 Smaller/faster variant: `--events-per-file 5` (600 events) still blocks the
 main thread for ~57 s before the first timer tick fires. The script never
 writes under `~/.needle/logs`.
+
+The following probes rerun the three evidence captures. Start with the
+120-file/400-event directory above and leave the TUI process running.
+
+### Synchronous stack capture
+
+```bash
+node dist/cli.js tui --source "$REPRO_DIR" >"$REPRO_DIR/tui.out" 2>&1 &
+PID=$!
+kill -USR1 "$PID"                         # enable Node's inspector
+WS_URL=$(curl -fsS http://127.0.0.1:9229/json/list |
+  node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(JSON.parse(s)[0].webSocketDebuggerUrl))')
+node - "$WS_URL" <<'NODE'
+const WebSocket = require('ws');
+const ws = new WebSocket(process.argv[2]);
+ws.on('open', () => ws.send(JSON.stringify({ id: 1, method: 'Debugger.enable' })));
+ws.on('message', raw => {
+  const message = JSON.parse(raw);
+  if (message.id === 1) {
+    ws.send(JSON.stringify({ id: 2, method: 'Debugger.pause' }));
+  } else if (message.method === 'Debugger.paused') {
+    for (const [index, frame] of message.params.callFrames.entries()) {
+      const line = frame.location.lineNumber + 1;
+      console.log(`#${index} ${frame.functionName || '(anonymous)'} ${frame.url}:${line}`);
+    }
+    ws.send(JSON.stringify({ id: 3, method: 'Debugger.resume' }));
+    ws.close();
+  }
+});
+NODE
+kill -KILL "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+```
+
+The frames should end in `LogTailer.processLine`,
+`LogTailer.readNewContent`, `LogTailer.start`,
+`DirectoryTailer.activateFile`, and `DirectoryTailer.start`; the top frames
+should be blessed's `_align`/`_wrapContent` path.
+
+### Event-loop heartbeat
+
+```bash
+HEARTBEAT_PROBE=$(mktemp)
+printf '%s\n' 'setInterval(() => console.error(`heartbeat ${Date.now()}`), 250);' >"$HEARTBEAT_PROBE"
+node --require "$HEARTBEAT_PROBE" dist/cli.js tui --source "$REPRO_DIR" \
+  >"$REPRO_DIR/heartbeat.out" 2>"$REPRO_DIR/heartbeat.err" &
+PID=$!
+sleep 10
+printf 'heartbeat ticks in 10s: '
+grep -c '^heartbeat ' "$REPRO_DIR/heartbeat.err" || true
+kill -KILL "$PID" 2>/dev/null || true
+wait "$PID" 2>/dev/null || true
+rm -f "$HEARTBEAT_PROBE"
+```
+
+On the spinning path the count remains zero; with a yielding path it becomes
+nonzero. The same probe can be left running for the original 98-second
+observation by changing `sleep 10` to `sleep 98`.
+
+### Per-event amplification table
+
+This probe pre-fills the activity widget to 100 events, resets its counters,
+then measures 50 more events. It writes the result separately so blessed's
+terminal control sequences do not obscure the JSON output.
+
+```bash
+AMP_OUT=$(mktemp)
+AMP_OUT="$AMP_OUT" TERM=xterm-256color node --input-type=module > /dev/null 2>&1 <<'NODE'
+import fs from 'node:fs';
+import blessed from './node_modules/blessed/lib/blessed.js';
+import { InMemoryEventStore } from './dist/store.js';
+import { createTuiApp } from './dist/tui/app.js';
+
+const measured = 50;
+const counts = { log: 0, wrap: 0, render: 0 };
+const originalLog = blessed.Log.prototype.log;
+const originalWrap = blessed.Element.prototype._wrapContent;
+const originalRender = blessed.Screen.prototype.render;
+blessed.Log.prototype.log = function (...args) {
+  counts.log++;
+  return originalLog.apply(this, args);
+};
+blessed.Element.prototype._wrapContent = function (...args) {
+  counts.wrap++;
+  return originalWrap.apply(this, args);
+};
+blessed.Screen.prototype.render = function (...args) {
+  counts.render++;
+  return originalRender.apply(this, args);
+};
+
+const app = createTuiApp(new InMemoryEventStore(), { maxEvents: 100 });
+const event = (i) => ({
+  ts: Date.now() + i,
+  worker: 'probe-worker',
+  level: 'info',
+  msg: `event ${i}`,
+});
+for (let i = 0; i < 100; i++) app.addEvent(event(i));
+counts.log = counts.wrap = counts.render = 0;
+const start = performance.now();
+for (let i = 0; i < measured; i++) app.addEvent(event(100 + i));
+fs.writeFileSync(process.env.AMP_OUT, JSON.stringify({
+  log_log_calls_per_event: counts.log / measured,
+  wrapContent_calls_per_event: counts.wrap / measured,
+  screen_render_calls_per_event: counts.render / measured,
+  wall_ms_per_event: (performance.now() - start) / measured,
+}) + '\n');
+process.exit(0);
+NODE
+cat "$AMP_OUT"
+rm -f "$AMP_OUT"
+```
+
+The resulting JSON corresponds directly to the table above: approximately
+201 `log.log()` calls, 203 `_wrapContent()` calls, 6 `screen.render()` calls,
+and 44–54 ms per event on the measured environment.
 
 Re-verified 2026-09-19 at HEAD `5bdb723` (fabric-ac34599b, dispatch 3): default (120×400 = 48,000 lines) and explicit-flag (101×9 = 909 lines, `--dir` honored) runs exit 0 with the fresh mktemp path on the last stdout line; all 48,909 lines pass JSON + ingest-field checks and `normalizeToLogEvent` (the call at `src/tailer.ts:212`) with 0 invalid; `bash -n`/`--help`/exec bit clean; the `~/.needle/logs` guard refuses direct, subdir, symlink, `..`-escape, trailing-slash and hostile `${TMPDIR}` destinations (exit 1, empty stdout, no writes — the live logs dir's only delta during the window was concurrent fleet-worker logs, zero repro artifacts under it); bad-input battery (missing/non-numeric/zero/negative counts, unknown options) all exit 1 with clear errors; `npx tsc --noEmit` clean, `npm test` 2904 passed / 2 skipped; no script defect found.
 
