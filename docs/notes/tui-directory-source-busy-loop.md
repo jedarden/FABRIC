@@ -263,16 +263,22 @@ order:
 ```bash
 npm run build
 REPRO_DIR=$(scripts/gen-synthetic-logs.sh --count 120 --events-per-file 400 | tail -1)
+printf 'repro directory: %s\n' "$REPRO_DIR"
+```
+
+For the basic reproduction, run this in a terminal and leave it running:
+
+```bash
 node dist/cli.js tui --source "$REPRO_DIR"   # ~100% CPU, blank for tens of minutes
-rm -rf "$REPRO_DIR"
 ```
 
 Smaller/faster variant: `--events-per-file 5` (600 events) still blocks the
 main thread for ~57 s before the first timer tick fires. The script never
 writes under `~/.needle/logs`.
 
-The following probes rerun the three evidence captures. Start with the
-120-file/400-event directory above and leave the TUI process running.
+The following probes rerun the three evidence captures using the generated
+directory. Launch the TUI separately in each probe and clean up only after all
+probes finish.
 
 ### Synchronous stack capture
 
@@ -280,8 +286,13 @@ The following probes rerun the three evidence captures. Start with the
 node dist/cli.js tui --source "$REPRO_DIR" >"$REPRO_DIR/tui.out" 2>&1 &
 PID=$!
 kill -USR1 "$PID"                         # enable Node's inspector
-WS_URL=$(curl -fsS http://127.0.0.1:9229/json/list |
-  node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(JSON.parse(s)[0].webSocketDebuggerUrl))')
+for _ in $(seq 1 50); do
+  WS_URL=$(curl -fsS http://127.0.0.1:9229/json/list 2>/dev/null |
+    node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => process.stdout.write(JSON.parse(s)[0].webSocketDebuggerUrl))' 2>/dev/null) &&
+    [ -n "$WS_URL" ] && break
+  sleep 0.1
+done
+: "${WS_URL:?inspector did not start on 127.0.0.1:9229}"
 node - "$WS_URL" <<'NODE'
 const WebSocket = require('ws');
 const ws = new WebSocket(process.argv[2]);
@@ -382,6 +393,7 @@ process.exit(0);
 NODE
 cat "$AMP_OUT"
 rm -f "$AMP_OUT"
+find "$REPRO_DIR" -depth -delete
 ```
 
 The resulting JSON corresponds directly to the table above: approximately
