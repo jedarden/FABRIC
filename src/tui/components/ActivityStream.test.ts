@@ -186,7 +186,7 @@ describe('ActivityStream', () => {
       activityStream.addEvent(createMockEvent({ msg: 'heartbeat.emitted' }));
 
       expect(mockLogInstance.log).not.toHaveBeenCalled();
-      expect(activityStream.getEventsCount()).toBe(1);
+      expect(activityStream.getEventsCount()).toBe(0);
       expect(activityStream.getFilteredEventsCount()).toBe(0);
       expect(activityStream.getLastHeartbeats().get('w-test123')?.msg).toBe('heartbeat.emitted');
     });

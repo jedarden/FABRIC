@@ -68,7 +68,6 @@ export class ActivityStream {
   private log: blessed.Widgets.Log;
   private events: LogEvent[] = [];
   private heartbeatEvents: Map<string, LogEvent> = new Map();
-  private totalEventCount = 0;
   private filter: ActivityFilter = {};
   private maxLines: number;
   private isPaused = false;
@@ -215,8 +214,6 @@ export class ActivityStream {
    * Add event to the stream
    */
   addEvent(event: LogEvent): void {
-    this.totalEventCount++;
-
     if (isHeartbeatEvent(event)) {
       const previous = this.heartbeatEvents.get(event.worker);
       if (!previous || event.ts > previous.ts) {
@@ -355,7 +352,6 @@ export class ActivityStream {
   clear(): void {
     this.events = [];
     this.heartbeatEvents.clear();
-    this.totalEventCount = 0;
     this.log.setContent('');
     this.log.screen.render();
   }
@@ -392,7 +388,7 @@ export class ActivityStream {
    * Get current events count
    */
   getEventsCount(): number {
-    return this.totalEventCount;
+    return this.events.length;
   }
 
   /**
