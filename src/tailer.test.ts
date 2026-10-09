@@ -170,6 +170,50 @@ describe('LogTailer', () => {
   });
 
   describe('reading existing lines', () => {
+    it('yields to the event loop while replaying a large startup file', async () => {
+      const totalEvents = 512;
+      const events = Array.from({ length: totalEvents }, (_, index) => ({
+        ts: index + 1,
+        worker: 'w-replay',
+        level: 'info' as const,
+        msg: `startup-${index}`,
+      }));
+      fs.writeFileSync(logFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+
+      const tailer = new LogTailer({
+        path: logFile,
+        follow: false,
+        startPosition: 0,
+      });
+
+      let received = 0;
+      const replayComplete = new Promise<void>((resolve) => {
+        tailer.on('event', () => {
+          received++;
+          if (received === totalEvents) resolve();
+        });
+      });
+      const countAtEventLoopYield = new Promise<number>((resolve) => {
+        tailer.once('event', () => {
+          setImmediate(() => resolve(received));
+        });
+      });
+
+      tailer.start();
+
+      const receivedAtYield = await countAtEventLoopYield;
+      // DirectoryTailer replays recent JSONL files from byte zero. Catch-up
+      // reads must yield after bounded chunks so timers and the TUI can run
+      // before a large file has been emitted in full. The old synchronous
+      // read loop emits all 512 events before this setImmediate can run.
+      expect(receivedAtYield).toBeGreaterThan(0);
+      expect(receivedAtYield).toBeLessThan(totalEvents);
+
+      await replayComplete;
+      expect(received).toBe(totalEvents);
+      tailer.stop();
+    });
+
     it('should read last N lines on start when lines option is set', async () => {
       const events = [
         { ts: 1, worker: 'w1', level: 'info' as const, msg: 'first' },

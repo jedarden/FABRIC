@@ -433,6 +433,34 @@ describe('FabricTuiApp', () => {
       const mockScreen = getMockScreen();
       expect(mockScreen.render).toHaveBeenCalled();
     });
+
+    it('coalesces renders during directory-source startup replay', async () => {
+      vi.useFakeTimers();
+      try {
+        // The CLI enables batching for directory sources so replayed events
+        // append immediately but expensive TUI refresh work runs once on the
+        // refresh timer, yielding the event loop between bursts.
+        app = new FabricTuiApp(store, {
+          refreshInterval: 100,
+          batchEventRefresh: true,
+        } as TuiOptions);
+        app.start();
+
+        const mockScreen = getMockScreen();
+        mockScreen.render.mockClear();
+
+        for (let index = 0; index < 20; index++) {
+          app.addEvent(createMockEvent({ msg: `startup-${index}` }));
+        }
+
+        expect(mockScreen.render).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(100);
+        expect(mockScreen.render).toHaveBeenCalledTimes(1);
+      } finally {
+        app.stop();
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('render method', () => {
