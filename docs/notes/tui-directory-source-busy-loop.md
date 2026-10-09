@@ -6,7 +6,7 @@ against main** (commit `ffe9323`, 2026-09-18) by (a) pausing a live spinning
 process and capturing its synchronous call stack via the inspector protocol,
 (b) an event-loop heartbeat probe, and (c) a controlled amplification
 measurement. The file:line citations were re-verified against current main at
-commit `8d382f7ec30ff6465893d5fcfcc84993bd28012d` on 2026-10-08. Reproduce
+commit `74ffc375f4f303ccf86aba4e211f3c46479c4e94` on 2026-10-08. Reproduce
 with `scripts/gen-synthetic-logs.sh`.
 
 The 2026-10-08 re-verification found no substantive change to the root-cause
@@ -66,14 +66,15 @@ blank while one core burns.
    live events one at a time, so the single-file path yields between events and
    appears idle when no new lines arrive.
 
-3. **Is the missing render scan cost or a starved render loop?** Neither. The
-   `readdirSync`/`statSync` scan at `src/directoryTailer.ts:136-158` takes
-   seconds even for the large directory, and the TUI has no periodic render
-   loop (`refreshInterval` is defaulted at `src/tui/app.ts:102-107` but is not
-   consumed by any render timer).
-   The first paint is simply sequenced after the unbounded synchronous replay
-   (`src/cli.ts:239-241`), so that replay monopolizes the main thread before
-   any frame can be drawn.
+3. **Is the missing render startup-scan cost or a starved render loop?** It is
+   the synchronous replay/render storm starving Node's event loop, not the
+   directory scan. The `readdirSync`/`statSync` scan at
+   `src/directoryTailer.ts:136-158` takes seconds even for the large directory,
+   while the TUI has no periodic render loop (`refreshInterval` is defaulted at
+   `src/tui/app.ts:102-107` but is not consumed by any render timer). The first
+   paint is sequenced after the unbounded synchronous replay
+   (`src/cli.ts:239-241`), so that spin monopolizes the main thread before any
+   frame can be drawn.
 
 4. **Can the evidence be reproduced?** Yes. The commands in
    [Reproducing](#reproducing) generate a safe synthetic directory, launch the
@@ -216,13 +217,14 @@ periodic render loop at all** (`refreshInterval` at
 `src/tui/app.ts:45-46,102-107` is declared and defaulted but otherwise unused), so nothing can
 paint until an explicit `screen.render()` finally runs.
 
-So the answer to "startup-scan cost or starved render loop": **neither**.
+So the answer to "startup-scan cost or starved render loop" is: **the spin
+starves the event loop and the first TUI paint; it is not startup-scan cost**.
 The scan (`readdirSync`/`statSync`, `src/directoryTailer.ts:136-158`) is
-seconds, not minutes. There is no background render loop to starve. The first
-frame is simply *sequenced after* an unbounded synchronous replay, and each
-replayed line costs ~50 ms of blessed re-wrapping. (`fabric digest` is
-unaffected for the same reason: it ingests without building the TUI — 40k
-events in <60 s.)
+seconds, not minutes. There is no independent periodic render timer, but the
+first frame is still blocked because it is *sequenced after* an unbounded
+synchronous replay, and each replayed line costs ~50 ms of blessed
+re-wrapping. (`fabric digest` is unaffected for the same reason: it ingests
+without building the TUI — 40k events in <60 s.)
 
 ## Recommended fix shape (input to the fix child)
 
