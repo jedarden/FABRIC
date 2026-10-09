@@ -84,6 +84,7 @@ import {
 } from './workerMemoryLimiter.js';
 import { getMemorySampler } from './memorySampler.js';
 import { getFactoryPanelAggregator } from './factoryPanel.js';
+import { isHeartbeatEvent } from './tui/utils/heartbeatLiveness.js';
 
 /** Time window (in ms) to consider events as concurrent */
 const COLLISION_WINDOW_MS = 5000;
@@ -907,6 +908,14 @@ export class InMemoryEventStore implements EventStore {
     // Update last activity
     worker.lastActivity = event.ts;
 
+    // Keep heartbeat liveness separate from general activity. Heartbeats are
+    // deliberately noisy, so the TUI can collapse them into one worker marker
+    // without losing the last-seen timestamp needed to detect a stale worker.
+    if (isHeartbeatEvent(event) &&
+        (worker.lastHeartbeat === undefined || event.ts > worker.lastHeartbeat)) {
+      worker.lastHeartbeat = event.ts;
+    }
+
     // Track PID from event if available
     const pid = (event as Record<string, unknown>).pid as number | undefined;
     if (pid && typeof pid === 'number') {
@@ -1022,6 +1031,9 @@ export class InMemoryEventStore implements EventStore {
 
     // Update last event
     worker.lastEvent = event;
+    if (!isHeartbeatEvent(event)) {
+      worker.lastNonHeartbeatEvent = event;
+    }
 
     // Run gap-based stuck detection (throttled — only every 100 events per worker)
     if (worker.eventCount % 100 === 0) {

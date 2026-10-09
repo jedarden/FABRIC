@@ -182,6 +182,35 @@ describe('ActivityStream', () => {
       expect(loggedContent).toContain('bd-abc123');
     });
 
+    it('collapses heartbeat events out of the scrolling feed by default', () => {
+      activityStream.addEvent(createMockEvent({ msg: 'heartbeat.emitted' }));
+
+      expect(mockLogInstance.log).not.toHaveBeenCalled();
+      expect(activityStream.getEventsCount()).toBe(1);
+      expect(activityStream.getFilteredEventsCount()).toBe(0);
+      expect(activityStream.getLastHeartbeats().get('w-test123')?.msg).toBe('heartbeat.emitted');
+    });
+
+    it('keeps only the latest heartbeat sample for each worker when enabled', () => {
+      activityStream.addEvent(createMockEvent({ msg: 'heartbeat.emitted', ts: 1_000 }));
+      activityStream.addEvent(createMockEvent({ msg: 'heartbeat.emitted', ts: 2_000 }));
+      activityStream.setShowHeartbeats(true);
+
+      const heartbeatLogs = mockLogInstance.log.mock.calls.filter(
+        (call: unknown[]) => String(call[0]).includes('heartbeat.emitted'),
+      );
+      expect(heartbeatLogs).toHaveLength(1);
+      expect(activityStream.getLastHeartbeats().get('w-test123')?.ts).toBe(2_000);
+    });
+
+    it('continues to render non-heartbeat events unchanged after heartbeats', () => {
+      activityStream.addEvent(createMockEvent({ msg: 'heartbeat.emitted' }));
+      activityStream.addEvent(createMockEvent({ msg: 'useful event' }));
+
+      expect(mockLogInstance.log).toHaveBeenCalledTimes(1);
+      expect(mockLogInstance.log.mock.calls[0][0]).toContain('useful event');
+    });
+
     it('should not display event when paused', () => {
       activityStream.togglePause();
       const event = createMockEvent();

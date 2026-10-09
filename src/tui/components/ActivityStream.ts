@@ -7,6 +7,7 @@
 import blessed from 'blessed';
 import { LogEvent } from '../../types.js';
 import { colors, getLevelColor } from '../utils/colors.js';
+import { isHeartbeatEvent } from '../utils/heartbeatLiveness.js';
 
 export interface ActivityStreamOptions {
   /** Parent screen */
@@ -26,6 +27,9 @@ export interface ActivityStreamOptions {
 
   /** Maximum lines to keep in buffer */
   maxLines?: number;
+
+  /** Whether to show the latest heartbeat sample for each worker */
+  showHeartbeats?: boolean;
 }
 
 export interface ActivityFilter {
@@ -52,6 +56,9 @@ export interface ActivityFilter {
 
   /** Filter by host */
   host?: string;
+
+  /** Explicitly include the collapsed heartbeat samples in the stream */
+  includeHeartbeats?: boolean;
 }
 
 /**
@@ -60,15 +67,19 @@ export interface ActivityFilter {
 export class ActivityStream {
   private log: blessed.Widgets.Log;
   private events: LogEvent[] = [];
+  private heartbeatEvents: Map<string, LogEvent> = new Map();
+  private totalEventCount = 0;
   private filter: ActivityFilter = {};
   private maxLines: number;
   private isPaused = false;
+  private showHeartbeats = false;
   private focusModeEnabled = false;
   private pinnedBeadId?: string;
   private pinnedWorkerId?: string;
 
   constructor(options: ActivityStreamOptions) {
     this.maxLines = options.maxLines || 500;
+    this.showHeartbeats = options.showHeartbeats ?? false;
 
     this.log = blessed.log({
       parent: options.parent,
@@ -183,10 +194,43 @@ export class ActivityStream {
     return true;
   }
 
+  /** Whether an event should occupy a line in the scrolling stream. */
+  private shouldDisplay(event: LogEvent): boolean {
+    const includeHeartbeats = this.showHeartbeats || this.filter.includeHeartbeats;
+    return (includeHeartbeats || !isHeartbeatEvent(event)) && this.passesFilter(event);
+  }
+
+  /** Return regular events plus one latest sample per worker when requested. */
+  private getDisplayEvents(): LogEvent[] {
+    const events = [...this.events];
+    if (this.showHeartbeats || this.filter.includeHeartbeats) {
+      events.push(...this.heartbeatEvents.values());
+    }
+    // Preserve the existing arrival order for non-heartbeat events. The
+    // collapsed heartbeat samples are only appended when explicitly shown.
+    return events.filter((event) => this.shouldDisplay(event));
+  }
+
   /**
    * Add event to the stream
    */
   addEvent(event: LogEvent): void {
+    this.totalEventCount++;
+
+    if (isHeartbeatEvent(event)) {
+      const previous = this.heartbeatEvents.get(event.worker);
+      if (!previous || event.ts > previous.ts) {
+        this.heartbeatEvents.set(event.worker, event);
+      }
+
+      // Heartbeats are collapsed to one latest sample per worker when an
+      // explicit caller asks to inspect them; the default feed stays quiet.
+      if (!this.isPaused && (this.showHeartbeats || this.filter.includeHeartbeats)) {
+        this.reRender(false);
+      }
+      return;
+    }
+
     this.events.push(event);
 
     // Trim old events
@@ -195,7 +239,7 @@ export class ActivityStream {
     }
 
     // Only display if not paused and passes filter
-    if (!this.isPaused && this.passesFilter(event)) {
+    if (!this.isPaused && this.shouldDisplay(event)) {
       const formatted = this.formatEvent(event);
       this.log.log(formatted);
     }
@@ -249,11 +293,12 @@ export class ActivityStream {
    */
   scrollToTimestamp(timestamp: number): void {
     // Find the event closest to the target timestamp
+    const displayEvents = this.getDisplayEvents();
     let closestIndex = -1;
     let closestDiff = Infinity;
 
-    for (let i = 0; i < this.events.length; i++) {
-      const diff = Math.abs(this.events[i].ts - timestamp);
+    for (let i = 0; i < displayEvents.length; i++) {
+      const diff = Math.abs(displayEvents[i].ts - timestamp);
       if (diff < closestDiff) {
         closestDiff = diff;
         closestIndex = i;
@@ -266,11 +311,11 @@ export class ActivityStream {
 
       // Show 50 events before the target and 50 after
       const start = Math.max(0, closestIndex - 50);
-      const end = Math.min(this.events.length, closestIndex + 51);
+      const end = Math.min(displayEvents.length, closestIndex + 51);
 
       for (let i = start; i < end; i++) {
-        if (this.passesFilter(this.events[i])) {
-          const formatted = this.formatEvent(this.events[i]);
+        if (this.shouldDisplay(displayEvents[i])) {
+          const formatted = this.formatEvent(displayEvents[i]);
           const isTarget = i === closestIndex;
           if (isTarget) {
             // Add indicator for the target event
@@ -295,7 +340,7 @@ export class ActivityStream {
     this.log.setContent('');
 
     // Re-add filtered events
-    const filtered = this.events.filter(e => this.passesFilter(e));
+    const filtered = this.getDisplayEvents();
     for (const event of filtered.slice(-100)) { // Show last 100 matching
       const formatted = this.formatEvent(event);
       this.log.log(formatted);
@@ -309,6 +354,8 @@ export class ActivityStream {
    */
   clear(): void {
     this.events = [];
+    this.heartbeatEvents.clear();
+    this.totalEventCount = 0;
     this.log.setContent('');
     this.log.screen.render();
   }
@@ -345,14 +392,26 @@ export class ActivityStream {
    * Get current events count
    */
   getEventsCount(): number {
-    return this.events.length;
+    return this.totalEventCount;
   }
 
   /**
    * Get filtered events count
    */
   getFilteredEventsCount(): number {
-    return this.events.filter(e => this.passesFilter(e)).length;
+    return this.getDisplayEvents().length;
+  }
+
+  /** Toggle the collapsed heartbeat samples for callers that need raw detail. */
+  setShowHeartbeats(show: boolean): void {
+    if (this.showHeartbeats === show) return;
+    this.showHeartbeats = show;
+    this.reRender();
+  }
+
+  /** Return the latest heartbeat seen for each worker. */
+  getLastHeartbeats(): ReadonlyMap<string, LogEvent> {
+    return new Map(this.heartbeatEvents);
   }
 
   /**

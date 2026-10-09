@@ -565,6 +565,9 @@ export interface WorkerInfo {
   /** Last event received */
   lastEvent?: LogEvent;
 
+  /** Most recent non-heartbeat event, used for the worker task summary */
+  lastNonHeartbeatEvent?: LogEvent;
+
   /** Total beads processed (bead.released events with release_success, includes timed-out/deferred) */
   beadsCompleted: number;
 
@@ -579,6 +582,9 @@ export interface WorkerInfo {
 
   /** Last activity timestamp */
   lastActivity: number;
+
+  /** Timestamp of the most recent heartbeat.emitted event, if any */
+  lastHeartbeat?: number;
 
   /** Files currently being modified by this worker */
   activeFiles: string[];

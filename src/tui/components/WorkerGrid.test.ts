@@ -32,6 +32,7 @@ vi.mock('blessed', () => {
 // Import after mocking
 import { WorkerGrid } from './WorkerGrid.js';
 import { WorkerInfo } from '../../types.js';
+import { HEARTBEAT_STALE_AFTER_MS } from '../utils/heartbeatLiveness.js';
 
 // Helper to create mock WorkerInfo
 function createMockWorker(overrides: Partial<WorkerInfo> = {}): WorkerInfo {
@@ -390,6 +391,26 @@ describe('WorkerGrid', () => {
       const content = mockBoxInstance.setContent.mock.calls[0][0];
       expect(content).toContain('bd-abc123');
       expect(content).toContain('Processing bead');
+    });
+
+    it('should show an alive heartbeat age for each worker', () => {
+      const workers = [createMockWorker({ lastHeartbeat: Date.now() })];
+
+      workerGrid.updateWorkers(workers);
+
+      const content = mockBoxInstance.setContent.mock.calls[0][0];
+      expect(content).toContain('♥ LIVE');
+    });
+
+    it('should show stale heartbeat liveness when the threshold is exceeded', () => {
+      const workers = [createMockWorker({
+        lastHeartbeat: Date.now() - HEARTBEAT_STALE_AFTER_MS - 1,
+      })];
+
+      workerGrid.updateWorkers(workers);
+
+      const content = mockBoxInstance.setContent.mock.calls[0][0];
+      expect(content).toContain('♥ STALE');
     });
   });
 

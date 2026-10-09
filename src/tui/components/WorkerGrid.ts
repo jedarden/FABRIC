@@ -7,6 +7,11 @@
 import blessed from 'blessed';
 import { WorkerInfo } from '../../types.js';
 import { colors, getStatusColor, getNeedleStateColor, getNeedleStateIcon } from '../utils/colors.js';
+import {
+  formatHeartbeatAge,
+  getHeartbeatLiveness,
+  isHeartbeatEvent,
+} from '../utils/heartbeatLiveness.js';
 
 export interface WorkerGridOptions {
   /** Parent screen */
@@ -131,6 +136,21 @@ export class WorkerGrid {
     return '';
   }
 
+  /** Show heartbeat-derived liveness without adding heartbeat rows to the feed. */
+  private getLivenessIndicator(worker: WorkerInfo): string {
+    const liveness = getHeartbeatLiveness(worker.lastHeartbeat);
+    const age = formatHeartbeatAge(liveness.ageMs);
+
+    switch (liveness.state) {
+      case 'alive':
+        return `{light-green-fg}♥ LIVE ${age}{/}`;
+      case 'stale':
+        return `{light-red-fg}♥ STALE ${age}{/}`;
+      case 'unknown':
+        return `{gray-fg}♥ ${age}{/}`;
+    }
+  }
+
   /**
    * Format worker line for display
    */
@@ -152,6 +172,7 @@ export class WorkerGrid {
     const completedCount = worker.beadsCompleted;
 
     const duration = this.formatDuration(worker.lastActivity);
+    const liveness = this.getLivenessIndicator(worker);
     const collisionIndicator = this.getCollisionIndicator(worker);
     const stuckIndicator = this.getStuckIndicator(worker);
 
@@ -165,11 +186,14 @@ export class WorkerGrid {
     const dimSuffix = shouldDim ? '{/}' : '';
 
     // Format task message from lastEvent if available (truncated to 25 chars)
-    const taskMsg = worker.lastEvent?.msg
-      ? ` ${worker.lastEvent.msg.slice(0, 25)}${worker.lastEvent.msg.length > 25 ? '…' : ''}`
+    const taskEvent = worker.lastEvent && isHeartbeatEvent(worker.lastEvent)
+      ? worker.lastNonHeartbeatEvent
+      : worker.lastEvent;
+    const taskMsg = taskEvent?.msg
+      ? ` ${taskEvent.msg.slice(0, 25)}${taskEvent.msg.length > 25 ? '…' : ''}`
       : '';
 
-    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/}} {{bold}}${workerId}{{/}} {magenta-fg}[${host.slice(0, 8)}]{/} ${pinIndicator} {${color}-fg}${stateLabel}{/}} ${stuckIndicator} {{gray-fg}}${currentBead}{{/}} {{cyan-fg}}${completedCount} done{{/}} {{blue-fg}}${duration}{{/}} ${taskMsg}${collisionIndicator}${dimSuffix}`;
+    return `${dimPrefix}${selectedMarker} {${color}-fg}${icon}{/}} {{bold}}${workerId}{{/}} {magenta-fg}[${host.slice(0, 8)}]{/} ${pinIndicator} {${color}-fg}${stateLabel}{/}} ${stuckIndicator} {{gray-fg}}${currentBead}{{/}} {{cyan-fg}}${completedCount} done{{/}} {{blue-fg}}${duration}{{/}} ${liveness} ${taskMsg}${collisionIndicator}${dimSuffix}`;
   }
 
   /**

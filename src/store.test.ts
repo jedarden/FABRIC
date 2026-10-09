@@ -67,6 +67,16 @@ describe('InMemoryEventStore', () => {
       expect(worker).toBeDefined();
       expect(worker?.id).toBe('w-new');
     });
+
+    it('tracks the latest heartbeat separately from general activity', () => {
+      store.add(createEvent({ worker: 'w-heartbeat', ts: 1_000, msg: 'heartbeat.emitted' }));
+      store.add(createEvent({ worker: 'w-heartbeat', ts: 2_000, msg: 'useful event' }));
+      store.add(createEvent({ worker: 'w-heartbeat', ts: 3_000, msg: 'heartbeat.emitted' }));
+
+      const worker = store.getWorker('w-heartbeat');
+      expect(worker?.lastActivity).toBe(3_000);
+      expect(worker?.lastHeartbeat).toBe(3_000);
+    });
   });
 
   describe('query', () => {
