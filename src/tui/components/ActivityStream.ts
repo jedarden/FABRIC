@@ -290,7 +290,7 @@ export class ActivityStream {
   /**
    * Re-render all events with current filter
    */
-  private reRender(): void {
+  private reRender(renderScreen = true): void {
     // Clear the log
     this.log.setContent('');
 
@@ -301,7 +301,7 @@ export class ActivityStream {
       this.log.log(formatted);
     }
 
-    this.log.screen.render();
+    if (renderScreen) this.log.screen.render();
   }
 
   /**
@@ -358,11 +358,24 @@ export class ActivityStream {
   /**
    * Set focus mode state
    */
-  setFocusMode(enabled: boolean, pinnedBeadId?: string, pinnedWorkerId?: string): void {
+  setFocusMode(
+    enabled: boolean,
+    pinnedBeadId?: string,
+    pinnedWorkerId?: string,
+    renderScreen = true,
+  ): void {
+    if (
+      this.focusModeEnabled === enabled &&
+      this.pinnedBeadId === pinnedBeadId &&
+      this.pinnedWorkerId === pinnedWorkerId
+    ) {
+      return;
+    }
+
     this.focusModeEnabled = enabled;
     this.pinnedBeadId = pinnedBeadId;
     this.pinnedWorkerId = pinnedWorkerId;
-    this.reRender();
+    this.reRender(renderScreen);
   }
 }
 

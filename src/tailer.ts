@@ -7,6 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
+import { StringDecoder } from 'string_decoder';
 import { LogEvent } from './types.js';
 import { normalizeToLogEvent, EventDeduplicator } from './normalizer.js';
 
@@ -52,7 +53,10 @@ export class LogTailer extends EventEmitter {
   private watcher?: fs.FSWatcher;
   private position: number = 0;
   private buffer: string = '';
+  private decoder = new StringDecoder('utf8');
   private ended: boolean = false;
+  private reading: boolean = false;
+  private readAgain: boolean = false;
 
   constructor(options: TailerOptions) {
     super();
@@ -109,7 +113,7 @@ export class LogTailer extends EventEmitter {
     // consume any bytes written between the checkpoint and now, then rely on
     // the watcher for future writes.
     if (this.startPositionOpt !== undefined) {
-      this.readNewContent();
+      void this.readNewContent();
     }
   }
 
@@ -140,7 +144,7 @@ export class LogTailer extends EventEmitter {
   private watch(): void {
     this.watcher = fs.watch(this.filePath, (eventType) => {
       if (eventType === 'change') {
-        this.readNewContent();
+        void this.readNewContent();
       } else if (eventType === 'rename') {
         // File was rotated or deleted
         this.checkFileExists();
@@ -155,35 +159,73 @@ export class LogTailer extends EventEmitter {
   /**
    * Read new content from file
    */
-  private readNewContent(): void {
+  private async readNewContent(): Promise<void> {
+    if (this.ended) return;
+    if (this.reading) {
+      this.readAgain = true;
+      return;
+    }
+
+    this.reading = true;
     try {
-      const stats = fs.statSync(this.filePath);
-      if (stats.size < this.position) {
-        // File was truncated, start from beginning
-        this.position = 0;
-      }
+      do {
+        this.readAgain = false;
+        await this.readAvailableContent();
+      } while (this.readAgain && !this.ended);
+    } catch (err) {
+      this.emit('error', err as Error);
+    } finally {
+      this.reading = false;
+      // A watcher notification can arrive as the last async read is settling.
+      // Re-arm after clearing `reading` so that notification is never lost.
+      if (this.readAgain && !this.ended) void this.readNewContent();
+    }
+  }
 
-      if (stats.size > this.position) {
-        const fd = fs.openSync(this.filePath, 'r');
-        const buffer = Buffer.alloc(stats.size - this.position);
-        fs.readSync(fd, buffer, 0, buffer.length, this.position);
-        fs.closeSync(fd);
+  /** Read a snapshot of currently available bytes, yielding between chunks. */
+  private async readAvailableContent(): Promise<void> {
+    const stats = await fs.promises.stat(this.filePath);
+    if (this.ended) return;
 
-        this.position = stats.size;
-        this.buffer += buffer.toString('utf-8');
+    if (stats.size < this.position) {
+      // File was truncated, start from the beginning and discard partial state.
+      this.position = 0;
+      this.buffer = '';
+      this.decoder = new StringDecoder('utf8');
+    }
+    if (stats.size <= this.position) return;
 
-        // Process complete lines
+    const file = await fs.promises.open(this.filePath, 'r');
+    try {
+      const readThrough = stats.size;
+      let linesSinceYield = 0;
+
+      while (!this.ended && this.position < readThrough) {
+        const length = Math.min(64 * 1024, readThrough - this.position);
+        const chunk = Buffer.allocUnsafe(length);
+        const { bytesRead } = await file.read(chunk, 0, length, this.position);
+        if (bytesRead === 0) break;
+
+        this.position += bytesRead;
+        this.buffer += this.decoder.write(chunk.subarray(0, bytesRead));
+
+        // Process complete lines while retaining a partial final line for the
+        // next write. Bound synchronous event handling so the TUI and timers
+        // run during large startup replays.
         const lines = this.buffer.split('\n');
-        this.buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
+        this.buffer = lines.pop() ?? '';
         for (const line of lines) {
-          if (line.trim()) {
-            this.processLine(line);
+          if (line.trim()) this.processLine(line);
+          linesSinceYield++;
+          if (linesSinceYield >= 128) {
+            linesSinceYield = 0;
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            if (this.ended) break;
           }
         }
       }
-    } catch (err) {
-      this.emit('error', err as Error);
+    } finally {
+      await file.close();
     }
   }
 
@@ -196,7 +238,7 @@ export class LogTailer extends EventEmitter {
       setTimeout(() => {
         if (fs.existsSync(this.filePath)) {
           this.position = 0;
-          this.readNewContent();
+          void this.readNewContent();
         }
       }, 1000);
     }

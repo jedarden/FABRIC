@@ -157,11 +157,10 @@ export class DirectoryTailer extends EventEmitter {
       }
     }
 
-    // Activate the most recently modified files first, up to the cap.
+    // Keep startup activation bounded to the configured active set. The
+    // actual activation is scheduled below so the TUI can paint before file
+    // catch-up work begins.
     candidates.sort((a, b) => b.mtime - a.mtime);
-    for (let i = 0; i < Math.min(candidates.length, this.maxActiveFiles); i++) {
-      this.activateFile(candidates[i].fullPath);
-    }
 
     // Watch for new files appearing in the directory.
     this.dirWatcher = fs.watch(this.directory, (eventType, filename) => {
@@ -199,6 +198,8 @@ export class DirectoryTailer extends EventEmitter {
       () => this.pollInactiveFiles(),
       this.inactiveCheckIntervalMs,
     );
+
+    void this.activateStartupFiles(candidates.slice(0, this.maxActiveFiles));
   }
 
   stop(): void {
@@ -268,6 +269,19 @@ export class DirectoryTailer extends EventEmitter {
     // Apply memory limit to needle worker when activating its log file
     const fileName = path.basename(filePath);
     applyLimitForLogFile(fileName);
+  }
+
+  /** Activate startup candidates one at a time, yielding between files. */
+  private async activateStartupFiles(
+    candidates: Array<{ fullPath: string; mtime: number; size: number }>,
+  ): Promise<void> {
+    for (let index = 0; index < candidates.length; index++) {
+      if (this.stopped) return;
+      this.activateFile(candidates[index].fullPath);
+      if (index + 1 < candidates.length) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
   }
 
   /**

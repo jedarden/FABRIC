@@ -118,7 +118,11 @@ program
       const { createTuiApp } = await import('./tui/index.js');
       const { OtlpGrpcReceiver } = await import('./otlpGrpcReceiver.js');
       const store = getStore();
-      const app = createTuiApp(store, { logPath: resolved.path, filter });
+      const app = createTuiApp(store, {
+        logPath: resolved.path,
+        filter,
+        batchEventRefresh: resolved.kind === 'directory',
+      });
 
       // Shared deduplicator for cross-source dedup when OTLP is active
       const needsDedup = !!(options.otlpGrpc || options.otlpHttp);
@@ -237,8 +241,8 @@ program
       }
 
       // Start tailing and TUI
-      tailer.start();
       app.start();
+      tailer.start();
 
       // Handle graceful shutdown
       process.on('SIGINT', () => {

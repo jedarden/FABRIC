@@ -45,6 +45,9 @@ export interface TuiOptions {
   /** Refresh interval in ms */
   refreshInterval?: number;
 
+  /** Coalesce event-driven UI work for bursty directory-source replay. */
+  batchEventRefresh?: boolean;
+
   /** CLI filter for worker/level */
   filter?: EventFilter;
 }
@@ -54,6 +57,8 @@ export class FabricTuiApp {
   private store: InMemoryEventStore;
   private options: TuiOptions;
   private isRunning = false;
+  private eventRenderTimer?: ReturnType<typeof setTimeout>;
+  private pendingEvent?: LogEvent;
 
   // View mode
   private viewMode: 'default' | 'heatmap' | 'dag' | 'replay' | 'errors' | 'digest' | 'collisions' | 'git' | 'narrative' | 'analytics' | 'transcript' | 'xref' | 'budget' = 'default';
@@ -2138,7 +2143,7 @@ General:
     const workers = this.store.getWorkers();
     this.workerGrid.updateWorkers(workers);
     this.workerGrid.setFocusMode(this.focusModeEnabled, this.pinnedWorkerId);
-    this.activityStream.setFocusMode(this.focusModeEnabled, this.pinnedBeadId, this.pinnedWorkerId);
+    this.activityStream.setFocusMode(this.focusModeEnabled, this.pinnedBeadId, this.pinnedWorkerId, false);
   }
 
   /**
@@ -2146,17 +2151,38 @@ General:
    */
   addEvent(event: LogEvent): void {
     this.activityStream.addEvent(event);
-    this.renderWorkers();
 
+    // Directory startup replay can deliver many events in one burst. Keep the
+    // append cheap and coalesce the more expensive panel updates and screen
+    // paint into one pass per refresh window.
+    if (!this.isRunning || !this.options.batchEventRefresh) {
+      this.refreshForEvent(event);
+      return;
+    }
+
+    this.pendingEvent = event;
+    if (this.eventRenderTimer) return;
+    this.eventRenderTimer = setTimeout(
+      () => this.flushPendingEventRender(),
+      this.options.refreshInterval ?? 100,
+    );
+  }
+
+  private flushPendingEventRender(): void {
+    this.eventRenderTimer = undefined;
+    const event = this.pendingEvent;
+    this.pendingEvent = undefined;
+    if (!this.isRunning) return;
+    this.refreshForEvent(event);
+  }
+
+  private refreshForEvent(event?: LogEvent): void {
+    this.renderWorkers();
     // Update header badge with current worker stats
     this.updateHeader();
 
-    // Update focus mode state after rendering
-    this.workerGrid.setFocusMode(this.focusModeEnabled, this.pinnedWorkerId);
-    this.activityStream.setFocusMode(this.focusModeEnabled, this.pinnedBeadId, this.pinnedWorkerId);
-
     // Update file context panel if this is a file event
-    if (event.path && this.fileContextVisible) {
+    if (event?.path && this.fileContextVisible) {
       this.fileContextPanel.setContextFromEvent(event);
     }
 
@@ -2173,8 +2199,6 @@ General:
     if (this.viewMode === 'collisions') {
       this.updateCollisionAlerts();
     }
-
-    // DAG view auto-refreshes on its own schedule
 
     this.screen.render();
   }
@@ -2214,6 +2238,10 @@ General:
    */
   stop(): void {
     this.isRunning = false;
+    if (this.eventRenderTimer) {
+      clearTimeout(this.eventRenderTimer);
+      this.eventRenderTimer = undefined;
+    }
     // Clean up theme subscription
     if (this.themeUnsubscribe) {
       this.themeUnsubscribe();
