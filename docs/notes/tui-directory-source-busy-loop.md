@@ -69,7 +69,8 @@ blank while one core burns.
 3. **Is the missing render scan cost or a starved render loop?** Neither. The
    `readdirSync`/`statSync` scan at `src/directoryTailer.ts:136-158` takes
    seconds even for the large directory, and the TUI has no periodic render
-   loop (`options.refreshInterval` at `src/tui/app.ts:105-106` is never read).
+   loop (`refreshInterval` is defaulted at `src/tui/app.ts:102-107` but is not
+   consumed by any render timer).
    The first paint is simply sequenced after the unbounded synchronous replay
    (`src/cli.ts:239-241`), so that replay monopolizes the main thread before
    any frame can be drawn.
@@ -211,8 +212,8 @@ Steady state (after startup) explains the residual CPU numbers: with 3 files
 it yields between events, so renders happen — the burn rate tracks the event
 rate. The large-directory case never gets that far: startup replay is ordered
 **before** the first paint (`src/cli.ts:239-241`), and the TUI has **no
-periodic render loop at all** (`options.refreshInterval` at
-`src/tui/app.ts:105-106` is dead config — set, never read), so nothing can
+periodic render loop at all** (`refreshInterval` at
+`src/tui/app.ts:45-46,102-107` is declared and defaulted but otherwise unused), so nothing can
 paint until an explicit `screen.render()` finally runs.
 
 So the answer to "startup-scan cost or starved render loop": **neither**.
@@ -225,38 +226,52 @@ events in <60 s.)
 
 ## Recommended fix shape (input to the fix child)
 
-**Keep `fs.watch` wake-ups event-driven. Do not replace them with interval
-re-scanning** — the watcher itself is correct, and interval-driven rescans
-would reintroduce O(directory) cost per tick. Two independent fixes, in this
-order:
+**Decision: keep `fs.watch` wake-ups event-driven; do not add interval
+re-scanning.** `DirectoryTailer.start()` installs the directory watcher
+(`src/directoryTailer.ts:166-172`) and `LogTailer.watch()` handles file changes
+(`src/tailer.ts:140-148`). These are the wake-up paths to preserve; periodic
+rescans would repeat O(directory) work on every tick.
 
-1. **P1 — coalesce the render work (primary, load-bearing).** One ingested
-   line must cost one incremental append, not ~200. In
-   `TuiApp.addEvent` (`src/tui/app.ts:2147`) keep
-   `activityStream.addEvent` (the single `log.log()`) inline, and debounce the
-   expensive part — `renderWorkers()`, both `setFocusMode()` calls,
-   `screen.render()` — to at most once per 100–250 ms via a coalescing timer.
-   `ActivityStream.setFocusMode` (`ActivityStream.ts:361-366`) should not
-   `reRender()` unconditionally; it only needs to when focus state actually
-   changed. Repurposing the dead `refreshInterval` option
-   (`src/tui/app.ts:105-106`) as this coalescing interval would give the
-   option its intended meaning. This alone turns startup replay from
-   O(events × 100 log.log) into O(events log.log) — hours → seconds.
+Implement the following in order:
 
-2. **P2 — make the startup replay yield (supporting).** Even at O(1) renders
-   per line, a 40k-event replay should not hold the thread for its whole
-   duration: interleave `DirectoryTailer.start()`'s activation loop
-   (`src/directoryTailer.ts:162-164`) with `setImmediate`/`await` between
-   files, and/or make `readNewContent` (`src/tailer.ts:158-188`) chunked and
-   async (`fs.promises`) with an await per chunk. This keeps timers, signals
-   and blessed responsive during catch-up. Note the trap: async reads
-   **without** P1 would still burn the core — each async continuation
-   immediately re-arms into the next 44–54 ms render storm, which is exactly
+1. **P1 — coalesce render work; this is the primary, load-bearing fix.** In
+   `FabricTuiApp.addEvent()` (`src/tui/app.ts:2147-2179`), keep the event append
+   through `ActivityStream.addEvent()` (`src/tui/components/ActivityStream.ts:189-202`)
+   inline, but debounce/coalesce the expensive worker/focus updates and screen
+   paint behind a one-shot 100–250 ms timer. Schedule only when no flush is
+   pending; while one is pending, further events update state without
+   scheduling another or resetting the timer. This allows at most one full
+   render pass per 100–250 ms window. The pass should update the
+   worker grid and header, call `ActivityStream.setFocusMode()` once, and call
+   `screen.render()` once, replacing the duplicate focus updates and paints in
+   `FabricTuiApp.addEvent()` / `renderWorkers()` (`src/tui/app.ts:2137-2179`).
+   In `ActivityStream.setFocusMode()` (`src/tui/components/ActivityStream.ts:361-366`),
+   call `reRender()` only when the focus tuple actually changes; its current
+   unconditional re-render rebuilds up to 100 log rows (`:293-305`).
+
+   Rechecked on current `main` (`4512ef7`): `refreshInterval` is declared and
+   defaulted (`src/tui/app.ts:45-46,102-107`) but no render timer consumes it.
+   Treat it as unused configuration today; if it is reused for P1, wire it to
+   the coalescing delay explicitly. P1 must reduce each ingested event to one
+   append plus no more than one full render pass per 100–250 ms.
+
+2. **P2 — make startup replay yield, after P1.** In
+   `DirectoryTailer.start()` (`src/directoryTailer.ts:162-164`), yield with
+   `setImmediate` between activated files. In `LogTailer.readNewContent()`
+   (`src/tailer.ts:158-188`), replace the synchronous whole-file read and
+   line loop with chunked asynchronous reads, yielding between chunks. Both
+   are required: yielding only between files still lets one large file block
+   the event loop. This lets timers, signals, and blessed run during catch-up.
+   The known trap is that async reads **without P1 still burn the core**: each
+   async continuation immediately re-arms the per-event render storm. That is
    why P1 is primary and P2 is supporting.
 
-3. **Sequencing:** paint before catching up — call `app.start()` before
-   `tailer.start()` (`src/cli.ts:239-241`) so the dashboard frame appears
-   immediately and fills in as replay progresses.
+3. **Paint before catch-up.** In the `tui` command action
+   (`src/cli.ts:239-241`), call `app.start()` before `tailer.start()` so the
+   first frame is painted before replay begins and then fills in during
+   catch-up.
+
+Fix-child scope boundary: implementation + verification only; no further diagnosis.
 
 ## Reproducing
 
