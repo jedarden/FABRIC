@@ -1,11 +1,23 @@
 # TUI directory-source busy-loop — root cause (fabric-0386d35e)
 
 `fabric tui --source <dir>` pins a core at ~100% and never renders on
-realistic directories. This note records the root cause **confirmed against
-current main** (commit `ffe9323`, 2026-09-18) by (a) pausing a live spinning
+realistic directories. This note records the root cause originally **confirmed
+against main** (commit `ffe9323`, 2026-09-18) by (a) pausing a live spinning
 process and capturing its synchronous call stack via the inspector protocol,
 (b) an event-loop heartbeat probe, and (c) a controlled amplification
-measurement. Reproduce with `scripts/gen-synthetic-logs.sh`.
+measurement. The file:line citations were re-verified against current main at
+commit `8d382f7ec30ff6465893d5fcfcc84993bd28012d` on 2026-10-08. Reproduce
+with `scripts/gen-synthetic-logs.sh`.
+
+The 2026-10-08 re-verification found no substantive change to the root-cause
+claims. `src/cli.ts` and `src/tui/app.ts` have drifted since the prior
+confirmation, so their citations below are updated; the
+`directoryTailer.ts`, `tailer.ts`, and `ActivityStream.ts` citations still land
+on the same code. In particular, the previously cited `src/cli.ts:180-188`,
+`src/cli.ts:198-205`, and `src/cli.ts:292-293` windows were walked but now
+cover workers-log handling/watching and web-command filter setup,
+respectively; the TUI paths are now at `src/cli.ts:128-136`,
+`src/cli.ts:146-153`, and `src/cli.ts:239-241`.
 
 ## TL;DR
 
@@ -33,13 +45,14 @@ blank while one core burns.
 
 Startup order — tailer first, first paint second:
 
-- `src/cli.ts:292` — `tailer.start()`
-- `src/cli.ts:293` — `app.start()` (the **first** `screen.render()`; only
+- `src/cli.ts:239` — `tailer.start()`
+- `src/cli.ts:240-241` — `app.start()` (the **first** `screen.render()`; only
   reached after the whole replay finishes)
 
 Directory construction:
 
-- `src/cli.ts:180-181` — `--source <dir>` → `DirectoryTailer`
+- `src/cli.ts:128-136` — resolved directory source → `DirectoryTailer` (the
+  single-file `-f` path is configured with `lines: 50` in the same range)
 - `src/directoryTailer.ts:136-158` — startup scan: `readdirSync` +
   `statSync` per file (secondary cost: ~seconds even at 34k files)
 - `src/directoryTailer.ts:144-149` — files with mtime ≤ `startupRereadMs`
@@ -60,14 +73,14 @@ Per-file replay (all synchronous):
 
 Per-line render storm (the amplifier):
 
-- `src/cli.ts:198-205` — `tailer.on('event')` → `store.add(event)` +
+- `src/cli.ts:146-153` — `tailer.on('event')` → `store.add(event)` +
   `app.addEvent(event)`
-- `src/tui/app.ts:2044-2077` — `TuiApp.addEvent`:
+- `src/tui/app.ts:2147-2180` — `TuiApp.addEvent`:
   `activityStream.addEvent(event)` (1 incremental append) **then**
   `renderWorkers()` **then** a second `activityStream.setFocusMode(...)` —
   each of the latter two triggering a full re-render — then another
   `screen.render()`
-- `src/tui/app.ts:2034-2039` — `renderWorkers()` →
+- `src/tui/app.ts:2137-2142` — `renderWorkers()` →
   `activityStream.setFocusMode(...)`
 - `src/tui/components/ActivityStream.ts:361-366` — `setFocusMode` →
   `this.reRender()` (unconditionally, every time)
@@ -148,7 +161,7 @@ Synthetic dir: 120 files × 400 events (`scripts/gen-synthetic-logs.sh
 Both paths are `fs.watch`-driven and event-driven afterwards; the difference
 is entirely in **startup replay volume**:
 
-- `-f` constructs `LogTailer` with `lines: 50` (`src/cli.ts:182-188`) →
+- `-f` constructs `LogTailer` with `lines: 50` (`src/cli.ts:128-136`) →
   `readExistingLines()` (`src/tailer.ts:119-135`) reads the file but processes
   **only the last 50 lines**, once (~2–3 s of storm, then done). No
   `startPosition` → no catch-up read (`src/tailer.ts:111-113`).
@@ -159,7 +172,7 @@ Steady state (after startup) explains the residual CPU numbers: with 3 files
 (~101% CPU) and `-f` (48% CPU) the loop still costs ~44 ms per **live** event;
 it yields between events, so renders happen — the burn rate tracks the event
 rate. The large-directory case never gets that far: startup replay is ordered
-**before** the first paint (`src/cli.ts:292-293`), and the TUI has **no
+**before** the first paint (`src/cli.ts:239-241`), and the TUI has **no
 periodic render loop at all** (`options.refreshInterval` at
 `src/tui/app.ts:105-106` is dead config — set, never read), so nothing can
 paint until an explicit `screen.render()` finally runs.
@@ -181,7 +194,7 @@ order:
 
 1. **P1 — coalesce the render work (primary, load-bearing).** One ingested
    line must cost one incremental append, not ~200. In
-   `TuiApp.addEvent` (`src/tui/app.ts:2044`) keep
+   `TuiApp.addEvent` (`src/tui/app.ts:2147`) keep
    `activityStream.addEvent` (the single `log.log()`) inline, and debounce the
    expensive part — `renderWorkers()`, both `setFocusMode()` calls,
    `screen.render()` — to at most once per 100–250 ms via a coalescing timer.
@@ -204,7 +217,7 @@ order:
    why P1 is primary and P2 is supporting.
 
 3. **Sequencing:** paint before catching up — call `app.start()` before
-   `tailer.start()` (`src/cli.ts:292-293`) so the dashboard frame appears
+   `tailer.start()` (`src/cli.ts:239-241`) so the dashboard frame appears
    immediately and fills in as replay progresses.
 
 ## Reproducing
