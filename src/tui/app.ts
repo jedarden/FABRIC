@@ -2150,12 +2150,13 @@ General:
    * Add event to activity stream
    */
   addEvent(event: LogEvent): void {
-    this.activityStream.addEvent(event);
+    const batchRefresh = this.isRunning && this.options.batchEventRefresh;
+    this.activityStream.addEvent(event, batchRefresh);
 
     // Directory startup replay can deliver many events in one burst. Keep the
     // append cheap and coalesce the more expensive panel updates and screen
     // paint into one pass per refresh window.
-    if (!this.isRunning || !this.options.batchEventRefresh) {
+    if (!batchRefresh) {
       this.refreshForEvent(event);
       return;
     }
@@ -2173,6 +2174,7 @@ General:
     const event = this.pendingEvent;
     this.pendingEvent = undefined;
     if (!this.isRunning) return;
+    this.activityStream.flushDisplay();
     this.refreshForEvent(event);
   }
 

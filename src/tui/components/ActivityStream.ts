@@ -72,6 +72,7 @@ export class ActivityStream {
   private maxLines: number;
   private isPaused = false;
   private showHeartbeats = false;
+  private displayDirty = false;
   private focusModeEnabled = false;
   private pinnedBeadId?: string;
   private pinnedWorkerId?: string;
@@ -213,7 +214,7 @@ export class ActivityStream {
   /**
    * Add event to the stream
    */
-  addEvent(event: LogEvent): void {
+  addEvent(event: LogEvent, deferDisplay = false): void {
     if (isHeartbeatEvent(event)) {
       const previous = this.heartbeatEvents.get(event.worker);
       if (!previous || event.ts > previous.ts) {
@@ -223,7 +224,11 @@ export class ActivityStream {
       // Heartbeats are collapsed to one latest sample per worker when an
       // explicit caller asks to inspect them; the default feed stays quiet.
       if (!this.isPaused && (this.showHeartbeats || this.filter.includeHeartbeats)) {
-        this.reRender(false);
+        if (deferDisplay) {
+          this.displayDirty = true;
+        } else {
+          this.reRender(false);
+        }
       }
       return;
     }
@@ -237,9 +242,19 @@ export class ActivityStream {
 
     // Only display if not paused and passes filter
     if (!this.isPaused && this.shouldDisplay(event)) {
-      const formatted = this.formatEvent(event);
-      this.log.log(formatted);
+      if (deferDisplay) {
+        this.displayDirty = true;
+      } else {
+        const formatted = this.formatEvent(event);
+        this.log.log(formatted);
+      }
     }
+  }
+
+  /** Rebuild the widget once after a batch of deferred events. */
+  flushDisplay(): void {
+    if (!this.displayDirty || this.isPaused) return;
+    this.reRender(false);
   }
 
   /**
@@ -333,6 +348,7 @@ export class ActivityStream {
    * Re-render all events with current filter
    */
   private reRender(renderScreen = true): void {
+    this.displayDirty = false;
     // Clear the log
     this.log.setContent('');
 

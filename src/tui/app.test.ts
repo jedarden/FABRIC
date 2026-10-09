@@ -91,6 +91,7 @@ vi.mock('./components/ActivityStream.js', () => {
   return {
     ActivityStream: class {
       addEvent = vi.fn();
+      flushDisplay = vi.fn();
       clearFilter = vi.fn();
       setFilter = vi.fn();
       togglePause = vi.fn();
@@ -454,8 +455,15 @@ describe('FabricTuiApp', () => {
         }
 
         expect(mockScreen.render).not.toHaveBeenCalled();
+        expect(app['activityStream'].addEvent).toHaveBeenCalledTimes(20);
+        expect(app['activityStream'].addEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ msg: 'startup-19' }),
+          true,
+        );
+        expect(app['activityStream'].flushDisplay).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(100);
         expect(mockScreen.render).toHaveBeenCalledTimes(1);
+        expect(app['activityStream'].flushDisplay).toHaveBeenCalledTimes(1);
       } finally {
         app.stop();
         vi.useRealTimers();

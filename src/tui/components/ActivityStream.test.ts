@@ -211,6 +211,57 @@ describe('ActivityStream', () => {
       expect(mockLogInstance.log.mock.calls[0][0]).toContain('useful event');
     });
 
+    it('defers widget updates for a batch and flushes the bounded stream once', () => {
+      const batchedStream = new ActivityStream({
+        parent: mockScreen,
+        top: 0,
+        right: 0,
+        width: '50%',
+        bottom: 0,
+        maxLines: 3,
+      });
+
+      for (let index = 0; index < 5; index++) {
+        batchedStream.addEvent(createMockEvent({ msg: `batch-${index}` }), true);
+      }
+
+      expect(mockLogInstance.log).not.toHaveBeenCalled();
+      expect(batchedStream.getEventsCount()).toBe(3);
+
+      batchedStream.flushDisplay();
+
+      expect(mockLogInstance.setContent).toHaveBeenCalledTimes(1);
+      expect(mockLogInstance.log).toHaveBeenCalledTimes(3);
+      expect(mockLogInstance.log.mock.calls.map((call: unknown[]) => call[0])).toEqual(
+        expect.arrayContaining([expect.stringContaining('batch-2'), expect.stringContaining('batch-4')]),
+      );
+    });
+
+    it('defers opted-in heartbeat display while retaining the latest per worker', () => {
+      const heartbeatStream = new ActivityStream({
+        parent: mockScreen,
+        top: 0,
+        right: 0,
+        width: '50%',
+        bottom: 0,
+        showHeartbeats: true,
+      });
+
+      heartbeatStream.addEvent(createMockEvent({ msg: 'heartbeat.emitted', ts: 1_000 }), true);
+      heartbeatStream.addEvent(createMockEvent({ msg: 'heartbeat.emitted', ts: 2_000 }), true);
+
+      expect(mockLogInstance.log).not.toHaveBeenCalled();
+      expect(heartbeatStream.getLastHeartbeats().get('w-test123')?.ts).toBe(2_000);
+
+      heartbeatStream.flushDisplay();
+
+      const heartbeatLogs = mockLogInstance.log.mock.calls.filter(
+        (call: unknown[]) => String(call[0]).includes('heartbeat.emitted'),
+      );
+      expect(heartbeatLogs).toHaveLength(1);
+      expect(heartbeatLogs[0][0]).toContain(new Date(2_000).toLocaleTimeString());
+    });
+
     it('should not display event when paused', () => {
       activityStream.togglePause();
       const event = createMockEvent();
