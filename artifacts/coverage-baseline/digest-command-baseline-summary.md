@@ -111,7 +111,7 @@ more of the CLI digest path, including the command's source-resolution flow.
 | Statements | 419 → 527 (↑108)     | 1,348 → 1,376       | 31.08% → 38.30%         |
 
 The command exited non-zero after all tests passed because the configured 50%
-thresholds remain aspirational: v8's native summary reported 38.29% statements,
+thresholds were aspirational at the time: v8's native summary reported 38.29% statements,
 37.11% branches, 50.00% functions, and 39.38% lines. The committed comparison
 baseline uses the statement-map convention above, not v8's native line count.
 
@@ -124,11 +124,15 @@ Two measurement notes for future comparisons:
   "correct"; they count different things. Compare against this baseline only
   via the statementMap convention, which is what `src/coverageBaseline.test.ts`
   enforces.
-- **The 50% thresholds in `vitest.config.ts` currently fail.** The 2026-10-08
-  run reached 50.00% only for functions; statements (38.29%), branches
-  (37.11%), and lines (39.38%) remain below the configured thresholds, so
-  `npm run test:coverage` exits non-zero after all tests pass. The thresholds
-  are aspirational; a non-zero coverage exit is not a test failure.
+- **Threshold status (updated 2026-10-23, bead fabric-271a7d97).** The
+  2026-10-08 run exceeded the then-configured blanket 50% thresholds on
+  functions only (statements 38.29%, branches 37.11%, lines 39.38% stayed
+  below), so the command exited non-zero after all tests passed. Since
+  2026-10-23 the thresholds are right-sized to this baseline — lines 40,
+  functions 50, branches 40, statements 39 (bead fabric-f8802679, commit
+  b515547) — and `npm run test:coverage` exits 0 when all tests pass; a
+  non-zero exit now signals a real regression. Restoring 50/50/50/50 is
+  tracked by bead fabric-d48e8f7f.
 
 ## Analysis Notes
 

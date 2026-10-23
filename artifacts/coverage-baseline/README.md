@@ -40,6 +40,11 @@ below and the test constants are reconciled together.
 4. Re-run `npm test` before committing; it re-validates the artifacts in this
    directory.
 
-`npm run test:coverage` may exit non-zero even when all tests pass — the 50%
-thresholds in `vitest.config.ts` are aspirational and currently unmet. A
-non-zero coverage exit is not a test failure.
+`npm run test:coverage` exits 0 when all tests pass and the digest-scope
+thresholds hold. The blanket 50% thresholds were right-sized 2026-10-23 to
+the measured baseline — lines 40, functions 50, branches 40, statements 39
+— with one point of churn headroom (bead fabric-f8802679, commit b515547;
+`vitest.config.ts` documents the rationale where the thresholds are
+defined). A non-zero coverage exit now means a real regression: a test
+failure or a drop below the floored thresholds. Restoring the 50/50/50/50
+gate is owned by bead fabric-d48e8f7f.
