@@ -153,3 +153,56 @@ a contended box cannot trip the 5 s default while a genuine hang still fails
 fast at 30 s. Verified 2026-10-23: the standard parallel invocation exits 0
 twice in a row (with and without the headroom commit in history — the first
 run reproduced the 2026-10-23 baseline, the second ran the patched suites).
+
+## 2026-10-23 dispatch resolution and CI-visibility decision (bead fabric-36f7093d)
+
+The dispatch behind this report asked for one of three resolutions — (a) add
+tests until the global gate passes, (b) scope the gate to a defined inventory,
+or (c) lower/replace the threshold — plus a decision on whether coverage
+should join the `fabric-ci` Argo template. Resolution:
+
+- **Executed — right-size the gate (option c):** closed twin bead
+  fabric-f8802679 right-sized the thresholds to the measured baseline in
+  commit b515547 (section above). No duplicate implementation was performed
+  here.
+- **Owned elsewhere — restore 50/50/50/50 (option a):** open follow-up bead
+  fabric-d48e8f7f owns raising `src/cli.ts`, `src/analytics.ts`, and the TUI
+  `SessionDigest` component, then restoring the 50% gate with real margin.
+- **Decided here — CI visibility: coverage should join `fabric-ci`,
+  replacing the `npm test` step rather than being added alongside it.**
+
+Rationale for the CI decision:
+
+1. The gate is green again, so the historical reason it stayed out of CI (a
+   permanently red gate would fail every run) is gone. Without a coverage
+   step, a change that silently drops the six-file digest scope below the
+   floor ships unflagged — exactly the failure shape this dispatch was
+   admitted to close.
+2. `npm run test:coverage` is a strict superset of `npm test`: the same vitest
+   suite (verified above: identical 116 files / 3,774 passed / 2 skipped),
+   any test failure still fails the step, plus the threshold gate. Replacing
+   keeps CI time near-flat — one instrumented run (~53 s locally, measured
+   twice on 2026-10-23) instead of the suite twice back to back.
+3. `pretest:coverage` runs `npm run build`, which the template already
+   performs as its own step; the redundant rebuild is a no-op tsc pass and
+   needs no template restructuring.
+
+The template edit itself is a one-line change in `jedarden/declarative-config`
+(`k8s/iad-ci/argo-workflows/fabric-ci-workflowtemplate.yml`: `npm test` →
+`npm run test:coverage`). That repository is outside this one, so the edit is
+follow-up work for declarative-config, recorded here and on the owning bead
+for admission. Fallback if a CI runner cannot afford the instrumented run:
+keep `npm test` and add `npm run test:coverage` as an additional step — same
+signal, roughly doubled suite time.
+
+One scope caution to carry into that edit: `coverage.include` in
+`vitest.config.ts` is the six-file digest scope, so the CI gate would protect
+that scope only, not the whole tree. That is the scoping this report
+documents; widening it belongs to fabric-d48e8f7f alongside the 50% restore.
+
+Fresh verification on the committed tree (bead fabric-36f7093d, 2026-10-23):
+`npx tsc --noEmit` exit 0; `npx vitest run` exit 0 (116 files, 3,774 passed,
+2 skipped); `npm run test:coverage` exit 0 — totals identical to the
+2026-10-08/23 measurement (statements 40.43% 552/1365, branches 41.73%
+293/702, functions 51.45% 106/206, lines 41.50% 520/1253), confirming the
+right-sized gate holds with its headroom intact.
