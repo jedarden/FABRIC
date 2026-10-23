@@ -11,6 +11,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+// These suites bind real listeners; under parallel coverage the instrumented
+// startup of every suite at once can push a suite's first tests past the 5 s
+// default on a loaded box (five web-server tests timed out that way on
+// 2026-10-08, see docs/digest-command-coverage-report.md). Give their tests
+// explicit headroom; a genuine hang still fails fast at 30 s.
+vi.setConfig({ testTimeout: 30_000 });
+
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

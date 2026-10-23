@@ -75,7 +75,11 @@ measurement reported here.
 
 ## Reproduction
 
-Run the final command from the repository root. Compare its six-file raw report
+Run the standard parallel command (`npm run test:coverage`) from the
+repository root — since the 2026-10-23 web-server timeout headroom
+(bead fabric-7165df98, below) it completes green with no controlled
+invocation; the single-worker command in the Verification section is kept
+only as the historical 2026-10-08 record. Compare the six-file raw report
 with the frozen baseline using the aggregation described in
 `artifacts/coverage-baseline/digest-command-baseline-summary.md`.
 
@@ -112,3 +116,31 @@ files stays green, and a real regression (~19 covered lines, ~12 branches,
 ~20 statements) still fails the gate. Restoring the 50/50/50/50 gate after
 raising `cli.ts`, `analytics.ts`, and the TUI `SessionDigest` component is
 tracked by follow-up bead fabric-d48e8f7f.
+
+## 2026-10-23 web-server timeout headroom (bead fabric-7165df98)
+
+The five web-server timeouts from the 2026-10-08 parallel attempt are closed
+out, and the controlled single-worker invocation above is retired: the
+reproduction command for this report is now the standard parallel
+`npm run test:coverage`.
+
+The 2026-10-08 run did not record the five test names. A live measurement
+under the standard parallel invocation (116 files, 3,774 passed, ~53 s)
+identifies the failure shape instead: the slowest tests in every web-server
+suite are the suite's first tests, which absorb the instrumented
+transform + import + listener-startup window (`server.getRoutes.test.ts`
+peaked at 2.2 s on an unloaded box; actual test-async time is tens of
+milliseconds). The 2026-10-08 controlled run passed single-worker WITH the
+same instrumentation, so the cause is coverage-instrumentation plus
+parallel-scheduling overhead on a loaded box, not genuinely slow async paths.
+
+The fix is explicit per-suite headroom rather than a slower workaround: each
+web-server suite that binds real listeners — `server.test.ts`,
+`server.getRoutes.test.ts`, `server.authRoutes.test.ts`,
+`server.metrics.test.ts`, `server.alerts.test.ts`, `server.heap.test.ts`,
+`eventsApi.contract.test.ts`, `retentionControls.integration.test.ts` —
+now sets `vi.setConfig({ testTimeout: 30_000 })`, so instrumented startup on
+a contended box cannot trip the 5 s default while a genuine hang still fails
+fast at 30 s. Verified 2026-10-23: the standard parallel invocation exits 0
+twice in a row (with and without the headroom commit in history — the first
+run reproduced the 2026-10-23 baseline, the second ran the patched suites).
