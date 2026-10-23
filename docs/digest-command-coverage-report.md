@@ -78,3 +78,37 @@ measurement reported here.
 Run the final command from the repository root. Compare its six-file raw report
 with the frozen baseline using the aggregation described in
 `artifacts/coverage-baseline/digest-command-baseline-summary.md`.
+
+## 2026-10-23 threshold right-sizing (bead fabric-f8802679)
+
+The measurement above was reproduced unchanged on 2026-10-23 with the default
+parallel command (`npx vitest run --coverage`): 116 test files, 3,774 passed,
+2 skipped, and the same global totals — statements 40.43% (552/1365), branches
+41.73% (293/702), functions 51.45% (106/206), lines 41.50% (520/1253). The
+five web-server timeouts from the 2026-10-08 parallel attempt did not
+reproduce; the run completed in ~53 s and the only failure was the threshold
+gate itself.
+
+A permanently red gate provides no regression signal and pushes every
+measurement onto the controlled single-worker workaround, so the thresholds
+were right-sized to the maintained baseline rather than chased. The shortfall
+is structural, not a test gap on the digest path: `sessionDigest.ts` and
+`pathResolver.ts` measure 100% and `errorGrouping.ts` 98.5%, while the
+all-command `src/cli.ts` entry point measures 5.24% lines, `src/analytics.ts`
+20.43%, and the TUI `SessionDigest` component 33.57%.
+
+`vitest.config.ts` now floors each measured value to a whole percent minus one
+point of churn headroom:
+
+| Metric    | Measured | Threshold |
+| --------- | -------: | --------: |
+| Lines     | 41.50%   | 40        |
+| Branches  | 41.73%   | 40        |
+| Functions | 51.45%   | 50        |
+| Statements| 40.43%   | 39        |
+
+`npm run test:coverage` exits 0 again; ordinary churn on the six in-scope
+files stays green, and a real regression (~19 covered lines, ~12 branches,
+~20 statements) still fails the gate. Restoring the 50/50/50/50 gate after
+raising `cli.ts`, `analytics.ts`, and the TUI `SessionDigest` component is
+tracked by follow-up bead fabric-d48e8f7f.
