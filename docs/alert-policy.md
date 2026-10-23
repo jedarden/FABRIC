@@ -432,3 +432,48 @@ open/closed instance) so it inherits this policy rather than re-implementing
 deduplication. Since §Durability, registry ids are stable across restarts;
 the web service re-files active instances into its process-local bead view at
 boot and reconciles it before ingest resumes.
+
+### Live audit (2026-10-23, bead fabric-a4260de0)
+
+The dispatch-era backlog report ("dozens of duplicate `P0: ALERT: Worker <x>
+has no work available` beads") was audited against the live workspace; the
+failure it described no longer exists and the policy holds end to end:
+
+- **Call-site audit** — every no-work/stuck observation and every
+  claim/resume resolution enters through the store's two enforcement points
+  (`observeAlert`/`resolveAlert`, `src/store.ts`), which replay-guard and then
+  call `AlertManager.observe`/`resolve` before the filer sees anything.
+  Identity is `alertIdentity(kind, scope)` with `scope = worker.id`; cooldown
+  escalation and resolution mutate the same instance; the filer
+  (`src/alertBeadFiler.ts`) files a bead only on `created`/`new-epoch` and
+  folds `deduplicated`/`escalated` into the same open bead. There is no path
+  that mints a bead per raw observation, and no FABRIC code generates the
+  legacy `ALERT: Worker … has no work available` titles — the historical
+  emitter was external to this repo.
+- **Queue backlog** — zero open ALERT beads. All 52 `no-work` beads across the
+  five legacy identities (`claude-code-glm-5-alpha/bravo/charlie`,
+  `claude-code-sonnet-alpha/bravo`) and both `stuck` beads scoped to
+  `/home/coder/FABRIC` (a path that does not exist on codinghome) were closed
+  2026-08-14 as false positives; none was created since. No open bead carries
+  a nonexistent host/path scope.
+- **Live inventory** (fabric-web on codinghome, 2026-10-23) — `GET /api/alerts`
+  reported 113 active instances, exactly one per identity; `GET
+  /api/alerts/beads` reported 113 open beads across 113 identities;
+  `POST /api/alerts/beads/reconcile` returned
+  `{filed: 0, duplicatesClosed: 0, orphansClosed: 0, openBeadsAfter: 113}` —
+  the served inventory already conforms and reconciliation is a no-op.
+- **Regression pins** — the two queue-backlog invariants (repeated
+  observations of one identity never spawn a second alert bead; recurrence
+  after resolution opens the next epoch of the same identity, never a new
+  series) are pinned at four layers, all landed 2026-09-28
+  (`67be797`, `d44a753`, `616313a`): the registry
+  (`src/alertManager.test.ts`, lifecycle matrix in
+  `src/alertManager.contract.test.ts`), the filing boundary and store
+  emission (`src/alertBeadFiler.test.ts`), the live HTTP surface (`GET
+  /api/alerts/beads` test), and restart/replay durability
+  (`src/alertDurability.test.ts`).
+- **Residual queue artifact** — a pile of duplicate open *dispatch* beads for
+  this same audit/reconciliation task (minted by the weave-strand dispatcher,
+  not by the alert pipeline) remains in the bead queue. These are not alert
+  beads and are outside the policy's identity space; they are left for
+  operator batch admission, consistent with the 2026-10-16 precedent.
