@@ -55,13 +55,22 @@ Logical path coverage:
 
 ## Verification
 
+> **Current status (2026-10-23, bead fabric-798c7ae3):** the standard
+> `npm run test:coverage` command now **exits 0** — verified live on
+> 2026-10-23 (exit 0; 116 test files, 3,774 passed, 2 skipped) after the
+> threshold right-sizing in the
+> [2026-10-23 section](#2026-10-23-threshold-right-sizing-bead-fabric-f8802679).
+> The exit-code-1 result below is the historical 2026-10-08 measurement taken
+> before the thresholds were retuned; it no longer describes the expected
+> outcome of any current command.
+
 Final analysis command:
 
 ```text
 npm run test:coverage -- --pool=forks --fileParallelism=false --maxWorkers=1
 ```
 
-Result: 114 test files passed; 3,752 tests passed; 2 skipped. The command
+Result (2026-10-08, pre-right-sizing): 114 test files passed; 3,752 tests passed; 2 skipped. The command
 returned exit code 1 only because the configured 50% coverage thresholds are
 not yet met for lines (41.50%), branches (41.73%), and statements (40.43%);
 the final digest-scope values above use the documented `statementMap`
@@ -77,7 +86,7 @@ measurement reported here.
 
 Run the standard parallel command (`npm run test:coverage`) from the
 repository root — since the 2026-10-23 web-server timeout headroom
-(bead fabric-7165df98, below) it completes green with no controlled
+(bead fabric-7165df98, below) it completes green (exit 0) with no controlled
 invocation; the single-worker command in the Verification section is kept
 only as the historical 2026-10-08 record. Compare the six-file raw report
 with the frozen baseline using the aggregation described in
