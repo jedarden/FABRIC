@@ -206,3 +206,63 @@ Fresh verification on the committed tree (bead fabric-36f7093d, 2026-10-23):
 2026-10-08/23 measurement (statements 40.43% 552/1365, branches 41.73%
 293/702, functions 51.45% 106/206, lines 41.50% 520/1253), confirming the
 right-sized gate holds with its headroom intact.
+
+## 2026-10-24 coverage raise and 50/50/50/50 gate restore (bead fabric-d48e8f7f)
+
+The follow-up closed the loop: dedicated tests for the two structurally
+uncovered non-CLI files raised the six-file digest scope far enough that the
+original 50/50/50/50 gate was restored with double-digit headroom on every
+metric.
+
+What was added:
+
+- **`src/analytics.test.ts`** (new) — `computeFleetAnalytics` resolves its log
+  directory from `homedir()` at module load, so each test points `HOME` at a
+  temp tree seeded with `needle-*.log` fixtures and imports the module fresh.
+  The canonical fixture drives every metric path: all five duration buckets,
+  odd/even medians, both `extractModel` regex and fallback branches, strand
+  success/fail classification via every recognized suffix plus the
+  error-level `includes('failed')` rule, claim races, workspace coverage,
+  worker relaunches, hourly bucketing, malformed-line rejection, the
+  `needle-*` file-name filter (a decoy `.jsonl` and a broken symlink are
+  excluded), and both empty-result paths (missing dir, empty dir). One
+  shipped-behavior quirk is pinned: model-metric shallowness is plain
+  `d < 10000` with no `> 0` guard, so a 0ms completion counts there even
+  though `BeadCompletion.isShallow` excludes it.
+- **`src/tui/components/SessionDigest.test.ts`** (extended) — the existing
+  suite covered only the pure `generateSessionDigest`/categorize/fingerprint
+  functions; a new block exercises the blessed panel class itself on a real
+  screen (the SessionReplay test pattern): all five tab renders with rich and
+  empty fixtures, the four `formatDuration` tiers, export to json/markdown/
+  text including the footer reset timer, the export-failure path, the
+  no-digest guards, visibility toggles, and all nine `bindKeys` handlers
+  captured via a prototype spy.
+
+### Before and after (six-file digest scope)
+
+| Metric    | 2026-10-08/23 baseline | 2026-10-24 | Change |
+| --------- | ---------------------: | ---------: | -----: |
+| Lines     | 520/1253 (41.50%)      | 906/1253 (**72.30%**) | +30.80 pp |
+| Branches  | 293/702 (41.73%)       | 449/702 (**63.96%**)  | +22.23 pp |
+| Functions | 106/206 (51.45%)       | 159/206 (**77.18%**)  | +25.73 pp |
+| Statements| 552/1365 (40.43%)      | 975/1365 (**71.42%**) | +30.99 pp |
+
+Per file: `analytics.ts` 20.43% → **100%** lines (98.15% stmts, 92.38%
+branches, 97.29% functions); TUI `SessionDigest.ts` 33.57% → **99.52%**
+lines (97.98% stmts, 92.04% branches, 100% functions); `sessionDigest.ts`,
+`pathResolver.ts` unchanged at 100%; `errorGrouping.ts` unchanged at 98.5%.
+`src/cli.ts` is deliberately unchanged (5.24% lines) — its action callbacks
+run in spawned processes (the 53 `dist/cli.js` spawn tests) that coverage
+instrumentation cannot see, so it remains the structural remainder of the
+scope and the reason the aggregate tops out in the low 70s rather than the
+high 90s.
+
+### Gate restored
+
+`vitest.config.ts` thresholds are back to lines 50, functions 50, branches
+50, statements 50; the right-sizing comment is replaced by a pointer to this
+section. Minimum headroom over the gate is 13.96 pp (branches), so ordinary
+churn cannot trip it while a real regression (~280 statements, ~280 lines,
+~90 branch arms) still fails. Verified live 2026-10-24: the standard
+parallel command `npm run test:coverage` exits 0 with the restored gate
+(117 test files, 3,793 passed, 2 skipped).

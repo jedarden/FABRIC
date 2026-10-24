@@ -489,3 +489,422 @@ describe('generateSessionDigest', () => {
     expect(digest.cost.estimatedCostUsd).toBe(0);
   });
 });
+
+// ============================================================
+// SessionDigest component (blessed panel) tests
+// ============================================================
+
+import blessed from 'blessed';
+import { SessionDigest, createSessionDigest, DigestViewTab } from './SessionDigest.js';
+
+type BoxLike = blessed.Widgets.BoxElement;
+type KeyHandler = (ch?: string, key?: { name?: string }) => void;
+
+/** Strip SGR escapes blessed leaves in getContent() so substrings match. */
+function plain(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+/** Reach the private blessed boxes so tests can assert rendered content. */
+function boxes(component: SessionDigest): Record<'header' | 'tabBar' | 'content' | 'footer', BoxLike> {
+  const internals = component as unknown as {
+    headerBox: BoxLike;
+    tabBar: BoxLike;
+    contentBox: BoxLike;
+    footerBox: BoxLike;
+  };
+  return {
+    header: internals.headerBox,
+    tabBar: internals.tabBar,
+    content: internals.contentBox,
+    footer: internals.footerBox,
+  };
+}
+
+/**
+ * Capture key bindings registered while the factory runs (bindKeys binds on
+ * the content box during construction) so tests can invoke the handlers
+ * directly — the same pattern SessionReplay.test.ts uses.
+ */
+function captureKeyBindings(factory: () => SessionDigest): {
+  instance: SessionDigest;
+  handlers: Map<string, KeyHandler>;
+} {
+  const handlers = new Map<string, KeyHandler>();
+  const boxWithProto = blessed.box as unknown as {
+    prototype: { key: (keys: string[], handler: KeyHandler) => void };
+  };
+  const originalKey = boxWithProto.prototype.key;
+  boxWithProto.prototype.key = function (keys: string[], handler: KeyHandler) {
+    for (const k of keys) handlers.set(k, handler);
+    return originalKey.call(this, keys, handler);
+  };
+  try {
+    return { instance: factory(), handlers };
+  } finally {
+    boxWithProto.prototype.key = originalKey;
+  }
+}
+
+/** A rich digest exercising every list branch of the render methods. */
+function makeRichDigest(): SessionDigestData {
+  return {
+    sessionId: 'session-20261024-abcdefgh',
+    startTime: 1770000000000,
+    endTime: 1770003600000,
+    durationMs: 3660000, // 1h 1m — hours branch of formatDuration
+    beadsCompleted: [
+      { beadId: 'bd-111', workerId: 'w-worker-one', completedAt: 1770001200000, durationMs: 65000 },
+      { beadId: 'bd-222', workerId: 'w-worker-two', completedAt: 1770002400000 }, // no duration
+      { beadId: 'bd-333', workerId: 'w-worker-one', completedAt: 1770003500000, durationMs: 500 },
+    ],
+    filesModified: [
+      { path: '/repo/src/green.ts', modifications: 1, workers: ['w-a'], tools: ['Edit'] },
+      { path: '/repo/src/cyan.ts', modifications: 3, workers: ['w-a', 'w-b'], tools: ['Edit', 'Write'] },
+      { path: '/repo/src/yellow.ts', modifications: 5, workers: ['w-a'], tools: [] },
+      { path: '/repo/src/red.ts', modifications: 10, workers: ['w-a', 'w-b'], tools: ['Edit'] },
+    ],
+    errors: [
+      {
+        message: 'x'.repeat(120), // >100 chars -> truncated with ellipsis
+        category: 'network',
+        workerId: 'w-worker-one',
+        timestamp: 1770001000000,
+        fingerprint: 'network-fingerprint',
+      },
+      {
+        message: 'permission denied',
+        category: 'permission',
+        workerId: 'w-worker-two',
+        timestamp: 1770002000000,
+      },
+    ],
+    workers: [
+      {
+        workerId: 'w-worker-two',
+        beadsCompleted: 1,
+        filesModified: 2,
+        errorsEncountered: 1,
+        totalEvents: 40,
+        activeTimeMs: 5500, // 5.5s branch of formatDuration
+        firstActivity: 1770000100000,
+        lastActivity: 1770003400000,
+      },
+      {
+        workerId: 'w-worker-one',
+        beadsCompleted: 2,
+        filesModified: 2,
+        errorsEncountered: 1,
+        totalEvents: 60,
+        activeTimeMs: 450, // ms branch of formatDuration
+        firstActivity: 1770000050000,
+        lastActivity: 1770003500000,
+      },
+    ],
+    cost: {
+      totalTokens: 12000,
+      inputTokens: 8000,
+      outputTokens: 4000,
+      estimatedCostUsd: 0.1234,
+    },
+    stats: {
+      totalEvents: 100,
+      totalWorkers: 2,
+      totalBeads: 3,
+      totalFiles: 4,
+      totalErrors: 2,
+      avgEventsPerWorker: 50,
+      avgBeadsPerWorker: 1.5,
+    },
+  };
+}
+
+/** A digest with empty lists — exercises each render method's empty branch. */
+function makeEmptyDigest(): SessionDigestData {
+  return {
+    sessionId: 'session-empty',
+    startTime: 1770000000000,
+    endTime: 1770000600000,
+    durationMs: 60000, // 1m 0s branch of formatDuration
+    beadsCompleted: [],
+    filesModified: [],
+    errors: [],
+    workers: [],
+    cost: { totalTokens: 0, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+    stats: {
+      totalEvents: 0,
+      totalWorkers: 0,
+      totalBeads: 0,
+      totalFiles: 0,
+      totalErrors: 0,
+      avgEventsPerWorker: 0,
+      avgBeadsPerWorker: 0,
+    },
+  };
+}
+
+describe('SessionDigest component', () => {
+  let screen: blessed.Widgets.Screen;
+  let component: SessionDigest;
+  let exported: Array<{ format: string; path: string }>;
+  let writeMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useRealTimers();
+    writeMock = fs.writeFileSync as unknown as ReturnType<typeof vi.fn>;
+    writeMock.mockReset();
+    writeMock.mockImplementation(() => undefined);
+
+    exported = [];
+    screen = blessed.screen({ smartCSR: true, dump: false, warnings: false });
+    component = createSessionDigest({
+      parent: screen,
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      onExport: (format, path) => exported.push({ format, path }),
+    });
+  });
+
+  afterEach(() => {
+    component.getElement().destroy();
+    screen.destroy();
+    vi.useRealTimers();
+  });
+
+  it('creates a hidden panel via the factory and exposes its element', () => {
+    expect(component).toBeInstanceOf(SessionDigest);
+    expect(component.isVisible()).toBe(false);
+    expect(component.getElement().options.label).toBe(' Session Digest ');
+  });
+
+  it('shows, hides, and toggles visibility', () => {
+    component.show();
+    expect(component.isVisible()).toBe(true);
+    component.hide();
+    expect(component.isVisible()).toBe(false);
+    component.toggle(); // hidden -> show
+    expect(component.isVisible()).toBe(true);
+    component.toggle(); // visible -> hide
+    expect(component.isVisible()).toBe(false);
+    expect(() => component.focus()).not.toThrow();
+  });
+
+  it('renders the no-data placeholder before a digest is set', () => {
+    component.render();
+    expect(plain(boxes(component).content.getContent())).toContain('No session data loaded');
+  });
+
+  it('exports nothing before a digest is set', () => {
+    const footerBefore = boxes(component).footer.getContent();
+    component.exportDigest('json');
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(exported).toEqual([]);
+    expect(boxes(component).footer.getContent()).toBe(footerBefore);
+  });
+
+  it('renders the summary tab with stats, cost, and grouped error categories', () => {
+    component.setDigest(makeRichDigest());
+
+    const header = plain(boxes(component).header.getContent());
+    expect(header).toContain('session-20261024...'); // sessionId sliced to 16 chars + ellipsis
+    expect(header).toContain('1h 1m'); // durationMs 3660000
+
+    const content = plain(boxes(component).content.getContent());
+    expect(content).toContain('SESSION SUMMARY');
+    expect(content).toContain('Total Events:     100');
+    expect(content).toContain('Est. Cost:        $0.1234');
+    expect(content).toContain('network: 1');
+    expect(content).toContain('permission: 1');
+    // 120-char message not on this tab; category counts only
+    expect(component.getCurrentTab()).toBe('summary');
+  });
+
+  it('renders every tab and reports the current tab', () => {
+    component.setDigest(makeRichDigest());
+
+    const expectations: Array<[DigestViewTab, string]> = [
+      ['summary', 'SESSION SUMMARY'],
+      ['beads', 'COMPLETED BEADS'],
+      ['files', 'FILES MODIFIED'],
+      ['errors', 'ERRORS'],
+      ['workers', 'WORKERS'],
+    ];
+    for (const [tab, marker] of expectations) {
+      component.switchTab(tab);
+      expect(component.getCurrentTab()).toBe(tab);
+      expect(plain(boxes(component).content.getContent())).toContain(marker);
+    }
+
+    // Active tab is bracketed in the tab bar
+    component.switchTab('beads');
+    expect(plain(boxes(component).tabBar.getContent())).toContain('[2:Beads]');
+  });
+
+  it('renders beads newest-first with optional durations', () => {
+    component.setDigest(makeRichDigest());
+    component.switchTab('beads');
+
+    const content = plain(boxes(component).content.getContent());
+    const newest = content.indexOf('bd-333');
+    const oldest = content.indexOf('bd-111');
+    expect(newest).toBeGreaterThan(-1);
+    expect(oldest).toBeGreaterThan(newest);
+    expect(content).toContain('(1m 5s)'); // bd-111 duration
+  });
+
+  it('renders files with modification-count coloring tiers and tool lists', () => {
+    component.setDigest(makeRichDigest());
+    component.switchTab('files');
+
+    const content = plain(boxes(component).content.getContent());
+    expect(content).toContain('1 mod');       // green tier
+    expect(content).toContain('3 mods');      // cyan tier
+    expect(content).toContain('5 mods');      // yellow tier
+    expect(content).toContain('10 mods');     // red tier
+    expect(content).toContain('1 worker');
+    expect(content).toContain('2 workers');
+    expect(content).toContain('Tools: Edit, Write');
+    expect(content.indexOf('/repo/src/red.ts')).toBeGreaterThan(-1);
+  });
+
+  it('renders errors newest-first with truncation over 100 chars and fingerprints', () => {
+    component.setDigest(makeRichDigest());
+    component.switchTab('errors');
+
+    const content = plain(boxes(component).content.getContent());
+    expect(content).toContain('[NETWORK]');
+    expect(content).toContain('...');
+    expect(content).toContain('Fingerprint: network-fingerprint');
+    const permissionIdx = content.indexOf('permission denied');
+    const networkIdx = content.indexOf('Fingerprint');
+    // sorted newest-first: permission (ts ...20m) renders before network (ts ...10m)
+    expect(networkIdx).toBeGreaterThan(permissionIdx);
+  });
+
+  it('renders workers most-productive-first with duration formatting', () => {
+    component.setDigest(makeRichDigest());
+    component.switchTab('workers');
+
+    const content = plain(boxes(component).content.getContent());
+    const twoIdx = content.indexOf('w-worker-two');
+    const oneIdx = content.indexOf('w-worker-one');
+    // w-worker-one has 2 beads and sorts first
+    expect(oneIdx).toBeGreaterThan(-1);
+    expect(twoIdx).toBeGreaterThan(oneIdx);
+    expect(content).toContain('5.5s');  // w-worker-two activeTime
+    expect(content).toContain('450ms'); // w-worker-one activeTime
+  });
+
+  it('renders empty-list placeholders on every tab', () => {
+    component.setDigest(makeEmptyDigest());
+
+    const placeholders: Array<[DigestViewTab, string]> = [
+      ['beads', 'No beads completed'],
+      ['files', 'No files modified'],
+      ['errors', 'No errors encountered'],
+      ['workers', 'No workers in this session'],
+    ];
+    for (const [tab, marker] of placeholders) {
+      component.switchTab(tab);
+      expect(plain(boxes(component).content.getContent())).toContain(marker);
+    }
+
+    // Summary of the empty digest omits the error section entirely
+    component.switchTab('summary');
+    expect(plain(boxes(component).content.getContent())).not.toContain('─── Errors');
+  });
+
+  it('exports json, markdown, and text digests and fires onExport', () => {
+    vi.useFakeTimers();
+    component.setDigest(makeRichDigest());
+    const footerOriginal = ' [1-5] Tabs  [e] Export JSON  [m] Export Markdown  [j/k] Scroll  [Esc] Close';
+
+    component.exportDigest('json');
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    const [jsonPath, jsonContent] = writeMock.mock.calls[0] as [string, string];
+    expect(jsonPath).toMatch(/session-digest-.*\.json$/);
+    expect(jsonContent).toContain('"sessionId": "session-20261024-abcdefgh"');
+    expect(boxes(component).footer.getContent()).toContain('Exported to');
+    expect(exported).toEqual([{ format: 'json', path: jsonPath }]);
+
+    // Footer resets to the control hint after 3 seconds
+    vi.advanceTimersByTime(3000);
+    expect(boxes(component).footer.getContent()).toBe(footerOriginal);
+
+    component.exportDigest('markdown');
+    const [, mdContent] = writeMock.mock.calls[1] as [string, string];
+    expect(mdContent).toContain('# Session Digest');
+    expect(mdContent).toContain('| Bead ID | Worker | Completed At | Duration |');
+    expect(mdContent).toContain('| bd-111 | w-worker |');
+    expect(mdContent).toContain('`/repo/src/red.ts` | 10 | 2 |');
+
+    component.exportDigest('text');
+    const [, txtContent] = writeMock.mock.calls[2] as [string, string];
+    expect(txtContent).toContain('SESSION DIGEST');
+    expect(txtContent).toContain('[NETWORK]');
+
+    expect(exported.map((e) => e.format)).toEqual(['json', 'markdown', 'text']);
+    vi.useRealTimers();
+  });
+
+  it('exports markdown and text with empty-list wording for an empty digest', () => {
+    component.setDigest(makeEmptyDigest());
+    component.exportDigest('markdown');
+    const [, md] = writeMock.mock.calls[0] as [string, string];
+    expect(md).toContain('_No beads completed_');
+    expect(md).toContain('_No files modified_');
+    expect(md).toContain('_No errors encountered_');
+
+    component.exportDigest('text');
+    const [, txt] = writeMock.mock.calls[1] as [string, string];
+    expect(txt).toContain('No beads completed');
+    expect(txt).toContain('No files modified');
+    expect(txt).toContain('No errors encountered');
+    expect(exported.map((e) => e.format)).toEqual(['markdown', 'text']);
+  });
+
+  it('shows an export-failure message when the write throws', () => {
+    writeMock.mockImplementationOnce(() => {
+      throw new Error('EACCES: permission denied');
+    });
+    component.setDigest(makeRichDigest());
+
+    component.exportDigest('json');
+    expect(boxes(component).footer.getContent()).toContain('Export failed');
+    expect(exported).toEqual([]); // onExport not called on failure
+  });
+
+  it('binds tab and export keys on the content box', () => {
+    const { instance, handlers } = captureKeyBindings(() =>
+      createSessionDigest({ parent: screen, top: 0, left: 0, width: '100%', height: '100%' }),
+    );
+    try {
+      instance.setDigest(makeRichDigest());
+
+      for (const [key, tab] of [
+        ['1', 'summary'],
+        ['2', 'beads'],
+        ['3', 'files'],
+        ['4', 'errors'],
+        ['5', 'workers'],
+      ] as const) {
+        handlers.get(key)!();
+        expect(instance.getCurrentTab()).toBe(tab);
+      }
+
+      handlers.get('e')!();
+      expect(writeMock).toHaveBeenCalledTimes(1);
+      expect((writeMock.mock.calls[0] as [string])[0]).toMatch(/\.json$/);
+
+      handlers.get('m')!();
+      expect((writeMock.mock.calls[1] as [string])[0]).toMatch(/\.md$/);
+
+      handlers.get('t')!();
+      expect((writeMock.mock.calls[2] as [string])[0]).toMatch(/\.txt$/);
+    } finally {
+      instance.getElement().destroy();
+    }
+  });
+});
