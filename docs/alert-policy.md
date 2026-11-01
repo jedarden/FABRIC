@@ -479,3 +479,20 @@ failure it described no longer exists and the policy holds end to end:
   not by the alert pipeline) remains in the bead queue. These are not alert
   beads and are outside the policy's identity space; they are left for
   operator batch admission, consistent with the 2026-10-16 precedent.
+
+### Follow-up verification (2026-10-31, bead fabric-7c7a6473)
+
+The current bead-rs inventory confirms that the historical cleanup remains in
+place: all 52 legacy `ALERT: Worker … has no work available` beads and both
+legacy `NEEDLE stuck` beads are closed. The open queue's 57 title matches for
+`alert` are weave-generated task/proposal beads, not alert instances, so they
+must not be folded into the alert identity space or auto-closed by this policy.
+
+After restarting `fabric-web.service`, the live service returned `200` for
+`GET /api/health`, `GET /api/alerts` reported 136 active records across 136
+unique identities, and `GET /api/alerts/beads` reported 136 open beads across
+136 unique identities. The end-to-end regression remains pinned by
+`src/web/server.alerts.test.ts` (authenticated `POST /api/events` → registry →
+filed-bead lifecycle), with store-level stuck-clear coverage in
+`src/store.alerts.integration.test.ts`; the full suite passed with 3,793 tests
+passing and 2 skipped.
