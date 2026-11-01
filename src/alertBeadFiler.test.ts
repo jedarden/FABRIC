@@ -212,7 +212,7 @@ describe('AlertBeadFiler lifecycle', () => {
     expect(open()[0].occurrences).toBe(1);
   });
 
-  it('enforces identity uniqueness while filing into a legacy duplicate inventory', () => {
+  it('keeps the most recent open row while filing into a legacy duplicate inventory', () => {
     seedOpenBead(sink, 'legacy-1', 'no-work:w-alpha', BASE);
     seedOpenBead(sink, 'legacy-2', 'no-work:w-alpha', BASE + MIN, {
       occurrences: 2,
@@ -224,12 +224,12 @@ describe('AlertBeadFiler lifecycle', () => {
 
     expect(emission.action).toBe('updated');
     expect(open()).toHaveLength(1);
-    expect(sink.getBead('legacy-1')).toMatchObject({
+    expect(sink.getBead('legacy-2')).toMatchObject({
       status: 'open',
       occurrences: 4,
       lastObservedAt: BASE + 2 * MIN,
     });
-    expect(sink.getBead('legacy-2')).toMatchObject({
+    expect(sink.getBead('legacy-1')).toMatchObject({
       status: 'closed',
       closeNote: expect.stringContaining('bead-creation boundary'),
     });
@@ -368,9 +368,9 @@ describe('AlertBeadFiler.reconcileWithRegistry', () => {
         .filter((bead) => bead.status === 'open')
         .map((bead) => bead.id)
         .sort()
-    ).toEqual([noWorkCanonical.id, stuckCanonical.id].sort());
+    ).toEqual(['legacy-no-work-3', 'legacy-stuck-2'].sort());
 
-    for (const duplicateId of ['legacy-no-work-2', 'legacy-no-work-3', 'legacy-stuck-2']) {
+    for (const duplicateId of [noWorkCanonical.id, 'legacy-no-work-2', stuckCanonical.id]) {
       expect(sink.getBead(duplicateId)).toMatchObject({
         status: 'closed',
         closeNote: expect.stringContaining('one open bead per active alert instance'),
@@ -389,7 +389,7 @@ describe('AlertBeadFiler.reconcileWithRegistry', () => {
     const open = sink.listBeads().filter((bead) => bead.status === 'open');
     expect(open).toHaveLength(2);
     expect(open.map((bead) => bead.id).sort()).toEqual(
-      [noWorkCanonical.id, stuckCanonical.id].sort()
+      ['legacy-no-work-3', 'legacy-stuck-2'].sort()
     );
     expect(sink.listBeads()).toHaveLength(5);
   });

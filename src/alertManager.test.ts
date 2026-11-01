@@ -280,13 +280,14 @@ describe('event store alert wiring', () => {
       occurrences: 3,
       lastNotifiedAt: RB,
     });
+    const latest = legacy('no-work', 'w-alpha', RB + MIN, { epoch: 2 });
     const report = store.restoreAlertRecords([
       canonical,
-      legacy('no-work', 'w-alpha', RB + MIN, { epoch: 2 }),
+      latest,
     ]);
     expect(report.duplicatesClosed).toBe(1);
     expect(store.getActiveAlerts()).toHaveLength(1);
-    expect(store.getActiveAlerts()[0].id).toBe(canonical.id);
+    expect(store.getActiveAlerts()[0].id).toBe(latest.id);
 
     // The next live observation enters through add() — the single
     // enforcement point — and folds into the survivor: the inventory stays
@@ -583,15 +584,15 @@ describe('legacy inventory reconciliation', () => {
     expect(report.duplicatesClosed).toBe(3);
     expect(report.activeInstancesAfter).toBe(2);
 
-    // The canonical active record per identity is the EARLIEST-CREATED one —
-    // the longest-standing record keeps its id.
+    // The canonical active record per identity is the MOST-RECENTLY-OBSERVED
+    // one — the freshest open row keeps its id.
     const byId = new Map(inventory.map((r) => [r.id, r]));
-    expect(byId.get(alphaEarliest.id)?.status).toBe('active');
-    expect(byId.get(stuckEarliest.id)?.status).toBe('active');
+    expect(byId.get(alphaLatest.id)?.status).toBe('active');
+    expect(byId.get(stuckLatest.id)?.status).toBe('active');
     expect(byId.get(bravoResolved.id)?.status).toBe('resolved');
     expect(inventory.filter((r) => r.status === 'active').map((r) => r.id)).toEqual([
-      alphaEarliest.id,
-      stuckEarliest.id,
+      alphaLatest.id,
+      stuckLatest.id,
     ]);
 
     // The reconciliation report documents exactly what was folded where.
@@ -599,20 +600,20 @@ describe('legacy inventory reconciliation', () => {
       identity: 'no-work:w-alpha',
       kind: 'no-work',
       scope: 'w-alpha',
-      canonicalId: alphaEarliest.id,
-      closedIds: [alphaMiddle.id, alphaLatest.id],
+      canonicalId: alphaLatest.id,
+      closedIds: [alphaEarliest.id, alphaMiddle.id],
     });
     expect(report.reconciled).toContainEqual({
       identity: 'stuck:w-alpha',
       kind: 'stuck',
       scope: 'w-alpha',
-      canonicalId: stuckEarliest.id,
-      closedIds: [stuckLatest.id],
+      canonicalId: stuckLatest.id,
+      closedIds: [stuckEarliest.id],
     });
 
     // Each closed duplicate carries a documented reason naming its canonical
     // record — the audit trail a reader sees in the resolved history.
-    for (const dup of [alphaMiddle, alphaLatest, stuckLatest]) {
+    for (const dup of [alphaEarliest, alphaMiddle, stuckEarliest]) {
       const closed = byId.get(dup.id)!;
       expect(closed.status).toBe('resolved');
       expect(closed.resolvedAt).toBeGreaterThan(0);
@@ -640,8 +641,8 @@ describe('legacy inventory reconciliation', () => {
     expect(report.duplicatesClosed).toBe(2);
 
     const canonical = inventory.find((r) => r.status === 'active')!;
-    expect(canonical.id).toBe(earliest.id);
-    expect(canonical.createdAt).toBe(RB);
+    expect(canonical.id).toBe(latest.id);
+    expect(canonical.createdAt).toBe(RB + 2 * MIN);
     // Audit signal survives the fold: totals summed, window widened, evidence
     // taken from the most recently observed duplicate.
     expect(canonical.occurrences).toBe(7);
@@ -665,7 +666,7 @@ describe('legacy inventory reconciliation', () => {
 
     const { inventory } = reconcileLegacyAlerts([earliest, laterDuplicate], { at: RB + 21 * MIN });
     const canonical = inventory.find((record) => record.status === 'active')!;
-    expect(canonical.id).toBe(earliest.id);
+    expect(canonical.id).toBe(laterDuplicate.id);
     expect(canonical.lastNotifiedAt).toBe(RB + 20 * MIN);
 
     const mgr = new AlertManager({ cooldownMs: 30 * MIN });
@@ -675,7 +676,7 @@ describe('legacy inventory reconciliation', () => {
     expect(folded.alert.notifications).toBe(2);
 
     const resolved = mgr.resolve('no-work', 'w-alpha', { at: RB + 26 * MIN });
-    expect(resolved?.id).toBe(earliest.id);
+    expect(resolved?.id).toBe(laterDuplicate.id);
 
     const recurred = mgr.observe('no-work', 'w-alpha', { at: RB + 27 * MIN });
     expect(recurred.outcome).toBe('new-epoch');
@@ -728,10 +729,10 @@ describe('legacy inventory reconciliation', () => {
     expect(report.duplicatesClosed).toBe(2);
     const canonical = inventory.find((r) => r.status === 'active')!;
     expect(canonical.identity).toBe('no-work:w-gamma');
-    expect(canonical.createdAt).toBe(RB);
-    expect(canonical.epoch).toBe(1);
+    expect(canonical.createdAt).toBe(RB + 2 * MIN);
+    expect(canonical.epoch).toBe(3);
     // Derived epochs are audit labels: creation order ranks them 1..3.
-    expect(inventory.map((r) => r.epoch)).toEqual([2, 3, 1]);
+    expect(inventory.map((r) => r.epoch)).toEqual([1, 2, 3]);
   });
 
   it('positions the canonical active record last so observe() folds into it', () => {
@@ -749,7 +750,7 @@ describe('legacy inventory reconciliation', () => {
     // registry contract observe() relies on. Three records in, two resolved
     // (the untouched epoch-9 history row and the closed duplicate), one live.
     expect(inventory.map((r) => r.status)).toEqual(['resolved', 'resolved', 'active']);
-    expect(inventory[inventory.length - 1].id).toBe(activeEarly.id);
+    expect(inventory[inventory.length - 1].id).toBe(activeLate.id);
   });
 });
 
@@ -763,18 +764,19 @@ describe('AlertManager legacy restore and live reconciliation', () => {
       occurrences: 5,
       lastNotifiedAt: RB,
     });
+    const alphaLatest = legacy('no-work', 'w-alpha', RB + 2 * MIN, { epoch: 3 });
     const bravoActive = legacy('stuck', 'w-bravo', RB + 3 * MIN, { epoch: 1 });
     const legacyInventory = [
       alphaEarliest,
       legacy('no-work', 'w-alpha', RB + MIN, { epoch: 2 }),
-      legacy('no-work', 'w-alpha', RB + 2 * MIN, { epoch: 3 }),
+      alphaLatest,
       bravoActive,
     ];
     const report = mgr.restore(legacyInventory);
 
     expect(report.duplicatesClosed).toBe(2);
     expect(mgr.activeAlerts().map((r) => r.id)).toEqual([
-      alphaEarliest.id,
+      alphaLatest.id,
       bravoActive.id,
     ]);
     // Evidence folded: 5 + 1 + 1 duplicate observations survive as 7.
@@ -784,9 +786,9 @@ describe('AlertManager legacy restore and live reconciliation', () => {
     // condition folds into the CANONICAL record — no new epoch, no new bead.
     const folded = mgr.observe('no-work', 'w-alpha', { at: RB + 3 * MIN });
     expect(folded.outcome).toBe('deduplicated');
-    expect(folded.alert.id).toBe(alphaEarliest.id);
+    expect(folded.alert.id).toBe(alphaLatest.id);
     expect(folded.alert.occurrences).toBe(8);
-    expect(folded.alert.epoch).toBe(1);
+    expect(folded.alert.epoch).toBe(3);
     expect(mgr.activeAlerts()).toHaveLength(2);
     expect(mgr.history()).toHaveLength(4); // 2 closed dups + 2 active survivors
   });

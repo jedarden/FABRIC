@@ -178,8 +178,10 @@ Rules:
   (epoch derived from creation order when a row lacks one; derived numbers
   are audit labels — ids stay the keys, and `observe()` counts epochs
   positionally, so derivation never changes which instance is active).
-- **Canonical** — of an identity's active records, the **earliest-created**
-  survives: the longest-standing record keeps its id, createdAt, and epoch.
+- **Canonical** — of an identity's active records, the **most recently
+  observed** open record survives: it keeps its id, createdAt,
+  and epoch. Ties use notification time, creation time, epoch, and id so the
+  choice is deterministic.
 - **Duplicates closed with documented reasons** — every other active record
   becomes resolved history: `resolvedAt` stamped and `resolutionNote` set to
   `legacy duplicate of <canonicalId> — closed by inventory reconciliation
@@ -220,10 +222,10 @@ canonical id and duplicate-close reason whenever it repairs a live inventory.
 
 The regression is pinned at the bead-filer boundary by
 `src/alertBeadFiler.test.ts`: a duplicate-laden snapshot containing both
-`no-work` and `stuck` identities is reconciled to the earliest-created active
-epoch, each duplicate is closed with the identity-policy reason, and repeated
-post-reconciliation observations continue updating those two canonical rows
-without creating another open row.
+`no-work` and `stuck` identities is reconciled to the most recently observed
+active epoch, each duplicate is closed with the identity-policy reason, and
+repeated post-reconciliation observations continue updating those two
+canonical rows without creating another open row.
 
 ## Durability across restarts
 

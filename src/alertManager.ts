@@ -134,7 +134,7 @@ export interface ReconciledIdentity {
   readonly identity: string;
   readonly kind: AlertKind;
   readonly scope: string;
-  /** The preserved active instance (earliest-created of the duplicates). */
+  /** The preserved active instance (most recently observed duplicate). */
   readonly canonicalId: string;
   /** Duplicate active instances closed as resolved history. */
   readonly closedIds: readonly string[];
@@ -178,8 +178,10 @@ function closeDuplicate(dup: AlertRecord, canonicalId: string, at: number): Aler
  * - Audit: records group by `identity` (derived via `alertIdentity(kind,
  *   scope)` when a legacy row has none) and order by epoch, then createdAt
  *   (epoch is derived from createdAt order when a legacy row lacks it).
- * - Canonical: of an identity's active records, the earliest-created is the
- *   canonical instance and keeps its id, createdAt, and epoch.
+ * - Canonical: of an identity's active records, the most recently observed is
+ *   the canonical instance and keeps its id, createdAt, and epoch. This keeps
+ *   the live record with the freshest evidence when a legacy producer created
+ *   one row per observation.
  * - Duplicates: every other active record is closed — `status: 'resolved'`,
  *   `resolvedAt` stamped, `resolutionNote` naming the canonical id — and its
  *   evidence folds into the canonical record (occurrence/notification counts
@@ -238,10 +240,17 @@ export function reconcileLegacyAlerts(
 
     let canonical = active[0];
     if (active.length > 1) {
-      // Canonical = earliest-created active record; tie-break on epoch order.
+      // Canonical = most recently observed active record. Tie-break on the
+      // last notification, creation time, epoch, and id for deterministic
+      // handling of legacy rows with equal timestamps.
       canonical = [...active].sort(
-        (a, b) => a.createdAt - b.createdAt || a.epoch - b.epoch
-      )[0];
+        (a, b) =>
+          a.lastObservedAt - b.lastObservedAt ||
+          a.lastNotifiedAt - b.lastNotifiedAt ||
+          a.createdAt - b.createdAt ||
+          a.epoch - b.epoch ||
+          a.id.localeCompare(b.id)
+      ).at(-1)!;
       const dups = active.filter((r) => r !== canonical);
 
       // Fold duplicate evidence into the canonical instance so the audit

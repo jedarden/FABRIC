@@ -308,9 +308,14 @@ export class AlertBeadFiler {
     );
   }
 
-  /** Prefer the oldest open row when repairing a legacy duplicate inventory. */
+  /** Prefer the most recently observed open row when repairing legacy duplicates. */
   private canonicalOpenBead(beads: readonly AlertBead[]): AlertBead {
-    return [...beads].sort((a, b) => a.filedAt - b.filedAt || a.id.localeCompare(b.id))[0];
+    return [...beads].sort(
+      (a, b) =>
+        a.lastObservedAt - b.lastObservedAt ||
+        a.filedAt - b.filedAt ||
+        a.id.localeCompare(b.id)
+    ).at(-1)!;
   }
 
   /**
@@ -491,7 +496,7 @@ export class AlertBeadFiler {
    *   identity) it duplicated.
    * - Closed beads are history — never touched, never resurrected.
    * - A non-conformant registry snapshot (multiple actives for one identity)
-   *   is tolerated: the earliest-created active drives filing, matching
+   *   is tolerated: the most recently observed active drives filing, matching
    *   `reconcileLegacyAlerts`' canonical choice.
    *
    * Idempotent: reconciling a conforming inventory files and closes nothing.
@@ -503,12 +508,20 @@ export class AlertBeadFiler {
     const at = options.at ?? Date.now();
 
     // Canonical active instance per identity (registry is expected to hold at
-    // most one — earliest-created wins if a foreign snapshot holds more).
+    // most one — most recently observed wins if a foreign snapshot holds more).
     const activeByIdentity = new Map<string, AlertRecord>();
     for (const record of records) {
       if (record.status !== 'active') continue;
       const incumbent = activeByIdentity.get(record.identity);
-      if (!incumbent || record.createdAt < incumbent.createdAt) {
+      if (
+        !incumbent ||
+        record.lastObservedAt > incumbent.lastObservedAt ||
+        (record.lastObservedAt === incumbent.lastObservedAt &&
+          (record.lastNotifiedAt > incumbent.lastNotifiedAt ||
+            (record.lastNotifiedAt === incumbent.lastNotifiedAt &&
+              (record.createdAt > incumbent.createdAt ||
+                (record.createdAt === incumbent.createdAt && record.id > incumbent.id)))))
+      ) {
         activeByIdentity.set(record.identity, record);
       }
     }
