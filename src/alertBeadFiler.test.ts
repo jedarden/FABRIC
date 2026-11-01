@@ -153,6 +153,56 @@ describe('AlertBeadFiler lifecycle', () => {
     expect(bead.lastObservedAt).toBe(now);
   });
 
+  it('keeps one open bead per identity across every lifecycle outcome', () => {
+    const created = mgr.observe('no-work', 'w-alpha', { at: now, reason: 'worker.queue_empty' });
+    expect(created.outcome).toBe('created');
+    filer.emitObservation(created, now);
+
+    now += DEFAULT_ALERT_COOLDOWN_MS - 1;
+    const deduplicated = mgr.observe('no-work', 'w-alpha', { at: now, reason: 'worker.exhausted' });
+    expect(deduplicated.outcome).toBe('deduplicated');
+    filer.emitObservation(deduplicated, now);
+
+    now += 1;
+    const escalated = mgr.observe('no-work', 'w-alpha', { at: now });
+    expect(escalated.outcome).toBe('escalated');
+    filer.emitObservation(escalated, now);
+
+    expect(open()).toHaveLength(1);
+    expect(open()[0]).toMatchObject({
+      id: created.alert.id,
+      identity: 'no-work:w-alpha',
+      occurrences: 3,
+      notifications: 2,
+    });
+
+    now += 1;
+    const resolved = mgr.resolve('no-work', 'w-alpha', {
+      at: now,
+      note: 'worker claimed a bead',
+    });
+    filer.emitResolution(resolved, now);
+    expect(open()).toHaveLength(0);
+
+    now += 1;
+    const newEpoch = mgr.observe('no-work', 'w-alpha', { at: now, reason: 'worker.queue_empty' });
+    expect(newEpoch.outcome).toBe('new-epoch');
+    filer.emitObservation(newEpoch, now);
+
+    expect(open()).toHaveLength(1);
+    expect(open()[0]).toMatchObject({
+      id: 'no-work:w-alpha#2',
+      identity: 'no-work:w-alpha',
+      epoch: 2,
+      occurrences: 1,
+    });
+    expect(sink.listBeads()).toHaveLength(2);
+    expect(sink.getBead(created.alert.id)).toMatchObject({
+      status: 'closed',
+      closeNote: 'worker claimed a bead',
+    });
+  });
+
   it('closes the bead on resolution with the note, and repeat resolutions are no-ops', () => {
     const created = mgr.observe('stuck', 'w-bravo', { at: now });
     filer.emitObservation(created, now);
