@@ -266,3 +266,23 @@ churn cannot trip it while a real regression (~280 statements, ~280 lines,
 ~90 branch arms) still fails. Verified live 2026-10-24: the standard
 parallel command `npm run test:coverage` exits 0 with the restored gate
 (117 test files, 3,793 passed, 2 skipped).
+
+## 2026-10-31 current gate verification (bead fabric-ce0738fb)
+
+The historical 2026-10-08 failure described near the start of this report is
+no longer the current repository state. The selected resolution is to keep the
+coverage gate scoped to the six files in `vitest.config.ts` and retain the
+50/50/50/50 thresholds, after raising that digest scope above the thresholds in
+the 2026-10-24 coverage work. This preserves a meaningful regression gate for
+the digest command without pretending that the uninstrumented spawned CLI
+actions provide whole-repository coverage.
+
+Live verification on 2026-10-31:
+
+- `npm run test:coverage` exited 0.
+- 117 test files passed; 3,793 tests passed and 2 were skipped.
+- Digest-scope coverage was 71.42% statements, 63.96% branches, 77.18%
+  functions, and 72.30% lines, all above the configured 50% thresholds.
+
+This closes the threshold-gate failure without widening the scope or lowering
+the threshold, and keeps the earlier failure metrics as historical evidence.
