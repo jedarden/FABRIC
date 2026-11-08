@@ -33,7 +33,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "pretest:coverage": "npm run build",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage && node scripts/assert-coverage-report.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",

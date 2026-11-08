@@ -284,5 +284,18 @@ Live verification on 2026-10-31:
 - Digest-scope coverage was 71.42% statements, 63.96% branches, 77.18%
   functions, and 72.30% lines, all above the configured 50% thresholds.
 
+## 2026-11-08 extraction-path integrity (bead fabric-fb05aa5d)
+
+The coverage exclusion for test scratch files is anchored to this repository's
+own `tmp/**` directory. The previous unanchored `tmp/` pattern was evaluated by
+Vitest against absolute source paths, so a checkout created under `/tmp` could
+exclude every instrumented source file and pass the threshold gate with an
+empty report.
+
+The `test:coverage` script now runs `scripts/assert-coverage-report.mjs` after
+Vitest. It fails if the generated summary has no files or no measured code,
+which keeps a zero-file extraction report from being accepted as coverage
+evidence.
+
 This closes the threshold-gate failure without widening the scope or lowering
 the threshold, and keeps the earlier failure metrics as historical evidence.

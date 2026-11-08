@@ -1,4 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repositoryRoot = dirname(fileURLToPath(import.meta.url));
+const repositoryTmpGlob = join(repositoryRoot, 'tmp/**');
 
 export default defineConfig({
   test: {
@@ -23,7 +28,7 @@ export default defineConfig({
         '**/*.test.tsx',
         '**/*.d.ts',
         'src/web/frontend/src/', // Exclude React components from digest coverage
-        'tmp/',                  // Test temp directories
+        repositoryTmpGlob,       // Test temp directories in this repository only
         'tests/fixtures/',       // Test fixtures
       ],
       // Digest command specific coverage targets
