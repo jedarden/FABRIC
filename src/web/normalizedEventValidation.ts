@@ -240,6 +240,9 @@ export function validateNormalizedEventRequest(input: unknown): NormalizedEventV
   }
 
   const body = input;
+  if (body.payload !== undefined && !isJsonObject(body.payload)) {
+    return fail('payload', 'must be a JSON object');
+  }
   const payload = isJsonObject(body.payload) ? body.payload : undefined;
   const explicitData = body.data;
   if (explicitData !== undefined && !isJsonObject(explicitData)) {
@@ -253,6 +256,9 @@ export function validateNormalizedEventRequest(input: unknown): NormalizedEventV
   }
   if (!supportedTypes.has(type)) {
     return fail('type', `unknown event type "${type}"`);
+  }
+  if (explicitData === undefined && payload === undefined) {
+    return fail('data', 'is required');
   }
 
   const eventType = type as SupportedNormalizedEventType;

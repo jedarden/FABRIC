@@ -76,18 +76,25 @@ export class SessionDigestGenerator {
     // Generate worker summaries
     const workers = this.generateWorkerSummaries(filteredEvents);
 
-    // Process cost data
-    filteredEvents.forEach(event => this.costTracker.processEvent(event));
-    const costSummary = this.costTracker.getSummary();
+    // Process cost data only when the caller requested it. Keep the stable
+    // SessionDigest shape with a zeroed summary when cost is excluded so JSON
+    // consumers do not need a second response schema.
+    let costSummary = {
+      total: { total: 0, input: 0, output: 0 },
+      totalCostUsd: 0,
+    };
+    if (opts.includeCost) {
+      filteredEvents.forEach(event => this.costTracker.processEvent(event));
+      costSummary = this.costTracker.getSummary();
+    }
 
     // Calculate session time bounds
-    const now = Date.now();
     const startTime = filteredEvents.length > 0
       ? Math.min(...filteredEvents.map(e => e.ts))
-      : (opts.startTime ?? now);
+      : (opts.startTime ?? 0);
     const endTime = filteredEvents.length > 0
       ? Math.max(...filteredEvents.map(e => e.ts))
-      : (opts.endTime ?? now);
+      : (opts.endTime ?? startTime);
 
     // Generate statistics
     const uniqueWorkers = new Set(filteredEvents.map(e => e.worker));
@@ -447,7 +454,7 @@ export function formatDigestAsMarkdown(digest: SessionDigest): string {
   // Footer
   lines.push('---');
   lines.push('');
-  lines.push(`*Generated at ${new Date().toISOString()}*`);
+  lines.push(`*Generated for report window ending ${new Date(digest.endTime).toISOString()}*`);
 
   return lines.join('\n');
 }

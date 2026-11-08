@@ -72,6 +72,36 @@ describe('report and SSE API contracts', () => {
     });
   });
 
+  it('honors includeCost=false without changing the report response shape', async () => {
+    store.add(event({ input_tokens: 1000, output_tokens: 500 }));
+
+    const response = await fetch(`http://localhost:${port}/api/report?includeCost=false`);
+    expect(response.status).toBe(200);
+    const report = await response.json() as {
+      cost: { totalTokens: number; inputTokens: number; outputTokens: number; estimatedCostUsd: number };
+    };
+
+    expect(report.cost).toEqual({
+      totalTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: 0,
+    });
+  });
+
+  it('returns byte-stable reports when the store has no events', async () => {
+    const first = await fetch(`http://localhost:${port}/api/report`);
+    const firstJson = await first.json();
+    const firstMarkdown = await (await fetch(`http://localhost:${port}/api/report?format=markdown`)).text();
+
+    const second = await fetch(`http://localhost:${port}/api/report`);
+    const secondJson = await second.json();
+    const secondMarkdown = await (await fetch(`http://localhost:${port}/api/report?format=markdown`)).text();
+
+    expect(secondJson).toEqual(firstJson);
+    expect(secondMarkdown).toBe(firstMarkdown);
+  });
+
   it('sends an initial snapshot and a live event frame over SSE', async () => {
     store.add(event({ worker: 'initial-worker' }));
 
@@ -104,6 +134,22 @@ describe('report and SSE API contracts', () => {
       expect(frame).toContain('id: 1');
       expect(frame).toContain('"worker":"live-worker"');
       expect(frame).toContain('"msg":"worker.started"');
+    } finally {
+      await reader.cancel();
+      controller.abort();
+    }
+  });
+
+  it('does not run the mutating collision cleanup while opening an SSE stream', async () => {
+    const getCollisions = vi.spyOn(store, 'getCollisions');
+    const controller = new AbortController();
+    const response = await fetch(`http://localhost:${port}/api/events/stream`, {
+      signal: controller.signal,
+    });
+    const reader = response.body!.getReader();
+    try {
+      await readUntil(reader, 'event: init');
+      expect(getCollisions).not.toHaveBeenCalled();
     } finally {
       await reader.cancel();
       controller.abort();
@@ -158,6 +204,22 @@ describe('report and SSE API contracts', () => {
       await reader.cancel();
       controller.abort();
     }
+  });
+
+  it('rejects invalid SSE query values before opening a stream', async () => {
+    const invalidLevel = await fetch(`http://localhost:${port}/api/events/stream?level=trace`);
+    expect(invalidLevel.status).toBe(400);
+    expect(await invalidLevel.json()).toEqual({
+      error: 'Invalid stream query',
+      message: 'level must be one of debug, info, warn, or error',
+    });
+
+    const repeatedWorker = await fetch(`http://localhost:${port}/api/events/stream?worker=one&worker=two`);
+    expect(repeatedWorker.status).toBe(400);
+    expect(await repeatedWorker.json()).toEqual({
+      error: 'Invalid stream query',
+      message: 'worker must be a string',
+    });
   });
 });
 

@@ -105,6 +105,17 @@ describe('normalized event request validation', () => {
     if (!result.ok) expect(result.error.field).toBe(field);
   });
 
+  it('requires data or its object-shaped payload alias', () => {
+    expect(validateNormalizedEventRequest(baseEvent({ data: undefined }))).toEqual({
+      ok: false,
+      error: { field: 'data', message: 'is required' },
+    });
+    expect(validateNormalizedEventRequest(baseEvent({ payload: [] }))).toEqual({
+      ok: false,
+      error: { field: 'payload', message: 'must be a JSON object' },
+    });
+  });
+
   it('rejects invalid type-specific field values', () => {
     const result = validateNormalizedEventRequest(baseEvent({
       type: 'bead.completed',

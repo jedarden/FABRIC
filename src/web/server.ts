@@ -102,6 +102,7 @@ const WS_MAX_BUFFERED_BYTES = 1024 * 1024; // 1 MB
 
 /** Keep idle Server-Sent Events connections observable without polling. */
 const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
+const SSE_LEVELS = new Set<EventFilter['level']>(['debug', 'info', 'warn', 'error']);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -374,10 +375,24 @@ export function createWebServer(options: WebServerOptions): WebServer {
     // existing WebSocket transport.  It sends a bounded snapshot first, then
     // only matching live frames; it does not replay historical frames by id.
     app.get('/api/events/stream', (req: Request, res: Response) => {
-      const worker = typeof req.query.worker === 'string' ? req.query.worker : undefined;
-      const level = typeof req.query.level === 'string'
-        ? req.query.level as EventFilter['level']
-        : undefined;
+      const workerValue = req.query.worker;
+      if (workerValue !== undefined && typeof workerValue !== 'string') {
+        res.status(400).json({
+          error: 'Invalid stream query',
+          message: 'worker must be a string',
+        });
+        return;
+      }
+      const levelValue = req.query.level;
+      if (levelValue !== undefined && (typeof levelValue !== 'string' || !SSE_LEVELS.has(levelValue as EventFilter['level']))) {
+        res.status(400).json({
+          error: 'Invalid stream query',
+          message: 'level must be one of debug, info, warn, or error',
+        });
+        return;
+      }
+      const worker = workerValue as string | undefined;
+      const level = levelValue as EventFilter['level'] | undefined;
       const client: SseClient = { response: res, worker, level };
 
       res.status(200);
@@ -399,7 +414,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       writeSse(client, 'init', {
         workers: store.getWorkers(),
         recentEvents: store.query(filter).slice(-50),
-        collisions: store.getCollisions(),
+        collisions: store.peekCollisions(),
         filter: worker || level ? { worker, level } : undefined,
       });
     });

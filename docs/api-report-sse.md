@@ -26,6 +26,8 @@ or change the memory baseline.
 With `format=json`, the response is the `SessionDigest` JSON object described
 by `src/types.ts`. With `format=markdown`, the response is `text/markdown`
 containing the same digest rendered by `formatDigestAsMarkdown`.
+The JSON shape always includes `cost`; when `includeCost=false`, its numeric
+fields are zero and the Markdown representation omits the cost section.
 
 Invalid query values return `400`:
 
@@ -56,6 +58,10 @@ The response has `Content-Type: text/event-stream`, disables intermediary
 buffering, and sends a `: keep-alive` comment every 15 seconds while a client
 is connected.
 
+`level` must be one of `debug`, `info`, `warn`, or `error`, and `worker` must
+be a single string value. Invalid values return `400` with a JSON error before
+the stream is opened.
+
 ### Frames
 
 The initial frame is:
@@ -65,6 +71,9 @@ event: init
 data: {"workers":[],"recentEvents":[],"collisions":[]}
 
 ```
+
+Opening the stream reads the current collision snapshot without retiring stale
+records or changing worker flags; it remains read-only.
 
 Subsequent frames use these event names:
 

@@ -368,6 +368,15 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
+   * Read active collisions without retiring stale records or changing worker
+   * collision flags. Read-only HTTP surfaces use this snapshot method so a
+   * GET does not mutate derived in-memory state.
+   */
+  peekCollisions(): FileCollision[] {
+    return Array.from(this.collisions.values()).filter(c => c.isActive);
+  }
+
+  /**
    * Get collisions for a specific worker
    */
   getWorkerCollisions(workerId: string): FileCollision[] {

@@ -56,7 +56,9 @@ and is intended for producers that want a stable, runtime-validated contract.
 It requires `type`, `timestamp`, `worker_id`, `session_id`, `sequence`, and
 `data`; `type` must be one of the supported event types in
 `src/web/normalizedEventValidation.ts`. `payload` is accepted as a compatibility
-alias for `data`, and the response always normalizes it to the canonical shape.
+alias for `data` when it is an object, and the response always normalizes it to
+the canonical shape. Missing `data`/`payload`, a non-object `data`/`payload`,
+or any other contract violation returns `400` before ingestion side effects.
 
 Successful requests return `201` with `{ "success": true, "event": <LogEvent> }`.
 Malformed JSON or a contract violation returns `400` with `error`, `field`
