@@ -4,7 +4,7 @@
  * Express HTTP server with WebSocket support for real-time updates.
  */
 
-import express, { Express, Request, Response } from 'express';
+import express, { Express, NextFunction, Request, Response } from 'express';
 import { createServer, Server as HttpServer } from 'http';
 import { EventEmitter } from 'events';
 import { join, dirname } from 'path';
@@ -36,6 +36,7 @@ import { scanBeadWorkspaces } from '../beadWorkspaceScanner.js';
 import { getMemorySampler, type WorkerMemorySample } from '../memorySampler.js';
 import { loadConfiguredTheme, saveConfiguredTheme, isThemeName } from '../themeStore.js';
 import { getFactoryPanelAggregator, parseWindowLabel } from '../factoryPanel.js';
+import { validateNormalizedEventRequest } from './normalizedEventValidation.js';
 
 /** Cache for the v8 module */
 let v8Module: typeof import('v8') | null = null;
@@ -248,6 +249,22 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
     // Parse JSON bodies
     app.use(express.json({ limit: MAX_PAYLOAD_SIZE.toString() }));
+
+    // Keep parser failures machine-readable and stable for native JSON
+    // endpoints. In particular, /event/normalized must distinguish malformed
+    // transport JSON from a well-formed body that fails its event contract.
+    app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+      const parserError = err as { type?: string };
+      if (parserError.type === 'entity.parse.failed') {
+        res.status(400).json({ error: 'Invalid JSON', message: 'Malformed JSON request body' });
+        return;
+      }
+      if (parserError.type === 'entity.too.large') {
+        res.status(413).json({ error: 'Payload too large', message: `Request body exceeds ${MAX_PAYLOAD_SIZE} bytes` });
+        return;
+      }
+      next(err);
+    });
 
     wsServer.on('connection', (ws: WebSocket) => {
       clients.add(ws);
@@ -719,6 +736,37 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
       const events = store.query(filter).slice(-limit);
       res.json(events);
+    });
+
+    /**
+     * Ingest a canonical normalized event. Validation is intentionally
+     * complete before normalization, store mutation, metrics, or broadcast so
+     * rejected requests have no dispatch side effects.
+     */
+    app.post('/event/normalized', (req: Request, res: Response) => {
+      const validation = validateNormalizedEventRequest(req.body);
+      if (!validation.ok) {
+        res.status(400).json({
+          error: 'Invalid normalized event',
+          field: validation.error.field,
+          message: validation.error.message,
+        });
+        return;
+      }
+
+      const logEvent = normalizeToLogEvent(validation.event, 'jsonl', deduplicator);
+      if (!logEvent) {
+        res.status(400).json({
+          error: 'Invalid normalized event',
+          message: 'Event could not be normalized',
+        });
+        return;
+      }
+
+      store.add(logEvent);
+      metrics.recordEvent(logEvent.host, logEvent.worker);
+      broadcast(logEvent);
+      res.status(201).json({ success: true, event: logEvent });
     });
 
     // POST endpoint to ingest NEEDLE telemetry events
