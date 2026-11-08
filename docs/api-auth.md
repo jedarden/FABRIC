@@ -130,6 +130,7 @@ Every `POST` route `src/web/server.ts` currently registers — derived from
 
 | Route | What it mutates |
 |---|---|
+| `POST /event/normalized` | Validates and ingests one strict canonical NEEDLE event — contract documented in `docs/events-api.md` |
 | `POST /api/events` | Ingests a NEEDLE event into the store — payload, validation, batching, and limits documented in `docs/events-api.md` |
 | `POST /api/events/batch` | Ingests a batch of NEEDLE events (same contract, array body; `docs/events-api.md`) |
 | `POST /api/retention/prune` | Archives/deletes NEEDLE log files (unless `dryRun: true`) |

@@ -127,6 +127,9 @@ src/
 |----------|---------|-------------|--------|
 | P1 | **HTTP Server** | Express server with static file serving | ✅ Done |
 | P1 | **WebSocket** | Real-time updates via ws | ✅ Done |
+| P1 | **Normalized Event Validation** | Strict canonical event contract at `POST /event/normalized` | ✅ Done |
+| P2 | **Report API** | Deterministic JSON/Markdown digest at `GET /api/report` | ✅ Done |
+| P2 | **SSE Stream** | Filtered read-only event stream at `GET /api/events/stream` | ✅ Done |
 | P1 | **React Frontend** | Browser UI with Vite build | ✅ Done |
 | P1 | **Worker Grid** | Worker cards with status | ✅ Done |
 | P1 | **Activity Stream** | Real-time event feed | ✅ Done |

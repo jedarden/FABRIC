@@ -1,8 +1,9 @@
 # FABRIC Event Ingestion API
 
 Canonical reference for FABRIC's native JSON event-ingestion endpoints:
-`POST /api/events` (single event) and `POST /api/events/batch` (batched
-events). Payload, validation, limits, responses, and side effects for both.
+`POST /api/events` (single event), `POST /api/events/batch` (batched events),
+and `POST /event/normalized` (strict canonical events). Payload, validation,
+limits, responses, and side effects for all three.
 
 These are the endpoints NEEDLE's `fabric.endpoint` setting pushes to. They
 are the *native JSON* ingestion path — the OTLP/HTTP receiver
@@ -14,7 +15,7 @@ in the same store.
 Implementation: `src/web/server.ts` (route handlers), `src/normalizer.ts`
 (`normalizeToLogEvent` with the `jsonl` source). The endpoints are pinned by
 the `POST /api/events` and `POST /api/events/batch` describes in
-`src/web/server.test.ts`.
+`src/web/server.test.ts`, plus `src/web/normalizedEventValidation.test.ts`.
 
 ## Authentication
 
@@ -47,6 +48,21 @@ unauthorized submission never ingests an event or touches metrics.
   handler runs. (Both pinned for `/api/*` by `src/web/server.authRoutes.test.ts`.)
 - `Content-Type: application/json` is required; without a parseable body the
   handler sees no body and answers `400` (see validation below).
+
+## `POST /event/normalized` — strict canonical event
+
+This route accepts the canonical event envelope from [`schema.md`](schema.md)
+and is intended for producers that want a stable, runtime-validated contract.
+It requires `type`, `timestamp`, `worker_id`, `session_id`, `sequence`, and
+`data`; `type` must be one of the supported event types in
+`src/web/normalizedEventValidation.ts`. `payload` is accepted as a compatibility
+alias for `data`, and the response always normalizes it to the canonical shape.
+
+Successful requests return `201` with `{ "success": true, "event": <LogEvent> }`.
+Malformed JSON or a contract violation returns `400` with `error`, `field`
+(when applicable), and `message`. Rejection occurs before store, metrics, or
+broadcast side effects. As a `POST`, it uses the same bearer-token policy as
+the other ingestion routes.
 
 ## `POST /api/events` — single event
 
@@ -202,7 +218,8 @@ events, oldest first, tail-limited:
 | `worker` | — | Filter to one worker id |
 | `level` | — | Filter to `debug`/`info`/`warn`/`error` |
 
-Live consumers get the same events pushed over WebSocket instead of polling.
+Live consumers can receive the same events over WebSocket or the read-only SSE
+endpoint [`GET /api/events/stream`](api-report-sse.md) instead of polling.
 
 ## Examples
 

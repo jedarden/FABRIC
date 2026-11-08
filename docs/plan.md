@@ -1383,7 +1383,10 @@ fabric logs --worker w-abc123           # Filter by worker
 
 ### Phase 3: Web Display (implementation complete; production readiness gated)
 - [x] HTTP server with WebSocket support
+- [x] Strict normalized event validation (`POST /event/normalized`; contract in `docs/events-api.md`)
 - [x] Real-time event streaming to browser
+- [x] Read-only SSE event stream (`GET /api/events/stream`; WebSocket remains supported)
+- [x] Deterministic report export (`GET /api/report`, JSON or Markdown; `GET /api/digest` remains an alias)
 - [x] React/Svelte dashboard UI
 - [x] Worker cards and activity feed
 - [x] Command palette (Cmd+K)
@@ -1620,7 +1623,7 @@ fabric logs --follow
 
 ## Non-Goals
 
-- ❌ Static report generation (FABRIC is live, not batch)
+- ❌ Persisted or batch report generation (FABRIC is live; `/api/report` is a bounded in-memory export)
 - ❌ External database server (uses local SQLite file only)
 - ❌ Push notifications (alerts are in-UI only)
 - ❌ Worker control (FABRIC is read-only, cannot stop/start workers)

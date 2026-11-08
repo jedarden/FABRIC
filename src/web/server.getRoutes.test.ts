@@ -271,6 +271,8 @@ describe('GET route-discovery contract (docs/api-auth.md)', () => {
         '/api/errors/groups',
         '/api/productivity',
         '/api/digest',
+        '/api/report',
+        '/api/events/stream',
         '/api/sessions',
         '/api/system/memory',
       ]) {

@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as systemdNotify from 'systemd-notify';
 import { WebSocketServer, WebSocket } from 'ws';
-import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus, SemanticNarrative, NarrativeSegment, SpanDagResponse, SpanNode } from '../types.js';
+import { LogEvent, EventFilter, CrossReferenceEntityType, CrossReferenceRelationship, DagOptions, BeadStatus, SemanticNarrative, NarrativeSegment, SpanDagResponse, SpanNode, type SessionDigestOptions } from '../types.js';
 import { InMemoryEventStore } from '../store.js';
 import { refreshDependencyGraph, getDagStats } from '../tui/dagUtils.js';
 import { normalizeToLogEvent, EventDeduplicator } from '../normalizer.js';
@@ -100,6 +100,9 @@ const MAX_BATCH_SIZE = 100;
 /** Maximum buffered bytes per WebSocket client before termination. */
 const WS_MAX_BUFFERED_BYTES = 1024 * 1024; // 1 MB
 
+/** Keep idle Server-Sent Events connections observable without polling. */
+const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Send a systemd sd_notify message. */
@@ -177,7 +180,19 @@ export function createWebServer(options: WebServerOptions): WebServer {
   let memoryUpdateInterval: NodeJS.Timeout | null = null;
   let logsDirSizeInterval: NodeJS.Timeout | null = null;
   let memoryCheckInterval: NodeJS.Timeout | null = null;
+  let sseHeartbeatInterval: NodeJS.Timeout | null = null;
   let startPromise: Promise<void> | null = null;
+
+  type SseClient = {
+    response: Response;
+    worker?: string;
+    level?: EventFilter['level'];
+  };
+  const sseClients = new Set<SseClient>();
+  let nextSseEventId = 0;
+  let broadcastSse: (eventName: string, data: unknown, id?: string) => void = () => {
+    // Replaced when start() installs the HTTP handlers.
+  };
 
   function start(): Promise<void> {
     if (startPromise) return startPromise;
@@ -292,6 +307,103 @@ export function createWebServer(options: WebServerOptions): WebServer {
       });
     });
 
+    function removeSseClient(client: SseClient): void {
+      sseClients.delete(client);
+      if (sseClients.size === 0 && sseHeartbeatInterval) {
+        clearInterval(sseHeartbeatInterval);
+        sseHeartbeatInterval = null;
+      }
+    }
+
+    function writeSse(client: SseClient, eventName: string, data: unknown, id?: string): void {
+      if (client.response.writableEnded || client.response.destroyed) {
+        removeSseClient(client);
+        return;
+      }
+
+      const lines = [`event: ${eventName}`];
+      if (id !== undefined) lines.push(`id: ${id}`);
+      lines.push(`data: ${JSON.stringify(data)}`, '', '');
+
+      try {
+        client.response.write(lines.join('\n'));
+        if (client.response.writableLength > WS_MAX_BUFFERED_BYTES) {
+          client.response.destroy();
+          removeSseClient(client);
+        }
+      } catch {
+        removeSseClient(client);
+      }
+    }
+
+    function writeSseComment(client: SseClient, comment: string): void {
+      if (client.response.writableEnded || client.response.destroyed) {
+        removeSseClient(client);
+        return;
+      }
+      try {
+        client.response.write(`: ${comment}\n\n`);
+      } catch {
+        removeSseClient(client);
+      }
+    }
+
+    function ensureSseHeartbeat(): void {
+      if (sseHeartbeatInterval) return;
+      sseHeartbeatInterval = setInterval(() => {
+        for (const client of [...sseClients]) {
+          writeSseComment(client, 'keep-alive');
+        }
+      }, SSE_HEARTBEAT_INTERVAL_MS);
+    }
+
+    function matchesSseFilter(event: LogEvent, client: SseClient): boolean {
+      if (client.worker && event.worker !== client.worker) return false;
+      if (client.level && event.level !== client.level) return false;
+      return true;
+    }
+
+    broadcastSse = (eventName: string, data: unknown, id?: string): void => {
+      for (const client of [...sseClients]) {
+        if (eventName === 'event' && !matchesSseFilter(data as LogEvent, client)) continue;
+        writeSse(client, eventName, data, id);
+      }
+    };
+
+    // Server-Sent Events is a read-only browser-friendly alternative to the
+    // existing WebSocket transport.  It sends a bounded snapshot first, then
+    // only matching live frames; it does not replay historical frames by id.
+    app.get('/api/events/stream', (req: Request, res: Response) => {
+      const worker = typeof req.query.worker === 'string' ? req.query.worker : undefined;
+      const level = typeof req.query.level === 'string'
+        ? req.query.level as EventFilter['level']
+        : undefined;
+      const client: SseClient = { response: res, worker, level };
+
+      res.status(200);
+      res.set({
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.flushHeaders();
+
+      sseClients.add(client);
+      ensureSseHeartbeat();
+      req.on('close', () => removeSseClient(client));
+
+      const filter: EventFilter = {};
+      if (worker) filter.worker = worker;
+      if (level) filter.level = level;
+      writeSse(client, 'init', {
+        workers: store.getWorkers(),
+        recentEvents: store.query(filter).slice(-50),
+        collisions: store.getCollisions(),
+        filter: worker || level ? { worker, level } : undefined,
+      });
+    });
+
     // ── Memory Sampler Setup ──
     const memorySampler = getMemorySampler();
     memorySampler.start();
@@ -348,6 +460,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       for (const client of terminatedClients) {
         clients.delete(client);
       }
+
+      broadcastSse('memory', { workers: store.getWorkers() });
     }, 10000);
 
     // Health check endpoint
@@ -1558,18 +1672,87 @@ export function createWebServer(options: WebServerOptions): WebServer {
       }
     });
 
-    app.get('/api/digest', (req: Request, res: Response) => {
+    function parseReportOptions(req: Request): {
+      format: 'json' | 'markdown';
+      options?: SessionDigestOptions;
+      error?: string;
+    } {
+      const formatValue = req.query.format;
+      if (formatValue !== undefined && (typeof formatValue !== 'string' || !['json', 'markdown'].includes(formatValue))) {
+        return { format: 'json', error: 'format must be "json" or "markdown"' };
+      }
+
+      const options: SessionDigestOptions = {};
+      for (const field of ['startTime', 'endTime'] as const) {
+        const value = req.query[field];
+        if (value === undefined) continue;
+        if (typeof value !== 'string' || value.trim() === '') {
+          return { format: 'json', error: `${field} must be a finite number` };
+        }
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+          return { format: 'json', error: `${field} must be a finite number` };
+        }
+        options[field] = parsed;
+      }
+
+      const workersValue = req.query.workers;
+      if (workersValue !== undefined) {
+        if (typeof workersValue !== 'string') {
+          return { format: 'json', error: 'workers must be a comma-separated string' };
+        }
+        options.workers = workersValue.split(',').map(worker => worker.trim()).filter(Boolean);
+      }
+
+      for (const field of ['includeErrors', 'includeCost'] as const) {
+        const value = req.query[field];
+        if (value === undefined) continue;
+        if (value !== 'true' && value !== 'false') {
+          return { format: 'json', error: `${field} must be true or false` };
+        }
+        options[field] = value === 'true';
+      }
+
+      for (const field of ['maxFiles', 'maxErrors'] as const) {
+        const value = req.query[field];
+        if (value === undefined) continue;
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 0) {
+          return { format: 'json', error: `${field} must be a non-negative integer` };
+        }
+        options[field] = parsed;
+      }
+
+      return {
+        format: formatValue === 'markdown' ? 'markdown' : 'json',
+        options,
+      };
+    }
+
+    function sendReport(req: Request, res: Response): void {
+      const parsed = parseReportOptions(req);
+      if (parsed.error) {
+        res.status(400).json({ error: 'Invalid report query', message: parsed.error });
+        return;
+      }
+
       try {
-        const generator = new SessionDigestGenerator(store);
-        const opts: Record<string, unknown> = {};
-        if (req.query.startTime) opts.startTime = Number(req.query.startTime);
-        if (req.query.endTime) opts.endTime = Number(req.query.endTime);
-        const digest = generator.generateDigest(opts);
-        res.json(digest);
+        const digest = new SessionDigestGenerator(store).generateDigest(parsed.options);
+        if (parsed.format === 'markdown') {
+          res.type('text/markdown').send(formatDigestAsMarkdown(digest));
+        } else {
+          res.json(digest);
+        }
       } catch (err) {
         res.status(500).json({ error: String(err) });
       }
-    });
+    }
+
+    // Deterministic, read-only report export. /api/digest remains the
+    // historical JSON alias; /api/report adds the documented Markdown form
+    // and query validation without introducing a second report generator.
+    app.get('/api/report', sendReport);
+    app.get('/api/digest', sendReport);
 
     // ============================================
     // Semantic Narrative API Endpoints
@@ -2306,6 +2489,15 @@ export function createWebServer(options: WebServerOptions): WebServer {
       memoryCheckInterval = null;
     }
 
+    if (sseHeartbeatInterval) {
+      clearInterval(sseHeartbeatInterval);
+      sseHeartbeatInterval = null;
+    }
+    for (const client of sseClients) {
+      client.response.end();
+    }
+    sseClients.clear();
+
     // Close all WebSocket connections
     for (const client of clients) {
       client.close();
@@ -2406,6 +2598,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
     for (const client of terminatedClients) {
       clients.delete(client);
     }
+
+    broadcastSse('event', event, String(++nextSseEventId));
   }
 
   function broadcastCollisions(): void {
@@ -2434,6 +2628,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
     for (const client of terminatedClients) {
       clients.delete(client);
     }
+
+    broadcastSse('collision', {
+      collisions,
+      workers: store.getWorkers(),
+    });
   }
 
   function recordEvent(host?: string, workerId?: string): void {
